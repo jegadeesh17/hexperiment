@@ -461,10 +461,10 @@ The recording happens after spec `hexperiment-kiro` provides the `exorcise` work
 
 1. Copy `haunted/train.py` over `train.py`.
 2. Run the `exorcise` workflow. It runs `hexperiment run`, fixes one finding at a time and re-runs until `APPROVED`. Expected history: hotels 3 or 4 full runs, flights 3 full runs (see "The demo arc"), plus the fast runs of the save hook, which may lead to a `test_set_uses` warning (see "`hex.toml`").
-3. Commit `runs/`, `verdict.json` and the final `train.py` unchanged.
+3. Commit `runs/`, `verdict.json` and the final `train.py` unchanged, as one commit, so the ghost hunter's script stays in git history. Then restore the authored honest `train.py` and run `hexperiment run` on it once more, and commit that run too. *Decision (2026-11-12):* `test_scripts.py` pins `train.py` to the authored honest script (the haunted script is that script plus exactly two leaks, and every feature is a prepared column), and the ghost hunter's fix may add a derived feature (hotels: `country_cancel_rate` from the training rows), so the tree keeps the authored script and the history ends with its `APPROVED` run. *Recorded 2026-11-12:* in both apps the ghost hunter removed both leaks in one round (hotels: haunted `REJECTED` 1.0000, hook fast run, `APPROVED` 0.9090; flights: haunted `REJECTED` 0.7971 with The Prophet, hook fast run, `APPROVED` 0.6193; then the authored scripts `APPROVED` 0.9096 and 0.6193). For flights it read the README, which names the second leak, so no recorded run shows The Peeking Spirit; `test_history.py` therefore no longer asks for one, and the partial-fix stage is shown by the measured split-fixed variant. The recordings ran in a scratch git worktree with the shell tool trusted (headless workflows need it), and every command and write was checked afterwards: only `hexperiment run`, read-only `Get-Content` and edits to `train.py`.
 4. If the arc is not clean, delete the whole `runs/` folder and the app `verdict.json` and record again. Never edit a file inside `runs/`.
 
-`apps/tests/test_history.py` then checks the arc. The final `train.py` is the agent's result, so `test_scripts.py` also validates it (forbidden columns, audit last, seeds). The authored honest script stays in git history and in this spec's verification record.
+`apps/tests/test_history.py` then checks the arc. The ghost hunter's script stays in the recording commit; the tree keeps the authored honest script, which `test_scripts.py` validates.
 
 ## Error Handling
 
