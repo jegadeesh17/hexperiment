@@ -4,6 +4,11 @@
       "url": "https://mcp.context7.com/mcp",
       "disabled": false,
       "autoApprove": ["resolve-library-id", "query-docs"]
+    },
+    "hexperiment": {
+      "command": "hexperiment-mcp",
+      "args": [],
+      "env": {}
     }
   }
 }

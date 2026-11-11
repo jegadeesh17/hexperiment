@@ -34,6 +34,7 @@ Scope: the `hexperiment hook` and `hexperiment init` commands, the Kiro hook, wo
 5. THE `hexperiment hook` command SHALL always exit with code `0`, so that a failing or haunted run is reported to the agent and never blocks the agent's turn; a run that fails (exit code `2` of `hexperiment run`) SHALL be reported on standard output with the failure message.
 6. THE hook SHALL finish within its configured timeout (`120` seconds), and a fast run SHALL never start the canary execution.
 7. A run started by the hook SHALL be recorded in the app's run history and SHALL count as a use of the test set, like any other run, because the agent sees the test metric.
+8. IF another `hexperiment run` holds the app's run lock THEN the hook SHALL print that run's refusal message and the full-check notice and exit with code `0`.
 
 ### Requirement 2: Loop until approved
 
@@ -78,6 +79,8 @@ Scope: the `hexperiment hook` and `hexperiment init` commands, the Kiro hook, wo
 5. IF a tool gets an app outside the workspace, an app without `hex.toml` and `train.py`, or an unknown mode or ghost name THEN it SHALL return an error result naming the problem, and SHALL NOT run any code.
 6. THE server SHALL run at most one audit at a time, and an audit SHALL respect the app's `[run] timeout_seconds`.
 7. THE server SHALL never write to an app folder except through `hexperiment run`.
+8. THE server SHALL start quickly: importing its module SHALL NOT load scikit-learn or SciPy, and `import hexperiment` SHALL NOT load pandas, scikit-learn or SciPy until one of the package's exported functions is used.
+9. IF the workspace holds no app THEN `list_apps` SHALL add a `hint` that names the workspace it used and says how to point the server at the project: the `.kiro/settings/mcp.json` entry that `hexperiment init --kiro` writes, or `HEXPERIMENT_WORKSPACE`.
 
 ### Requirement 5: Setting up a project
 
@@ -86,9 +89,9 @@ Scope: the `hexperiment hook` and `hexperiment init` commands, the Kiro hook, wo
 #### Acceptance Criteria
 
 1. THE package SHALL provide `hexperiment init <app_dir>` that creates `<app_dir>` with a commented `hex.toml` template and a `train.py` template that loads with `hexperiment.load()`, splits with `hexperiment.split()`, fits on training rows only, and calls `hexperiment.audit(...)` with `y_score_train`.
-2. THE command `hexperiment init --kiro` SHALL write the hook, the workflow, the ghost hunter agent and the ML-integrity steering file into the current project's `.kiro/` folder.
+2. THE command `hexperiment init --kiro` SHALL write the hook, the workflow, the ghost hunter agent and the ML-integrity steering file into the current project's `.kiro/` folder. WHEN `.kiro/settings/mcp.json` does not exist THEN it SHALL also create it with a `hexperiment` server entry, so that Kiro starts `hexperiment-mcp` in the project folder; WHEN the file exists without a `hexperiment` entry THEN it SHALL leave the file unchanged and print the entry to add.
 3. THE `init` command SHALL never overwrite an existing file; it SHALL list each file it created and each file it skipped.
-4. THE files written by `init --kiro` SHALL be identical to the ones in this repository's `.kiro/` folder, and a test SHALL fail if they drift apart.
+4. THE four files written by `init --kiro` SHALL be identical to the ones in this repository's `.kiro/` folder, the `hexperiment` entry it writes into `.kiro/settings/mcp.json` SHALL equal the one in this repository's `.kiro/settings/mcp.json`, and a test SHALL fail if they drift apart.
 
 ### Requirement 6: The power
 
@@ -111,3 +114,12 @@ Scope: the `hexperiment hook` and `hexperiment init` commands, the Kiro hook, wo
 2. THE hook, workflow, agent and power JSON files SHALL be checked by tests for the fields their Kiro formats require.
 3. THE core package's runtime dependencies SHALL stay `pandas`, `numpy` and `scikit-learn`; the MCP SDK SHALL be pinned in the `mcp` extra.
 4. THE full test suite, including the new tests, SHALL pass with `.venv/Scripts/python -m pytest hexperiment/tests -q` in under 90 seconds, and `ruff` SHALL report no problems.
+
+### Requirement 8: One run per app at a time
+
+**User Story:** As a user whose agent, hook and MCP server can all start runs, I want two runs on one app never to overlap, so that their `.hex/` exchange files cannot mix.
+
+#### Acceptance Criteria
+
+1. WHILE a `hexperiment run` is running on an app THEN a second `hexperiment run` on the same app SHALL exit with code `2` and a message that names the app, without writing a run folder or changing `verdict.json`.
+2. THE lock SHALL be held by the operating system for the life of the first process, so that it is released when that process ends, also when it is killed.
