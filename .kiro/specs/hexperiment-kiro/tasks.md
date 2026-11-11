@@ -51,7 +51,7 @@
   - Add the drift test described under "Drift check" in `design.md`: package-data template equals the repository file (line endings normalised) and `init_kiro(tmp_path)` writes the same bytes, for each of the four files.
   - _Requirements: 5.1, 5.2, 5.3, 5.4, 7.1_
 
-- [ ] 6. The ghost catalogue and the MCP service logic (no SDK yet)
+- [x] 6. The ghost catalogue and the MCP service logic (no SDK yet)
   - Create `hexperiment/src/hexperiment/ghosts.py` (pure): `Ghost`, `CATALOG` with the ten entries and texts of the table in `design.md`, `find_ghost`, `to_dict`. Take the ghost names from `checks.row_overlap.GHOST`, `checks.target_proxy.GHOST`, `checks.temporal.GHOST`, `canary.PEEKING_SPIRIT` and `canary.SHAPESHIFTER`.
   - Create `hexperiment/src/hexperiment/mcp_server/__init__.py` as an empty package marker for now (task 7 adds `main`) and `mcp_server/service.py` with `list_apps`, `get_verdict`, `get_history`, `explain_ghost`, `check_audit_request`, `run_audit`, `model_card`, `resource_uri` and `app_from_resource_id`. The module imports no SDK and prints nothing.
   - Create `hexperiment/tests/test_ghosts.py`: the catalogue covers every name in `verdict.FINDING_ORDER`, the five ghost names equal the product table, the unknown-name message lists the known names, and the Hypothesis property on name variants.
@@ -59,7 +59,7 @@
   - In `hexperiment/tests/test_architecture.py` add `ghosts.py` to `PURE_FILES` and to the list of required pure modules.
   - _Requirements: 4.3, 4.4, 4.5, 4.7, 7.1_
 
-- [ ] 7. The MCP server
+- [x] 7. The MCP server
   - The MCP SDK decision is recorded as ADR-0002 in `docs/DECISIONS.md`. The SDK (`mcp==2.3.0`) is already installed in `.venv`.
   - In `hexperiment/pyproject.toml` add the extra `mcp = ["mcp==2.3.0"]`, add `"hexperiment[mcp]"` to the `dev` extra and the script `hexperiment-mcp = "hexperiment.mcp_server:main"`. Reinstall with `.venv/Scripts/python -m pip install -e "hexperiment[dev]"`.
   - Create `hexperiment/src/hexperiment/mcp_server/server.py` (the only module that imports `mcp` and `anyio`): `build_server(workspace, *, run=run_app)` and `serve()`. The five tools, the model card template and static resources, the `anyio.Lock`, `anyio.to_thread.run_sync` for the audit, `ToolError` for every `HexInputError`, validation before the lock. The `mode` parameter is a `str`. Create the server and the lock inside the function.

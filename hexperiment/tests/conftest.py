@@ -80,6 +80,12 @@ def fake_runner() -> type[FakeRunner]:
 
 
 @pytest.fixture
+def anyio_backend() -> str:
+    """The MCP tests run on asyncio only."""
+    return "asyncio"
+
+
+@pytest.fixture
 def refuse_unlink(monkeypatch):
     """Make ``<app_dir>/verdict.json`` fail to delete, like a file held open.
 

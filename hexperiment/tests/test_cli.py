@@ -203,7 +203,10 @@ def test_the_exit_code_constants_are_the_documented_ones():
 def test_pyproject_maps_the_console_script_to_main():
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
     scripts = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["scripts"]
-    assert scripts == {"hexperiment": "hexperiment.cli:main"}
+    assert scripts == {
+        "hexperiment": "hexperiment.cli:main",
+        "hexperiment-mcp": "hexperiment.mcp_server:main",
+    }
     module, _, attribute = scripts["hexperiment"].partition(":")
     assert getattr(importlib.import_module(module), attribute) is main
 

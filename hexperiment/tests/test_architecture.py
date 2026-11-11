@@ -5,6 +5,9 @@ changing this file (Requirements 2.1, 15.2).
 """
 
 import ast
+import subprocess
+import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -24,7 +27,14 @@ PUBLIC_API = {
 }
 
 # Modules that must stay free of file, process, clock and config access.
-PURE_FILES = {"verdict.py", "card.py", "models.py", "errors.py", "hook_event.py"}
+PURE_FILES = {
+    "verdict.py",
+    "card.py",
+    "models.py",
+    "errors.py",
+    "hook_event.py",
+    "ghosts.py",
+}
 FORBIDDEN_IN_PURE = {"os", "pathlib", "shutil", "subprocess", "tomllib", "datetime"}
 
 MUTABLE_CALLS = {
@@ -170,8 +180,13 @@ def test_only_canary_imports_subprocess():
 
 def imported_modules(path: Path) -> set[str]:
     """Every module a file imports, as dotted names, including ``from x import y``."""
+    return module_names(parse(path))
+
+
+def module_names(tree: ast.AST) -> set[str]:
+    """Dotted names imported by the import statements in ``tree``."""
     modules: set[str] = set()
-    for node in ast.walk(parse(path)):
+    for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             modules.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
@@ -180,7 +195,9 @@ def imported_modules(path: Path) -> set[str]:
     return modules
 
 
-@pytest.mark.parametrize("name", ["hook.py", "hook_event.py", "workspace.py"])
+@pytest.mark.parametrize(
+    "name", ["hook.py", "hook_event.py", "workspace.py", "mcp_server/service.py"]
+)
 def test_the_hook_modules_do_not_import_the_cli(name):
     assert "hexperiment.cli" not in imported_modules(PACKAGE_DIR / name)
 
@@ -234,12 +251,91 @@ def test_the_pure_modules_include_every_check():
         "models.py",
         "errors.py",
         "hook_event.py",
+        "ghosts.py",
     } <= checked
 
 
 @pytest.mark.parametrize("path", package_modules(), ids=module_id)
 def test_no_module_defines_a_module_level_mutable_variable(path):
     assert mutable_module_variables(parse(path)) == []
+
+
+# The MCP SDK is optional (Requirements 4.1, 7.3).
+
+SDK_ROOTS = {"mcp", "anyio"}
+SERVER_MODULE = "mcp_server/server.py"
+
+
+def test_only_the_server_module_imports_the_sdk():
+    importers = [
+        module_id(path)
+        for path in package_modules()
+        if imported_roots(parse(path)) & SDK_ROOTS
+    ]
+    assert importers == [SERVER_MODULE]
+
+
+def test_no_module_outside_the_mcp_package_imports_it():
+    importers = [
+        module_id(path)
+        for path in package_modules()
+        if not module_id(path).startswith("mcp_server/")
+        and any(
+            name == "hexperiment.mcp_server"
+            or name.startswith("hexperiment.mcp_server.")
+            for name in imported_modules(path)
+        )
+    ]
+    assert importers == []
+
+
+def test_the_mcp_package_marker_has_no_module_level_sdk_or_server_import():
+    tree = parse(PACKAGE_DIR / "mcp_server" / "__init__.py")
+    top_level = ast.Module(
+        body=[n for n in tree.body if isinstance(n, ast.Import | ast.ImportFrom)],
+        type_ignores=[],
+    )
+    assert imported_roots(top_level) & SDK_ROOTS == set()
+    assert not any(
+        name.startswith("hexperiment.mcp_server") for name in module_names(top_level)
+    )
+
+
+def test_importing_hexperiment_does_not_load_the_sdk():
+    code = (
+        "import sys, hexperiment\n"
+        "loaded = [m for m in sys.modules if m == 'mcp' or m.startswith('mcp.')]\n"
+        "server = 'hexperiment.mcp_server.server' in sys.modules\n"
+        "sys.exit(1 if loaded or server else 0)\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def project_table() -> dict:
+    path = PACKAGE_DIR.parents[1] / "pyproject.toml"
+    return tomllib.loads(path.read_text(encoding="utf-8"))["project"]
+
+
+def test_the_runtime_dependencies_stay_the_three_of_the_core():
+    assert sorted(project_table()["dependencies"]) == [
+        "numpy",
+        "pandas",
+        "scikit-learn",
+    ]
+
+
+def test_the_sdk_is_pinned_in_the_mcp_extra_and_reached_through_dev():
+    extras = project_table()["optional-dependencies"]
+    assert extras["mcp"] == ["mcp==2.3.0"]
+    assert "hexperiment[mcp]" in extras["dev"]
+
+
+def test_the_console_script_for_the_server_is_declared():
+    scripts = project_table()["scripts"]
+    assert scripts["hexperiment-mcp"] == "hexperiment.mcp_server:main"
 
 
 # The helpers above must catch what they claim to catch.
