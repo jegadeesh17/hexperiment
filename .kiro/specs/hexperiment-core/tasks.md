@@ -64,12 +64,12 @@
   - Extend `hexperiment/tests/test_data.py` with tmp-path apps: missing and empty CSV raise with the resolved path in the message; index is `0..n-1` in file order; normal and control mode return the file values; canary mode changes exactly the rows in the test mask by `scramble_test_rows`, never the time column or training rows; marker files written only when `HEX_RUN_ID` is set, with the scrambled ids in canary mode; `split` uses the stored cutoff after `dropna()`-style filtering; `split` with cleared `attrs` recomputes the cutoff; empty side raises.
   - _Requirements: 1.1, 1.2, 1.3, 1.5, 1.6, 10.6_
 
-- [ ] 8. Data module, part 4: input validation for `audit`
+- [x] 8. Data module, part 4: input validation for `audit`
   - In `hexperiment/src/hexperiment/data.py` add `ValidatedInputs`, `SnapshotInputs`, `validate_audit_inputs` (rules in the order given in `design.md`, each message naming the offender and the fix, the single-class message naming the positive value and the target's distinct values) and `validate_snapshot_inputs` (training-side rules only).
   - Extend `hexperiment/tests/test_data.py`: one example per Requirement 4 case for `validate_audit_inputs` (empty train or test, missing target in either frame, single-class test target, wrong score length, NaN or out-of-range score, unknown feature, missing or unparseable time column); for `validate_snapshot_inputs`, it raises only for an empty train, a feature missing from train or a bad `y_score_train`, and accepts a single-class test target, a `y_score` of the wrong length and a missing time column.
   - _Requirements: 2.4, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6_
 
-- [ ] 9. Checks, part 1: The Doppelganger, The Possession and The Prophet
+- [x] 9. Checks, part 1: The Doppelganger, The Possession and The Prophet
   - Create `hexperiment/src/hexperiment/checks/__init__.py` (package marker only for now), `checks/row_overlap.py` (`check_row_overlap`), `checks/target_proxy.py` (`standalone_score`, `check_target_proxy`) and `checks/temporal.py` (`check_temporal`). Each is a pure function that returns a `CheckResult`, reads no file, environment or clock, and does not modify its arguments.
   - Create `hexperiment/tests/test_row_overlap.py`, `test_target_proxy.py` and `test_temporal.py` with the leaking case, the clean case and the boundaries from the example table in `design.md`: `fraction == max_fraction` not flagged, identical NaN rows equal, `score == auc_max` flagged, constant test feature skipped, unseen category, NaN values, equal timestamps not a leak, no `time_column` gives `not applicable`, mixed timezones.
   - Add Hypothesis tests: any test row copied from train is detected; a feature equal to the target is always detected (both classes present, at least 2 unique values); reordering rows of `train` or `test` never changes any of the three results.
