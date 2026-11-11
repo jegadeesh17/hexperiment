@@ -1,8 +1,3 @@
-# Honest training script: will a 2013 New York flight arrive more than 15 minutes late,
-# judged from its schedule alone? (Requirements 3.1, 3.4)
-#
-# hexperiment.split puts the latest 20% of flights in the test set. Every learned step
-# sits inside one Pipeline fitted on training rows only.
 from __future__ import annotations
 
 import numpy as np
@@ -16,13 +11,17 @@ import hexperiment
 
 TARGET = "late"
 CATEGORICAL = ["carrier", "origin", "dest"]
-# month and day stay on purpose: a scheduled flight repeats every day with the same
-# columns, so without a date identical rows would sit in both train and test.
-NUMERIC = ["month", "day", "sched_dep_time", "sched_arr_time", "distance"]
+NUMERIC = [
+    "month",
+    "day",
+    "sched_dep_time",
+    "sched_arr_time",
+    "distance",
+]
+# Removed carrier_day_late_rate: it was the carrier's same-day late rate computed over
+# all rows, so it was built from the labels of test flights, which are not known when
+# a flight is scheduled.
 FEATURES = CATEGORICAL + NUMERIC
-# Not used: flight and tailnum (identifiers), hour and minute (already inside
-# sched_dep_time). fetch_data.py removed dep_time, dep_delay, arr_time and air_time:
-# they exist only after departure.
 
 
 def drop_seen_test_rows(
@@ -69,7 +68,8 @@ def build_model(categorical: list[str], numeric: list[str]) -> Pipeline:
 
 def main() -> None:
     df = hexperiment.load()
-    train, test = hexperiment.split(df)  # the latest 20% by time_hour is the test set
+    # Split by time with the kit: every training flight is earlier than every test flight.
+    train, test = hexperiment.split(df)
     test = drop_seen_test_rows(train, test, FEATURES + [TARGET])
     model = build_model(CATEGORICAL, NUMERIC).fit(train[FEATURES], train[TARGET])
     hexperiment.audit(
