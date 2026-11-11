@@ -541,7 +541,7 @@ The matcher `.*\.py$` gives the same result whether Kiro matches the whole path 
       {
         "capability": "shell",
         "match": [
-          "*&*", "*;*", "*|*", "*>*", "*<*", "*`*", "*$(*", "*..*",
+          "*&*", "*;*", "*|*", "*>*", "*<*", "*`*", "*$(*", "*..*", "*\n*", "*\r*",
           "git*", "rm *", "rmdir*", "del *", "Remove-Item*",
           "curl*", "wget*", "Invoke-WebRequest*", "Invoke-RestMethod*", "iwr *", "irm *",
           "pip*", "python*", "hexperiment init*", "hexperiment hook*"
