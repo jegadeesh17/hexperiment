@@ -1,0 +1,23 @@
+# Requirement 3.1. No [checks] table and no waivers: every check keeps its default.
+[app]
+name = "flight-delays"
+description = "Predict whether a 2013 New York flight arrives more than 15 minutes late, from its schedule."
+
+[data]
+path = "data/prepared.csv"
+
+[target]
+column = "late"
+positive = 1
+
+[metric]
+name = "roc_auc"
+threshold = 0.60
+
+[split]
+test_fraction = 0.2
+seed = 0
+time_column = "time_hour"
+
+[run]
+timeout_seconds = 120

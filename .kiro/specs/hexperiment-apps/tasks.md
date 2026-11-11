@@ -12,7 +12,7 @@
 
 ## Tasks
 
-- [ ] 1. Inspect the real sources, write both `hex.toml` files, and set up the test scaffolding
+- [x] 1. Inspect the real sources, write both `hex.toml` files, and set up the test scaffolding
   - With `.venv/Scripts/python -c ...`, read `apps/hotel-cancellations/data/hotels.csv` and `apps/flight-delays/data/flights.csv` and print: the header, dtypes, row count, the number of exact duplicate rows in hotels, the number of rows of hotels that are duplicates on `FEATURES + ["is_canceled"]` as listed in `design.md`, the format of three `time_hour` values in flights (with or without offset), and the name of the row-number column in flights. Print the SHA-256 of both files and confirm they equal the values in Requirement 1.2.
   - Write the results as a short note under this task. If a column name in `design.md` differs from the real header, use the real header in `REQUIRED_COLUMNS`, the feature lists and the tests, and put the difference in the note.
   - Create `apps/hotel-cancellations/hex.toml` and `apps/flight-delays/hex.toml` as in `design.md` (no `[checks]` table, no waivers, `timeout_seconds = 120`).
@@ -20,8 +20,15 @@
   - Create `apps/tests/test_hex_toml.py` as described in `design.md`. Only the `hex.toml` assertions that do not need `fetch_data.py` run now; the `data.path == "data/" + PREPARED_NAME` assertion is added in task 2.
   - Confirm `.gitignore` ignores `apps/*/data/` and `apps/*/.hex/` and does not ignore `apps/*/runs/`.
   - _Requirements: 1.8, 2.1, 3.1, 5.1_
+  - **Measurements (task 1, real files, pandas 3.1.1):**
+    - SHA-256 and size of both local sources equal Requirement 1.2: `hotels.csv` 7c2ae42a...b1fc06, 16,855,599 bytes; `flights.csv` b791a259...654f42, 33,206,996 bytes.
+    - Hotels: 119,390 rows, 32 columns, header identical to `REQUIRED_COLUMNS` in `design.md` (nothing missing, nothing extra). Cancel rate 0.3704. Dtypes: `children`, `agent`, `company`, `adr` are float64 (`children` has missing values; `agent` has 16,340 missing); `reservation_status_date` is text (`str`); the other integer columns are int64 and the other text columns are `str`. `country` has 178 distinct values including missing, `agent` 334 including missing.
+    - Hotels duplicates: 31,994 exact duplicate rows (26.8%); 33,252 rows are duplicates on `FEATURES + ["is_canceled"]` (the 27 columns of the honest script's `CATEGORICAL + NUMERIC` plus the target), the same count with `agent` turned into text.
+    - Flights: 336,776 rows, 20 columns. The header is `rownames` plus the 19 columns of `REQUIRED_COLUMNS` (nothing missing). The row-number column is `rownames` (int64, 1 to n). `arr_delay` is missing in 9,430 rows, leaving 327,346 rows with a late rate of 0.2371 (`arr_delay > 15`). Dtypes: `dep_time`, `dep_delay`, `arr_time`, `arr_delay`, `air_time` are float64; `carrier`, `tailnum`, `origin`, `dest`, `time_hour` are text; the rest are int64.
+    - `time_hour` format: all 336,776 values are 20 characters and end in `Z`: `2013-01-01T10:00:00Z` (first), `2013-04-04T15:00:00Z` (middle), `2013-09-30T12:00:00Z` (last). No missing values.
+    - No column name in `design.md` differs from the real headers, so `REQUIRED_COLUMNS` stays as designed.
 
-- [ ] 2. `fetch_data.py` for both apps, with offline tests, and the prepared files
+- [x] 2. `fetch_data.py` for both apps, with offline tests, and the prepared files
   - Create `apps/hotel-cancellations/fetch_data.py` and `apps/flight-delays/fetch_data.py` with the names and signatures in `design.md`: `Source`, `SOURCE` (URL, SHA-256 and size from Requirement 1.2), `PREPARED_NAME = "prepared.csv"`, `REQUIRED_COLUMNS`, `prepare`, `check_digest`, `sha256_of`, `download`, `write_atomic`, `fetch`, `main`. The source file keeps its name (`hotels.csv`, `flights.csv`) so the existing local files are not downloaded again.
   - `download` streams to `<name>.part`, hashes while reading, stops when the pinned size is exceeded, and calls `os.replace` only after size and SHA-256 match. `write_atomic` writes `<name>.part` and calls `os.replace`. Both remove the `.part` file on any failure. Every failure is a `HexInputError` that names the URL (download problems) and says how to fix it; `main` prints `fetch_data: <problem> <fix>` to stderr and returns 1.
   - `prepare` is a pure function of a DataFrame (no file, network or clock). Hotels returns a copy with every column. Flights drops the row-number column, drops rows without `arr_delay`, adds `late`, rewrites `time_hour` as `%Y-%m-%dT%H:%M:%SZ` (naive text taken as UTC), and drops `dep_time`, `dep_delay`, `arr_time`, `arr_delay`, `air_time`.
@@ -29,6 +36,7 @@
   - Create `apps/tests/test_prepared_with_core.py` as described in `design.md`. Add the `data.path == "data/" + PREPARED_NAME` assertion to `test_hex_toml.py`.
   - Run `.venv/Scripts/python apps/hotel-cancellations/fetch_data.py` and `.venv/Scripts/python apps/flight-delays/fetch_data.py`. Both must finish without a download (the checksum matches the local source) and write `data/prepared.csv`. Run each a second time to confirm the same behaviour. Record the row and column counts of both prepared files, and that the flights file has 327,346 rows and a late rate of about 0.237 (print it with `.venv/Scripts/python -c ...`).
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 5.1_
+  - **Measurements (task 2):** both `fetch_data.py` runs found the local source, matched the pinned SHA-256 and did not download; a second run of each behaved the same. Hotels `prepared.csv`: 119,390 rows, 32 columns, equal to the source frame. Flights `prepared.csv`: 327,346 rows, 15 columns (`year, month, day, sched_dep_time, sched_arr_time, carrier, flight, tailnum, origin, dest, distance, hour, minute, time_hour, late`), late rate 0.2371, `time_hour` still `2013-01-01T10:00:00Z` style. `data/` holds only the source and `prepared.csv` in each app.
 
 - [ ] 3. Scratch runner and the hotel-cancellations scripts
   - Create `apps/verify.py` as described in `design.md`: scratch copy of an app (without `runs`, `.hex`, `verdict.json`, `haunted`, `__pycache__` and the source CSVs), a variant written as `train.py`, `hexperiment run` through the console script of the root virtual environment, wall time from `time.perf_counter`, and one printed row per variant with the exit code, status, mode, metric, seconds, ghosts and the run summary. Include `split_fixed_source` (pure; exactly one line ending in `# LEAK: random split`, otherwise `ValueError`) so task 4 can use it.

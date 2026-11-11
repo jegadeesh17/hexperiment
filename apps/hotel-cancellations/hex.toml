@@ -1,0 +1,22 @@
+# Requirement 2.1. No [checks] table and no waivers: every check keeps its default.
+[app]
+name = "hotel-cancellations"
+description = "Predict whether a hotel booking will be cancelled."
+
+[data]
+path = "data/prepared.csv"
+
+[target]
+column = "is_canceled"
+positive = 1
+
+[metric]
+name = "roc_auc"
+threshold = 0.85
+
+[split]
+test_fraction = 0.2
+seed = 0
+
+[run]
+timeout_seconds = 120
