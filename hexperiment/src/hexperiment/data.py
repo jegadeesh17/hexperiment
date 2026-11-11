@@ -1,21 +1,33 @@
 """Data loading, splitting and the canary scramble.
 
-The split decides which rows are test rows. It never looks at feature values, so
-the same rows are test rows in every execution of a training script
-(Requirements 1.2 to 1.4). In canary mode the values in those rows are replaced
-by a tilted resample (Requirement 1.5).
+``load`` and ``split`` are the public entry points. The split decides which rows
+are test rows. It never looks at feature values, so the same rows are test rows in
+every execution of a training script (Requirements 1.2 to 1.4). In canary mode the
+values in those rows are replaced by a tilted resample (Requirement 1.5).
 """
 
 from __future__ import annotations
 
 import math
+import os
+import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
-from hexperiment.config import SplitConfig
+from hexperiment.canary import LoadMarker, write_load_marker
+from hexperiment.config import (
+    ExecMode,
+    SplitConfig,
+    current_mode,
+    load_config,
+    run_id_from_env,
+)
 from hexperiment.errors import HexInputError
 
 _GOLDEN_GAMMA = 0x9E3779B97F4A7C15
@@ -24,6 +36,10 @@ _MIX_2 = 0x94D049BB133111EB
 _UINT64_MODULUS = 1 << 64
 _FRAME_NAME = "the frame being split"
 _SCRAMBLE_FRAME_NAME = "the frame being scrambled"
+
+# Key under which ``load`` stores the app directory and the time cutoff in
+# ``df.attrs``, for ``split`` to read (Requirements 1.2, 1.3).
+ATTRS_KEY = "hexperiment"
 
 # Fixed second seed word of the canary generator, so the scramble draws are
 # independent of any other use of ``split.seed``. The bytes spell "HEXC".
@@ -192,7 +208,153 @@ def tilt_column(values: pd.Series, rng: np.random.Generator) -> pd.Series:
     return values.take(sources).set_axis(values.index)
 
 
+def load(app_dir: str | os.PathLike[str] | None = None) -> pd.DataFrame:
+    """Read the app's CSV and return it with the row id as its index.
+
+    ``app_dir`` defaults to the folder of the calling script. The index is
+    ``0..n-1`` in file order. With a ``split.time_column`` the time cutoff is
+    computed here, from the whole file, and stored with the app directory in
+    ``df.attrs`` for ``split``. With ``HEX_MODE=canary`` the test rows are
+    replaced by a tilted resample (Requirement 1.5); in any other mode the file
+    values are returned as read. When ``HEX_RUN_ID`` is set, a marker file tells
+    the parent process that the script loaded its data here (Requirement 10.6).
+    """
+    directory = _app_dir(app_dir, sys._getframe(1).f_globals)
+    config = load_config(directory)
+    mode = current_mode()
+    run_id = run_id_from_env()
+    df = _read_csv(directory, config.data.path)
+    cutoff = compute_cutoff(df, config.split)
+    scrambled_ids = None
+    if mode is ExecMode.CANARY:
+        mask = test_mask(df, config.split, cutoff)
+        scrambled_ids = df.index.to_numpy(dtype=np.int64)[mask]
+        df = scramble_test_rows(df, mask, config.split.time_column, config.split.seed)
+    if run_id is not None:
+        write_load_marker(directory, LoadMarker(mode, run_id, scrambled_ids))
+    df.attrs[ATTRS_KEY] = {"app_dir": str(directory), "cutoff": cutoff}
+    return df
+
+
+def split(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Split a frame returned by ``load`` into ``(train, test)`` copies.
+
+    The app directory and the time cutoff come from ``df.attrs``, so rows dropped
+    or filtered after ``load`` cannot move the time boundary: a remaining row is a
+    test row exactly when its ``(time, row id)`` is at or after the stored cutoff.
+    If ``attrs`` was lost, the app is the calling script's folder and the cutoff is
+    recomputed from ``df``, which can move the boundary after rows were removed
+    (the canary decision still guards against that). Raises ``HexInputError`` when
+    either side is empty.
+    """
+    stored = df.attrs.get(ATTRS_KEY)
+    if stored is None:
+        directory = _app_dir(
+            None,
+            sys._getframe(1).f_globals,
+            fix="Pass the frame returned by hexperiment.load to hexperiment.split, "
+            "and call split from a script file.",
+        )
+        cutoff = None
+    else:
+        directory, cutoff = _stored_state(stored)
+    config = load_config(directory)
+    train, test = split_frame(df, config.split, cutoff)
+    _require_both_sides(train, test, config.split)
+    return train, test
+
+
 # --- helpers -------------------------------------------------------------------------
+
+
+def _app_dir(
+    app_dir: str | os.PathLike[str] | None,
+    caller_globals: Mapping[str, Any],
+    *,
+    fix: str = "Pass the app folder: hexperiment.load(app_dir=...).",
+) -> Path:
+    """Resolve the app folder: the given one, else the calling script's folder."""
+    if app_dir is not None:
+        return Path(app_dir).resolve()
+    script = caller_globals.get("__file__")
+    if not isinstance(script, str | os.PathLike):
+        raise HexInputError(
+            "hexperiment cannot tell which app this call belongs to, because the "
+            "calling code has no __file__ (it is not a script file).",
+            fix,
+        )
+    return Path(script).resolve().parent
+
+
+def _stored_state(stored: Any) -> tuple[Path, TimeCutoff | None]:
+    """Read the app directory and cutoff that ``load`` left in ``df.attrs``."""
+    if (
+        not isinstance(stored, Mapping)
+        or not isinstance(stored.get("app_dir"), str)
+        or "cutoff" not in stored
+        or not isinstance(stored["cutoff"], TimeCutoff | None)
+    ):
+        raise HexInputError(
+            f'df.attrs["{ATTRS_KEY}"] is {stored!r}, which is not what '
+            "hexperiment.load stores.",
+            f'Do not change df.attrs["{ATTRS_KEY}"]; pass the frame from '
+            "hexperiment.load to hexperiment.split.",
+        )
+    return Path(stored["app_dir"]), stored["cutoff"]
+
+
+def _read_csv(directory: Path, relative: str) -> pd.DataFrame:
+    """Read the data file (Requirement 1.6); every failure names the resolved path."""
+    path = (directory / relative).resolve()
+    try:
+        df = pd.read_csv(path)
+    except FileNotFoundError:
+        raise HexInputError(
+            f'data.path "{relative}" does not exist (looked at {path}).',
+            "Run fetch_data.py or correct [data] path in hex.toml.",
+        ) from None
+    except pd.errors.EmptyDataError:
+        raise HexInputError(
+            f"the data file {path} is empty.",
+            "Run fetch_data.py again, or correct [data] path in hex.toml.",
+        ) from None
+    except (pd.errors.ParserError, UnicodeDecodeError) as error:
+        raise HexInputError(
+            f"the data file {path} cannot be read as CSV ({error}).",
+            "Check that the file is a UTF-8 CSV with a header row.",
+        ) from None
+    except OSError as error:
+        raise HexInputError(
+            f"the data file {path} cannot be opened ({error.strerror or error}).",
+            "Check that [data] path in hex.toml points to a readable file.",
+        ) from None
+    if df.empty:
+        raise HexInputError(
+            f"the data file {path} has a header but no data rows.",
+            "Run fetch_data.py again, or correct [data] path in hex.toml.",
+        )
+    if not isinstance(df.index, pd.RangeIndex):
+        # pandas turns the first column into the index when every row has one more
+        # field than the header; the row id must be the position in the file.
+        raise HexInputError(
+            f"the data file {path} has rows with more fields than its header.",
+            "Fix the CSV so that every row has one value per header column.",
+        )
+    return df
+
+
+def _require_both_sides(
+    train: pd.DataFrame, test: pd.DataFrame, config: SplitConfig
+) -> None:
+    for name, frame in (("train", train), ("test", test)):
+        if len(frame) == 0:
+            raise HexInputError(
+                f"the {name} set is empty after the split "
+                f"(split.test_fraction is {config.test_fraction:g}, "
+                f"{len(train) + len(test)} rows were split).",
+                f"Do not filter away every {name} row before hexperiment.split, "
+                "and check that the data has enough rows.",
+            )
 
 
 def _tilt_sources(

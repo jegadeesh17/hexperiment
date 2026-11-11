@@ -1,4 +1,5 @@
 import math
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -6,8 +7,10 @@ import pytest
 from hypothesis import assume, given
 from hypothesis import strategies as st
 
+import hexperiment
 from hexperiment import HexInputError, data
-from hexperiment.config import SplitConfig
+from hexperiment.canary import LoadMarker, hex_dir, read_load_marker
+from hexperiment.config import ExecMode, SplitConfig
 from hexperiment.data import (
     TimeCutoff,
     compute_cutoff,
@@ -931,3 +934,458 @@ def test_tilt_on_a_two_valued_column_is_its_own_inverse(
     once = tilt_column(series, rng)
     assert not once.equals(series)
     pd.testing.assert_series_equal(tilt_column(once, rng), series)
+
+
+# --- load and split (Requirements 1.1 to 1.3, 1.5, 1.6, 10.6) ------------------------
+
+RUN = "20251101-093012-a1b2c3"
+N_ROWS = 60  # coprime with 7, so the time column below is a permutation
+
+
+@pytest.fixture(autouse=True)
+def clean_hex_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("HEX_MODE", raising=False)
+    monkeypatch.delenv("HEX_RUN_ID", raising=False)
+
+
+def app_frame(n: int = N_ROWS) -> pd.DataFrame:
+    """Rows whose time order differs from the file order."""
+    return pd.DataFrame(
+        {
+            "id": [f"r{(i * 11) % n}" for i in range(n)],
+            "x": [round(0.37 * i + (i % 5) ** 2, 3) for i in range(n)],
+            "c": [("red", "green", "blue")[i % 3] for i in range(n)],
+            "y": [(i * 3) % 7 % 2 for i in range(n)],
+            "t": [day((i * 7) % n) for i in range(n)],
+        }
+    )
+
+
+def make_app(
+    tmp_path: Path,
+    *,
+    time_column: str | None = None,
+    fraction: float = 0.25,
+    seed: int = 3,
+    frame: pd.DataFrame | None = None,
+) -> Path:
+    app = tmp_path / "app"
+    app.mkdir(parents=True)
+    lines = [
+        "[data]",
+        'path = "data.csv"',
+        "[target]",
+        'column = "y"',
+        "[metric]",
+        'name = "roc_auc"',
+        "threshold = 0.7",
+        "[split]",
+        f"test_fraction = {fraction}",
+        f"seed = {seed}",
+    ]
+    if time_column is not None:
+        lines.append(f'time_column = "{time_column}"')
+    (app / "hex.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (frame if frame is not None else app_frame()).to_csv(
+        app / "data.csv", index=False
+    )
+    return app
+
+
+def file_frame(app: Path) -> pd.DataFrame:
+    return pd.read_csv(app / "data.csv")
+
+
+def config_for(time_column: str | None, fraction: float = 0.25, seed: int = 3):
+    return SplitConfig(test_fraction=fraction, seed=seed, time_column=time_column)
+
+
+def run_in_script(app: Path, code: str, **names) -> dict:
+    """Run ``code`` as if it were module-level code of ``<app>/train.py``."""
+    namespace = {"__file__": str(app / "train.py"), "hexperiment": hexperiment}
+    namespace.update(names)
+    exec(code, namespace)
+    return namespace
+
+
+# load: reading the file (Requirements 1.1, 1.6)
+
+
+def test_load_missing_csv_names_the_resolved_path(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    (app / "data.csv").unlink()
+    with pytest.raises(HexInputError) as error:
+        data.load(app)
+    assert str((app / "data.csv").resolve()) in str(error.value)
+    assert "fetch_data.py" in str(error.value)
+
+
+def test_load_empty_csv_names_the_resolved_path(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    (app / "data.csv").write_bytes(b"")
+    with pytest.raises(HexInputError, match="is empty") as error:
+        data.load(app)
+    assert str((app / "data.csv").resolve()) in str(error.value)
+
+
+def test_load_csv_with_a_header_and_no_rows_names_the_resolved_path(
+    tmp_path: Path,
+) -> None:
+    app = make_app(tmp_path, frame=app_frame().iloc[:0])
+    with pytest.raises(HexInputError, match="no data rows") as error:
+        data.load(app)
+    assert str((app / "data.csv").resolve()) in str(error.value)
+
+
+def test_load_data_path_that_is_a_folder_names_the_resolved_path(
+    tmp_path: Path,
+) -> None:
+    app = make_app(tmp_path)
+    (app / "data.csv").unlink()
+    (app / "data.csv").mkdir()
+    with pytest.raises(HexInputError) as error:
+        data.load(app)
+    assert str((app / "data.csv").resolve()) in str(error.value)
+
+
+def test_load_resolves_data_path_relative_to_the_app_folder(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    (app / "sub").mkdir()
+    (app / "data.csv").rename(app / "sub" / "rows.csv")
+    toml = (app / "hex.toml").read_text(encoding="utf-8")
+    (app / "hex.toml").write_text(
+        toml.replace('"data.csv"', '"sub/rows.csv"'), encoding="utf-8"
+    )
+    assert len(data.load(app)) == N_ROWS
+
+
+def test_load_index_is_the_row_position_in_file_order(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    df = data.load(app)
+    assert isinstance(df.index, pd.RangeIndex)
+    assert df.index.tolist() == list(range(N_ROWS))
+    assert df["id"].tolist() == file_frame(app)["id"].tolist()  # a column
+
+
+def test_load_rejects_rows_with_more_fields_than_the_header(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    text = (app / "data.csv").read_text(encoding="utf-8").splitlines()
+    # With one field too many on every row, pandas would use the first column as
+    # the index and the row ids would no longer be the file positions.
+    padded = [text[0]] + [line + ",extra" for line in text[1:]]
+    (app / "data.csv").write_text("\n".join(padded) + "\n", encoding="utf-8")
+    with pytest.raises(HexInputError, match="more fields than its header") as error:
+        data.load(app)
+    assert str((app / "data.csv").resolve()) in str(error.value)
+
+
+def test_load_rejects_a_ragged_csv_and_names_the_path(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    with (app / "data.csv").open("a", encoding="utf-8") as handle:
+        handle.write("r1,2.0,red,1,2024-01-01,extra,extra\n")
+    with pytest.raises(HexInputError, match="cannot be read as CSV") as error:
+        data.load(app)
+    assert str((app / "data.csv").resolve()) in str(error.value)
+
+
+def test_load_accepts_a_string_app_dir(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    assert len(data.load(str(app))) == N_ROWS
+
+
+def test_load_defaults_to_the_folder_of_the_calling_script(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    namespace = run_in_script(app, "df = hexperiment.load()")
+    assert namespace["df"].attrs["hexperiment"]["app_dir"] == str(app.resolve())
+    assert len(namespace["df"]) == N_ROWS
+
+
+def test_load_without_app_dir_and_without_a_script_file_asks_for_app_dir() -> None:
+    with pytest.raises(HexInputError, match="app_dir"):
+        exec("hexperiment.load()", {"hexperiment": hexperiment})
+
+
+def test_load_reports_an_invalid_execution_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = make_app(tmp_path)
+    monkeypatch.setenv("HEX_MODE", "haunted")
+    with pytest.raises(HexInputError, match="HEX_MODE"):
+        data.load(app)
+
+
+# load: execution modes (Requirement 1.5)
+
+
+@pytest.mark.parametrize("mode", [None, "normal", "control"])
+@pytest.mark.parametrize("time_column", [None, "t"])
+def test_load_returns_the_file_values_outside_canary_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str | None,
+    time_column: str | None,
+) -> None:
+    app = make_app(tmp_path, time_column=time_column)
+    if mode is not None:
+        monkeypatch.setenv("HEX_MODE", mode)
+    pd.testing.assert_frame_equal(data.load(app), file_frame(app))
+
+
+@pytest.mark.parametrize("time_column", [None, "t"])
+def test_load_in_canary_mode_scrambles_exactly_the_test_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, time_column: str | None
+) -> None:
+    app = make_app(tmp_path, time_column=time_column)
+    monkeypatch.setenv("HEX_MODE", "canary")
+    df = data.load(app)
+
+    original = file_frame(app)
+    split_config = config_for(time_column)
+    mask = data.test_mask(original, split_config)
+    expected = scramble_test_rows(original, mask, time_column, split_config.seed)
+    pd.testing.assert_frame_equal(df, expected)
+
+    assert 0 < mask.sum() < N_ROWS
+    assert not df[mask].equals(original[mask])  # the test rows changed
+    pd.testing.assert_frame_equal(df[~mask], original[~mask])  # training rows did not
+    assert df.index.tolist() == original.index.tolist()
+    if time_column is not None:
+        assert df["t"].tolist() == original["t"].tolist()
+
+
+def test_load_in_canary_mode_uses_the_seed_from_hex_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HEX_MODE", "canary")
+    one = data.load(make_app(tmp_path / "a", seed=1, time_column="t"))
+    two = data.load(make_app(tmp_path / "b", seed=2, time_column="t"))
+    # A time split ignores the seed, so the same rows are scrambled; the draws differ.
+    assert one["t"].tolist() == two["t"].tolist()
+    assert not one.equals(two)
+
+
+# load: what split needs later (Requirements 1.2, 1.3)
+
+
+def test_load_stores_the_app_dir_and_no_cutoff_for_a_hash_split(
+    tmp_path: Path,
+) -> None:
+    app = make_app(tmp_path)
+    assert data.load(app).attrs["hexperiment"] == {
+        "app_dir": str(app.resolve()),
+        "cutoff": None,
+    }
+
+
+def test_load_stores_the_cutoff_computed_from_the_whole_file(tmp_path: Path) -> None:
+    app = make_app(tmp_path, time_column="t")
+    stored = data.load(app).attrs["hexperiment"]
+    expected = compute_cutoff(file_frame(app), config_for("t"))
+    assert isinstance(expected, TimeCutoff)
+    assert stored == {"app_dir": str(app.resolve()), "cutoff": expected}
+
+
+def test_cutoff_is_the_same_in_canary_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = make_app(tmp_path, time_column="t")
+    normal = data.load(app).attrs["hexperiment"]["cutoff"]
+    monkeypatch.setenv("HEX_MODE", "canary")
+    assert data.load(app).attrs["hexperiment"]["cutoff"] == normal
+
+
+# load: the marker (Requirement 10.6)
+
+
+@pytest.mark.parametrize("mode", [None, "normal", "canary", "control"])
+def test_load_writes_no_marker_without_a_run_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str | None
+) -> None:
+    app = make_app(tmp_path)
+    if mode is not None:
+        monkeypatch.setenv("HEX_MODE", mode)
+    data.load(app)
+    assert not (app / ".hex").exists()
+
+
+@pytest.mark.parametrize("mode", [ExecMode.NORMAL, ExecMode.CONTROL])
+def test_load_writes_a_marker_without_ids_outside_canary_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: ExecMode
+) -> None:
+    app = make_app(tmp_path)
+    monkeypatch.setenv("HEX_MODE", mode.value)
+    monkeypatch.setenv("HEX_RUN_ID", RUN)
+    data.load(app)
+    assert read_load_marker(app, mode, RUN) == LoadMarker(mode, RUN, None)
+    assert not (hex_dir(app, mode) / "scrambled_ids.npy").exists()
+
+
+@pytest.mark.parametrize("time_column", [None, "t"])
+def test_load_writes_the_scrambled_ids_in_canary_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, time_column: str | None
+) -> None:
+    app = make_app(tmp_path, time_column=time_column)
+    monkeypatch.setenv("HEX_MODE", "canary")
+    monkeypatch.setenv("HEX_RUN_ID", RUN)
+    data.load(app)
+
+    marker = read_load_marker(app, ExecMode.CANARY, RUN)
+    mask = data.test_mask(file_frame(app), config_for(time_column))
+    assert marker is not None
+    assert marker.scrambled_ids.tolist() == np.flatnonzero(mask).tolist()
+    assert len(marker.scrambled_ids) == mask.sum() > 0
+
+
+def test_load_marker_carries_the_run_id_from_the_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = make_app(tmp_path)
+    monkeypatch.setenv("HEX_RUN_ID", RUN)
+    data.load(app)
+    assert read_load_marker(app, ExecMode.NORMAL, RUN).run_id == RUN
+
+
+# split (Requirements 1.2, 1.3)
+
+
+def test_split_without_a_time_column_matches_split_frame(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    df = data.load(app)
+    train, test = data.split(df)
+    expected_train, expected_test = split_frame(file_frame(app), config_for(None))
+    pd.testing.assert_frame_equal(train, expected_train)
+    pd.testing.assert_frame_equal(test, expected_test)
+    assert len(train) + len(test) == N_ROWS
+    assert set(train.index).isdisjoint(test.index)
+
+
+def test_split_with_a_time_column_puts_the_latest_rows_in_test(tmp_path: Path) -> None:
+    app = make_app(tmp_path, time_column="t")
+    train, test = data.split(data.load(app))
+    assert len(test) == 15
+    assert pd.to_datetime(train["t"]).max() < pd.to_datetime(test["t"]).min()
+
+
+def test_split_returns_copies_that_keep_the_row_id_index(tmp_path: Path) -> None:
+    df = data.load(make_app(tmp_path))
+    train, test = data.split(df)
+    assert train.index.is_monotonic_increasing
+    assert train.index.isin(df.index).all()
+    train.loc[train.index[0], "x"] = -1.0
+    test.loc[test.index[0], "x"] = -1.0
+    assert (df["x"] != -1.0).all()
+
+
+def test_split_in_canary_mode_gives_the_same_row_ids_as_in_normal_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = make_app(tmp_path, time_column="t")
+    normal_train, normal_test = data.split(data.load(app))
+    monkeypatch.setenv("HEX_MODE", "canary")
+    train, test = data.split(data.load(app))
+    assert train.index.tolist() == normal_train.index.tolist()
+    assert test.index.tolist() == normal_test.index.tolist()
+    pd.testing.assert_frame_equal(train, normal_train)  # training rows unchanged
+
+
+def late_rows_filtered(app: Path) -> tuple[pd.DataFrame, list[int]]:
+    """Load, set x to NaN in 10 of the 15 test rows, and drop them with dropna()."""
+    df = data.load(app)
+    _, test = data.split(df)
+    dropped = test.index[:10].tolist()
+    df.loc[dropped, "x"] = np.nan
+    return df.dropna(), dropped
+
+
+def test_split_uses_the_stored_cutoff_after_filtering(tmp_path: Path) -> None:
+    app = make_app(tmp_path, time_column="t")
+    filtered, dropped = late_rows_filtered(app)
+    full_train, full_test = data.split(data.load(app))
+    assert "hexperiment" in filtered.attrs  # dropna keeps attrs
+
+    train, test = data.split(filtered)
+
+    assert len(filtered) == N_ROWS - 10
+    assert train.index.tolist() == full_train.index.tolist()
+    assert test.index.tolist() == sorted(set(full_test.index) - set(dropped))
+
+
+def test_split_without_attrs_recomputes_the_cutoff_from_the_received_frame(
+    tmp_path: Path,
+) -> None:
+    app = make_app(tmp_path, time_column="t")
+    filtered, dropped = late_rows_filtered(app)
+    full_train, _ = data.split(data.load(app))
+    filtered.attrs.clear()
+
+    namespace = run_in_script(app, "result = hexperiment.split(df)", df=filtered)
+    train, test = namespace["result"]
+
+    expected_train, expected_test = split_frame(filtered, config_for("t"))
+    assert train.index.tolist() == expected_train.index.tolist()
+    assert test.index.tolist() == expected_test.index.tolist()
+    # The boundary moved: 8 rows that were training rows are now test rows.
+    assert len(test) == 13
+    assert set(full_train.index) - set(train.index) != set()
+    assert not set(dropped) & set(filtered.index)
+
+
+def test_split_without_attrs_gives_the_same_hash_split(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    df = data.load(app)
+    expected_train, expected_test = data.split(df)
+    cleared = df.copy()
+    cleared.attrs.clear()
+    namespace = run_in_script(app, "result = hexperiment.split(df)", df=cleared)
+    train, test = namespace["result"]
+    pd.testing.assert_frame_equal(train, expected_train)
+    pd.testing.assert_frame_equal(test, expected_test)
+
+
+def test_split_without_attrs_and_without_a_script_file_cannot_find_the_app(
+    tmp_path: Path,
+) -> None:
+    df = data.load(make_app(tmp_path))
+    df.attrs.clear()
+    with pytest.raises(HexInputError, match="no __file__"):
+        exec("hexperiment.split(df)", {"hexperiment": hexperiment, "df": df})
+
+
+def test_split_rejects_attrs_that_load_did_not_write(tmp_path: Path) -> None:
+    df = data.load(make_app(tmp_path))
+    df.attrs["hexperiment"] = {"app_dir": 5}
+    with pytest.raises(HexInputError, match="not what hexperiment.load stores"):
+        data.split(df)
+
+
+@pytest.mark.parametrize("time_column", [None, "t"])
+def test_split_raises_when_filtering_removed_every_test_row(
+    tmp_path: Path, time_column: str | None
+) -> None:
+    app = make_app(tmp_path, time_column=time_column)
+    df = data.load(app)
+    _, test = data.split(df)
+    only_train = df.drop(index=test.index)
+    with pytest.raises(HexInputError, match="test set is empty") as error:
+        data.split(only_train)
+    assert "before hexperiment.split" in str(error.value)
+
+
+@pytest.mark.parametrize("time_column", [None, "t"])
+def test_split_raises_when_filtering_removed_every_training_row(
+    tmp_path: Path, time_column: str | None
+) -> None:
+    app = make_app(tmp_path, time_column=time_column)
+    df = data.load(app)
+    train, _ = data.split(df)
+    only_test = df.drop(index=train.index)
+    with pytest.raises(HexInputError, match="train set is empty"):
+        data.split(only_test)
+
+
+def test_split_raises_when_the_hash_split_leaves_no_test_rows(tmp_path: Path) -> None:
+    app = make_app(tmp_path, fraction=0.01, frame=app_frame(5))
+    df = data.load(app)
+    assert not data.test_mask(df, config_for(None, fraction=0.01)).any()
+    with pytest.raises(HexInputError, match="test set is empty"):
+        data.split(df)

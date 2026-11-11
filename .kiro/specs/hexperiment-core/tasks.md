@@ -50,14 +50,14 @@
   - Add a Hypothesis test: for any combination of equal or different normal, canary and control snapshots, the control runner is called at most once and only when the canary differs and the id sets are equal.
   - _Requirements: 2.3, 2.6, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7_
 
-- [ ] 6. Canary module, part 2: the `.hex/` exchange protocol
+- [x] 6. Canary module, part 2: the `.hex/` exchange protocol
   - In `hexperiment/src/hexperiment/canary.py` add the private `ExecutionFailed`, `hex_dir`, `clear_mode_dir`, `write_snapshot` / `read_snapshot` (`meta.json` plus `snapshot.npz`, loaded with `allow_pickle=False`, `format_version` 1), `write_load_marker` / `read_load_marker` (`loaded.json`, `scrambled_ids.npy`) and `write_result` / `read_result` (`result.json`).
   - Every reader rejects a file whose `run_id` differs from the caller's or whose `format_version` is not 1 by raising `ExecutionFailed` with the message from the failure table in `design.md`. `read_load_marker` returns `None` when the marker is absent.
   - Extend `hexperiment/tests/test_canary.py`: round trips on `tmp_path` for snapshots (with and without `y_score_train`), markers (normal and canary) and results (including a result that carries an input error); `run_id` mismatch; wrong `format_version`; `clear_mode_dir` removes stale files and leaves other modes alone.
   - Add a Hypothesis test: `write_snapshot` then `read_snapshot` returns equal arrays.
   - _Requirements: 2.3, 2.4, 10.6_
 
-- [ ] 7. Data module, part 3: `load` and `split`
+- [x] 7. Data module, part 3: `load` and `split`
   - In `hexperiment/src/hexperiment/data.py` add `load` and `split`. `load` resolves `app_dir` (caller's directory when `None`; a caller without `__file__` raises asking for `app_dir`), reads the CSV at `data.path`, sets the `RangeIndex` in file order, computes the cutoff from the full frame when `time_column` is set, scrambles the test rows only when `HEX_MODE=canary`, writes the load marker through `canary.write_load_marker` only when `HEX_RUN_ID` is set, and stores `{"app_dir", "cutoff"}` in `df.attrs["hexperiment"]`.
   - `split` reads the app directory and cutoff from `df.attrs`; if `attrs` was lost it falls back to the caller's directory and recomputes the cutoff. It returns copies and raises `HexInputError` when either side is empty.
   - Update `hexperiment/src/hexperiment/__init__.py` to export `load` and `split`.
