@@ -82,7 +82,7 @@
   - **Owner, in Kiro (Open questions 1, 2, 3, 10):**
     1. Save a Python file in a prepared app as the agent and confirm the hook fires with the trigger `PostFileSave`. If not, correct `EXPECTED_TRIGGER` and the three JSON copies.
     2. (Done before the build: the real event shape is in `design.md`, Open question 2, and is a fixture from task 2 on.)
-    3. Check `.kiro/workflows/exorcise.workflow.json` with the `validate_workflow` tool, then run `exorcise` on a prepared haunted app (for example one built with `tests/app_builder.py` from the `mean_impute_global` scenario and placed under `apps/`). The loop must stop after the first `APPROVED`. If it never stops, `fileCheck.path` was not expanded: record that, and decide on fallback F in `design.md` before continuing.
+    3. Check `.kiro/workflows/exorcise.workflow.json` with the `validate_workflow` tool, then run `exorcise` on a prepared haunted app (for example one built with `tests/app_builder.py` from the `mean_impute_global` scenario and placed under `apps/`). The loop must stop after the first `APPROVED`. If it never stops, record the run and stop; the placeholder `{{app}}` was confirmed to expand on 2026-11-11, so a loop that does not stop points to a different cause.
     4. After `kiro-cli powers install`, ask the agent to call `list_apps` and confirm that the reported `workspace` is the project folder. If not, record it for the owner.
   - Report the results of the owner checks to the owner.
   - _Requirements: 3.6, 6.4, 7.4_
