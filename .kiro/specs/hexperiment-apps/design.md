@@ -208,7 +208,7 @@ time_column = "time_hour"
 timeout_seconds = 120
 ```
 
-No `[checks]` table and no `[[waivers]]`: every check keeps its default, and a test asserts that (steering rules 6 and 7). Expected cost with the defaults: `max_test_uses = 5` allows the three or four runs of the demo arc without a `test_set_uses` warning.
+No `[checks]` table and no `[[waivers]]`: every check keeps its default, and a test asserts that (steering rules 6 and 7). Expected cost with the defaults: `max_test_uses = 5` allows the three or four full runs of the demo arc. The fast runs that the save hook starts during the `exorcise` loop also count as test-set uses, so a recorded loop may pass 5 and show the `test_set_uses` warning on its later runs. That is accepted: it is a warning, the status does not change, and it is the honest count.
 
 ### Shared script shape
 
@@ -372,7 +372,7 @@ The builder copies the printed numbers into the READMEs. The temporary folders d
 4. **The haunted script.** A table: leak, line marker, ghost, how it is caught, evidence from a real run.
 5. **The honest script.** What changed, in a short list, and why each omitted column is omitted.
 6. **Results.** A table with the haunted AUC, the honest AUC, the threshold and the verdict of each step (numbers from task 6, never estimates).
-7. **Replay the demo.** Copy `haunted/train.py` over `train.py` (Git Bash `cp`, PowerShell `Copy-Item`), then run the `exorcise` workflow or fix it by hand and run `hexperiment run` again. A note that replaying adds runs to `runs/` and that `git restore apps/<app>/train.py` returns the honest script.
+7. **Replay the demo.** Four steps: copy `haunted/train.py` over `train.py` (Git Bash `cp`, PowerShell `Copy-Item`); run `.venv/Scripts/hexperiment run apps/<app>`, which replaces any stale verdict and shows `REJECTED`; in the Kiro CLI start `/workflow run exorcise --app apps/<app>`; afterwards `git checkout -- apps/<app>/train.py` returns the committed script. A note that replaying adds runs to `runs/`.
 8. **Limits.** Hotels: two Portuguese hotels, 2015 to 2017, a random split, columns such as `booking_changes` and `adr` can change after booking. Flights: one year, three airports, a schedule-only model, so the AUC is modest.
 9. **Files** table.
 
@@ -460,7 +460,7 @@ This spec does not create `runs/`, `verdict.json` or `model_card.md` in the app 
 The recording happens after spec `hexperiment-kiro` provides the `exorcise` workflow, for each app, from a clean `runs/`:
 
 1. Copy `haunted/train.py` over `train.py`.
-2. Run the `exorcise` workflow. It runs `hexperiment run`, fixes one finding at a time and re-runs until `APPROVED`. Expected history: hotels 3 or 4 runs, flights 3 runs (see "The demo arc"), all within `max_test_uses = 5`.
+2. Run the `exorcise` workflow. It runs `hexperiment run`, fixes one finding at a time and re-runs until `APPROVED`. Expected history: hotels 3 or 4 full runs, flights 3 full runs (see "The demo arc"), plus the fast runs of the save hook, which may lead to a `test_set_uses` warning (see "`hex.toml`").
 3. Commit `runs/`, `verdict.json` and the final `train.py` unchanged.
 4. If the arc is not clean, delete the whole `runs/` folder and the app `verdict.json` and record again. Never edit a file inside `runs/`.
 

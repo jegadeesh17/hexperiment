@@ -24,7 +24,7 @@ From the repository root, with the root virtual environment:
 
 The target is `is_canceled`. The metric is ROC AUC with a threshold of 0.85. The split is a 20% test set chosen by a hash of the row, with a fixed seed (`hex.toml`).
 
-**Run time.** One full run of the honest script (`hexperiment run`, which runs `train.py` normally and once more with the test rows scrambled) took 87.0 s on 2026-11-11, on Windows, CPU only, with pandas 3.1.1. Another process was using the CPU during that run, so an idle machine may be faster (an earlier run took 47.6 s). The limit in `hex.toml` is `timeout_seconds = 120`. These numbers are from that run on 2026-11-11 and will be replaced by the final measurements.
+**Run time.** One full run of the honest script (`hexperiment run`, which runs `train.py` normally and once more with the test rows scrambled, so two executions) took 20.7 s on 2026-11-12. A second run took 24.0 s and gave the same verdict and AUC. The machine was an AMD Ryzen 7 3750H laptop (4 cores, 8 threads) on Windows 11 with the High Performance power plan, CPU only, with pandas 3.1.1, and nothing else was running. The limit in `hex.toml` is `timeout_seconds = 120`. The haunted script needs a third execution (the control run, started when the canary finds a difference) and took 28.5 s.
 
 ## The haunted script
 
@@ -53,13 +53,13 @@ Other columns that are recorded after the outcome, such as `reservation_status_d
 
 ## Results
 
-From a run on 2026-11-11 (full mode, `hexperiment run` through `apps/verify.py` in a scratch copy of the app). These numbers will be replaced by the final measurements.
+Measured on 2026-11-12 on an AMD Ryzen 7 3750H laptop (4 cores, 8 threads), Windows 11, High Performance power plan, in full mode (`hexperiment run` through `apps/verify.py` in a scratch copy of the app).
 
-| Script | Verdict | AUC | Threshold | Findings | Wall time |
-|---|---|---|---|---|---|
-| `haunted/train.py` | `REJECTED` (exit 1) | 1.0000 | 0.85 | The Possession on `reservation_status`; The Peeking Spirit. Warnings: `split_order`, `metric` | 62.2 s |
-| Haunted with only `reservation_status` removed | `REJECTED` (exit 1) | 0.9101 | 0.85 | The Peeking Spirit. No The Possession. Warning: `split_order` | 71.0 s |
-| `train.py` (honest) | `APPROVED` (exit 0) | 0.9096 | 0.85 | none | 87.0 s |
+| Script | Verdict | AUC | Threshold | Findings | Executions | Wall time |
+|---|---|---|---|---|---|---|
+| `haunted/train.py` | `REJECTED` (exit 1) | 1.0000 | 0.85 | The Possession on `reservation_status`; The Peeking Spirit. Warnings: `split_order`, `metric` | 3 | 28.5 s |
+| Haunted with only `reservation_status` removed | `REJECTED` (exit 1) | 0.9101 | 0.85 | The Peeking Spirit. No The Possession. Warning: `split_order` | 3 | 29.1 s |
+| `train.py` (honest) | `APPROVED` (exit 0) | 0.9096 | 0.85 | none | 2 | 20.7 s |
 
 The second row is not a file in the repository. `apps/verify.py` builds it from the haunted script by removing the list item marked `# LEAK: The Possession`. It is the state an agent reaches after fixing the first finding.
 
@@ -81,23 +81,25 @@ The haunted AUC is 0.0904 higher than the honest one, and it is not a better mod
    Copy-Item apps/hotel-cancellations/haunted/train.py apps/hotel-cancellations/train.py
    ```
 
-2. Run the check:
+2. Run the check. This replaces any stale verdict and shows `REJECTED`:
 
    ```
    .venv/Scripts/hexperiment run apps/hotel-cancellations
    ```
 
-   The verdict is `REJECTED`.
-
-3. Fix it. Either start the workflow in Kiro:
+3. In the Kiro CLI, start the workflow and let the ghost hunter fix the script until `hexperiment run` gives `APPROVED`:
 
    ```
    /workflow run exorcise --app apps/hotel-cancellations
    ```
 
-   or fix the script by hand, one finding at a time, and run `.venv/Scripts/hexperiment run apps/hotel-cancellations` again until the verdict is `APPROVED`. Do not lower the threshold in `hex.toml` and do not edit `verdict.json`.
+4. To return to the packaged honest script, run:
 
-Every run adds a folder to `runs/`, so replaying adds to the history. `git restore apps/hotel-cancellations/train.py` brings back the honest script.
+   ```
+   git checkout -- apps/hotel-cancellations/train.py
+   ```
+
+Every run adds a folder to `runs/`, so replaying adds to the history. Do not lower the threshold in `hex.toml` and do not edit `verdict.json`.
 
 ## Limits
 

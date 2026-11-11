@@ -82,7 +82,7 @@
     - Test rows dropped by `drop_seen_test_rows` (counted with `python -c`, real data, no audit): hotels 7,910 of 23,933 (33%), 16,023 left; flights 0 of 65,469. The 7 flights rows dropped before the review were repeats inside the test rows, which are no overlap and now stay.
     - `pytest apps/tests -q`: 215 passed, 2 skipped (both in `test_history.py`). Both `ruff check apps` commands clean. No `runs/`, `verdict.json` or `.hex/` under either app.
 
-- [ ] 6. Final verification and record
+- [x] 6. Final verification and record
   - Run `.venv/Scripts/python apps/verify.py hotel-cancellations` and `.venv/Scripts/python apps/verify.py flight-delays` once more, in full mode, for every variant. Check each result against the "demo arc" table in `design.md`: statuses, exit codes, ghosts, warnings.
   - For each honest script, run `verify.py` a second time and confirm `status`, `metric` and the findings are identical (determinism). Confirm each honest full run finished within its `timeout_seconds` (120 s) in total, not only per execution.
   - Put the final measured AUCs, statuses and wall times into the results table and the run-time sentence of each README (machine, date, number of executions). Replace every estimate with a measured value. Add a short record of these numbers under this task as a note, including the haunted-versus-honest AUC of both apps and the three flights verdicts.
@@ -91,3 +91,25 @@
   - List `apps/hotel-cancellations` and `apps/flight-delays` and confirm neither contains `runs/`, `verdict.json` or `.hex/`, that `data/` holds only the source and `prepared.csv`, and that no file outside `apps/` was changed.
   - Confirm the follow-up for the recording: the packaged `haunted/train.py` of each app runs from a copy over `train.py` (done by `verify.py`), and `test_history.py` is ready to validate the history that the `exorcise` workflow will produce.
   - _Requirements: 2.3, 2.4, 3.3, 3.4, 4.1, 5.1, 5.2, 5.3, 5.4_
+  - **Final measurements (task 6, 2026-11-12, AMD Ryzen 7 3750H laptop, 4 cores / 8 threads, Windows 11, High Performance power plan, nothing else running; `apps/verify.py`, full mode; pandas 3.1.1).** Executions are 2 (normal and canary) unless the canary finds a difference, which adds the control execution (3); inferred from `run_executions` and the wall times, `verify.py` does not print the count.
+
+    | App | Variant | Exit | Status | AUC | Findings (errors) | Warnings | Executions | Wall time |
+    |---|---|---|---|---|---|---|---|---|
+    | hotels | haunted | 1 | `REJECTED` | 1.0000 | The Possession on `reservation_status`; The Peeking Spirit | `split_order`, `metric` | 3 | 28.5 s |
+    | hotels | possession-fixed | 1 | `REJECTED` | 0.9101 | The Peeking Spirit (no The Possession) | `split_order` | 3 | 29.1 s |
+    | hotels | honest | 0 | `APPROVED` | 0.9096 | none | none | 2 | 20.7 s |
+    | hotels | honest, second run | 0 | `APPROVED` | 0.9096 | none | none | 2 | 24.0 s |
+    | flights | haunted | 1 | `REJECTED` | 0.7971 | The Prophet on `time_hour` | `split_order`, `canary` (not applied), `metric` | 2 | 23.8 s |
+    | flights | split-fixed | 1 | `REJECTED` | 0.7605 | The Peeking Spirit (no The Prophet) | `split_order`, `metric` | 3 | 34.1 s |
+    | flights | honest | 0 | `APPROVED` | 0.6193 | none | none | 2 | 23.9 s |
+    | flights | honest, second run | 0 | `APPROVED` | 0.6193 | none | none | 2 | 26.3 s |
+
+    - Every gate holds: hotels honest 0.9096 at least 0.87; flights honest 0.6193 at least 0.61. No threshold, check, waiver or script was changed.
+    - Determinism: the second run of each honest script gave the same status, AUC (compared at the 4 decimals `verify.py` prints) and findings (none). Both honest full runs finished far inside `timeout_seconds = 120`, in 20.7 to 26.3 s in total.
+    - Haunted versus honest AUC: hotels 1.0000 against 0.9096 (difference 0.0904); flights 0.7971 against 0.6193 (difference 0.1778).
+    - The three flights verdicts: haunted `REJECTED` (The Prophet), split-fixed `REJECTED` (The Peeking Spirit), honest `APPROVED`.
+    - The earlier times (47.6 to 100.1 s) came from a shared CPU; the final times are 3 to 4 times lower.
+    - READMEs: results tables, run-time sentences, machine and date updated; replay steps are now (a) copy, (b) `hexperiment run` (shows `REJECTED`), (c) `/workflow run exorcise --app apps/<app>`, (d) `git checkout -- apps/<app>/train.py`. `test_readme.py` pins the order and the machine.
+    - Pin: `test_scripts.py` now has `HAUNTED_PINS` (SHA-256 of each haunted script, `\n` line endings) and `test_haunted_script_matches_its_pin`. Hotels `3f1f6e8a...80364c6`, flights `e34ac032...29d047f`. Mutation check: changing `random_state=0` to `1` in the haunted flights script made the pin test fail; the file was restored byte for byte.
+    - `pytest apps/tests -q --durations=5`: 221 passed, 2 skipped (both the real-app checks in `test_history.py`, no `runs/` yet), 9.7 s. `ruff check apps` and `ruff check apps --select E,F,I,UP,B`: clean. `pytest hexperiment/tests -q`: 1938 passed. `ruff check hexperiment`: clean.
+    - Folders: neither app has `runs/`, `verdict.json`, `model_card.md` or `.hex/`; `data/` holds only the source CSV and `prepared.csv`. `git status` shows changes only in the two READMEs, `test_readme.py`, `test_scripts.py` and this file, plus a change in `.kiro/specs/hexperiment-kiro/tasks.md` that was already there before this task and is not mine.
