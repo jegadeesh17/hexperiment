@@ -1,0 +1,45 @@
+"""Training script of this app.
+
+It follows the ML integrity rules: the kit loads and splits the data, the model
+is fitted on training rows only, and the script ends with one audit call.
+"""
+
+import hexperiment
+import pandas as pd
+from sklearn.ensemble import HistGradientBoostingClassifier
+
+# CHANGE: these two must match [target] column and positive in hex.toml.
+TARGET = "target"
+POSITIVE = 1
+
+df = hexperiment.load()
+
+# Split first. Nothing below this line may be fitted, scaled, imputed or encoded
+# on `df` or on `test`: only on `train`.
+train, test = hexperiment.split(df)
+
+# Model inputs: the numeric columns other than the target. Use only columns that are
+# known at prediction time. If a column is recorded after the outcome, leave it out
+# and say why in a comment. A categorical column needs an encoder, and the encoder
+# must be fitted on training rows only, so put both in a scikit-learn Pipeline.
+FEATURES = [
+    column
+    for column in train.columns
+    if column != TARGET and pd.api.types.is_numeric_dtype(train[column])
+]
+
+# A fixed random_state keeps every run identical, which the canary test needs.
+model = HistGradientBoostingClassifier(random_state=0)
+model.fit(train[FEATURES], train[TARGET])
+
+# The probability of the positive class, one value per row.
+positive_column = list(model.classes_).index(POSITIVE)
+
+hexperiment.audit(
+    train,
+    test,
+    y_score=model.predict_proba(test[FEATURES])[:, positive_column],
+    features=FEATURES,
+    script=__file__,
+    y_score_train=model.predict_proba(train[FEATURES])[:, positive_column],
+)

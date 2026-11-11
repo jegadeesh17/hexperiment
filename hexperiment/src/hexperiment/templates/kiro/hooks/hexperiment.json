@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "hexperiment-check-on-save",
+      "description": "Runs the fast Hexperiment check on the app that owns a Python file the agent saved, and puts the result in the agent's context.",
+      "trigger": "PostFileSave",
+      "matcher": ".*\\.py$",
+      "action": {
+        "type": "command",
+        "command": "hexperiment hook"
+      },
+      "timeout": 120
+    }
+  ]
+}

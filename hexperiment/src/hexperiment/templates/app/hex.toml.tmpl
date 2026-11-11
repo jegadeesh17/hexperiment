@@ -1,0 +1,31 @@
+# hex.toml: what this model must achieve and what the audit enforces.
+# Edit the lines marked CHANGE. Agents must not edit this file.
+
+[app]
+name = "my-model"                 # CHANGE: shown in the model card
+description = "What this model predicts, in one sentence."
+
+[data]
+path = "data/dataset.csv"         # CHANGE: CSV file, relative to this folder
+
+[target]
+column = "target"                 # CHANGE: the column to predict
+positive = 1                      # the value that marks the positive class
+
+[metric]
+name = "roc_auc"
+threshold = 0.75                  # CHANGE: the score the model must reach
+
+[split]
+test_fraction = 0.2
+seed = 0
+# time_column = "date"            # for time-ordered data: the split is then by time
+
+[run]
+timeout_seconds = 120
+
+# A waiver accepts a finding. It needs a human reason of 10+ characters.
+# [[waivers]]
+# check = "target_proxy"
+# column = "tenure_months"
+# reason = "Known at prediction time and legitimately strong."

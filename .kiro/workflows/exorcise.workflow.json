@@ -1,0 +1,30 @@
+{
+  "name": "exorcise",
+  "description": "Repeats the ghost-hunter agent on one Hexperiment app until hexperiment run writes an APPROVED verdict.json. After 5 rounds it pauses for the human.",
+  "inputs": {
+    "app": "string"
+  },
+  "steps": [
+    {
+      "type": "repeat",
+      "id": "hunt-until-approved",
+      "maxIterations": 5,
+      "onMaxIterations": "pause",
+      "stopCondition": {
+        "fileCheck": {
+          "path": "{{app}}/verdict.json",
+          "jsonPath": "$.status",
+          "value": "APPROVED"
+        }
+      },
+      "steps": [
+        {
+          "type": "step",
+          "id": "hunt",
+          "agent": "ghost-hunter",
+          "prompt": "Work on the Hexperiment app in the folder given as the workflow input `app` ({{app}}), written with forward slashes relative to the workspace, for example apps/churn.\n1. Run `hexperiment run {{app}}` (full mode).\n2. Read `{{app}}/verdict.json` and the model card in the newest folder under `{{app}}/runs/`.\n3. If the status is APPROVED, stop here and report it.\n4. Otherwise change the app's Python files so that each finding is fixed at its cause. Use the finding's fix hint and the suspect lines it lists. Then run `hexperiment run {{app}}` again as the last thing you do in this step.\nDo not change thresholds, waivers or any file outside the app's Python code. If you cannot fix a finding, say so and stop; do not work around it.\nEnd your reply with the status, the metric against its threshold, and one line per finding of the latest verdict.json."
+        }
+      ]
+    }
+  ]
+}

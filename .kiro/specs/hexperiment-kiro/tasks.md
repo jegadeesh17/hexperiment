@@ -35,13 +35,13 @@
   - Extend `hexperiment/tests/test_cli.py` with `main(["hook"])` and replaced standard input (use `io.TextIOWrapper(io.BytesIO(...))` as `sys.stdin`, with `.buffer`): a clean fast run gives exit 0 and the summary plus the notice, a rejected run gives exit 0 and the finding, a failed run gives exit 0 and the message, empty input and a non-Python file give empty output, a handler that raises gives the one-line message and exit 0. Assert that a hook run writes `runs/<run_id>/` and increases `test_set_uses` by 1 (Requirement 1.7).
   - _Requirements: 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 7.1_
 
-- [ ] 4. The hook, the workflow and the ghost hunter (Kiro files)
+- [x] 4. The hook, the workflow and the ghost hunter (Kiro files)
   - Create `.kiro/hooks/hexperiment.json`, `.kiro/workflows/exorcise.workflow.json` and `.kiro/agents/ghost-hunter.json` with exactly the contents in the section "The Kiro files" of `design.md`. **Owner:** run `kiro-cli agent validate` on the ghost hunter after the builder finishes.
   - Create `hexperiment/tests/test_kiro_files.py` with the hook, workflow and agent checks and the permission simulator described under "Format checks" in `design.md`. Keep the trigger literal (`EXPECTED_TRIGGER`) and the input placeholder (`INPUT_REF`) as two named constants at the top, so that a correction in task 9 changes one line each. The tests locate the repository's `.kiro/` from `Path(__file__)` and fail with a clear message if a file is missing.
   - The simulator test must show: the denied paths of Requirement 3.3 are surely denied, `apps/churn/train.py` is possibly allowed, the shell allow list admits only `hexperiment run` and `hexperiment run --fast` on `apps/*`, and the chained, redirected, `..`, version-control, deletion, network, `pip`, `python`, `init` and `hook` commands are not allowed.
   - _Requirements: 1.1, 2.1, 2.2, 2.3, 2.4, 2.5, 3.1, 3.2, 3.3, 3.4, 3.5, 7.2_
 
-- [ ] 5. `hexperiment init`, the templates and the drift check
+- [x] 5. `hexperiment init`, the templates and the drift check
   - Create `hexperiment/src/hexperiment/templates/app/hex.toml.tmpl` and `train.py.tmpl` with the contents described under `init.py` in `design.md`. Create `templates/kiro/hooks/hexperiment.json`, `templates/kiro/workflows/exorcise.workflow.json`, `templates/kiro/agents/ghost-hunter.json` and `templates/kiro/steering/ml-integrity.md` as exact copies of the files in `.kiro/` (copy the bytes; do not retype them). Do not add an `__init__.py` to `templates/`.
   - Create `hexperiment/src/hexperiment/init.py`: `TemplateFile`, `InitReport`, `APP_FILES`, `KIRO_FILES` (tuples), `init_app`, `init_kiro`, `format_report`. Templates are read with `importlib.resources` and written as bytes. An existing target is never opened for writing. The notes of `format_report` are those listed in `design.md` (including the `PATH` warning through `shutil.which`).
   - In `hexperiment/src/hexperiment/cli.py` add the subcommand `init` (`app_dir` optional, `--kiro` flag, at least one required), printing `format_report`. Exit 0 on success, 2 with `hexperiment: <message>` on `HexInputError` or `OSError`.

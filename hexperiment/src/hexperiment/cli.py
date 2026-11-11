@@ -19,6 +19,7 @@ from hexperiment.config import load_config
 from hexperiment.console import print_text
 from hexperiment.errors import HexInputError
 from hexperiment.hook import handle_hook
+from hexperiment.init import InitReport, format_report, init_app, init_kiro
 from hexperiment.models import RunOutcome, Status, Verdict
 from hexperiment.runs import clear_app_verdict, finalize_run, new_run_id
 from hexperiment.verdict import format_summary
@@ -61,6 +62,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="check the app that owns a file saved by an agent (reads a Kiro hook "
         "event from standard input; always exits 0)",
     )
+    init = commands.add_parser(
+        "init",
+        help="create an app from the templates and/or add the Kiro files to this "
+        "project",
+    )
+    init.add_argument(
+        "app_dir", nargs="?", help="new app folder to create, for example apps/churn"
+    )
+    init.add_argument(
+        "--kiro",
+        action="store_true",
+        help="write the hook, workflow, ghost hunter agent and steering file into "
+        "./.kiro (existing files are kept)",
+    )
     return parser
 
 
@@ -78,6 +93,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "hook":
         return _hook_command()
+    if args.command == "init":
+        return _init_command(args.app_dir, kiro=args.kiro)
     outcome = run_app(Path(args.app_dir), full=args.full)
     # Requirement 16.5: the verdict is written, so a failure to print it must not
     # change the exit code.
@@ -132,6 +149,38 @@ def _hook_command() -> int:
     if output:
         with contextlib.suppress(Exception):
             print_text(output)
+    return 0
+
+
+def _init_command(app_dir: str | None, *, kiro: bool) -> int:
+    """``hexperiment init [app_dir] [--kiro]``: print what was created and skipped.
+
+    Exit 0 after a run, even if every file was skipped; exit 2 with
+    ``hexperiment: <message>`` for invalid use or a file system error
+    (Requirements 5.1 to 5.3).
+    """
+    try:
+        if app_dir is None and not kiro:
+            raise HexInputError(
+                "init needs an app folder, --kiro, or both.",
+                "Run `hexperiment init apps/<name>` to create an app, "
+                "`hexperiment init --kiro` to add the Kiro files, "
+                "or pass both.",
+            )
+        reports = []
+        if app_dir is not None:
+            reports.append(init_app(Path(app_dir)))
+        if kiro:
+            reports.append(init_kiro(Path.cwd()))
+        report = InitReport(
+            created=tuple(path for r in reports for path in r.created),
+            skipped=tuple(path for r in reports for path in r.skipped),
+        )
+        text = format_report(report, Path.cwd())
+    except (HexInputError, OSError) as error:
+        print_text(f"hexperiment: {error}", sys.stderr)
+        return EXIT_RUN_FAILED
+    print_text(text)
     return 0
 
 

@@ -1,0 +1,63 @@
+{
+  "name": "ghost-hunter",
+  "description": "Fixes data leakage in one Hexperiment app. Can edit the app's Python files and run hexperiment run on it. Cannot change thresholds, waivers, verdicts, run history, data, .kiro or the hexperiment package.",
+  "prompt": "You are the ghost hunter for one Hexperiment app. Your goal is to make `hexperiment run <app>` end with status APPROVED by fixing the cause of each finding in the app's Python files.\n\nRules:\n1. Thresholds, waivers and every other setting in hex.toml are the human's decision. You cannot edit them. Never ask to lower a threshold or to add a waiver.\n2. Removing the hexperiment.audit call, or a feature that is not the cause of a finding, does not count as a fix, and neither does silencing, skipping or weakening a check. Dropping a column flagged by The Possession is a fix only when the column is recorded after the outcome; say why it is. If an honest fix leaves the metric below its threshold, report that.\n3. If you cannot fix a finding, stop and report it with its ghost, location and fix hint instead of working around it.\n4. Never edit verdict.json, model_card.md, fetch_data.py, runs/, .hex/, data/, haunted/, .kiro/ or the hexperiment package. Your tools refuse these writes; do not look for another way.\n5. Run only `hexperiment run apps/<name>` or `hexperiment run --fast apps/<name>`, one command per call, with forward slashes and no other shell syntax.\n6. Follow the ML integrity rules in the steering file.\n7. End every reply with the status, the metric against its threshold and one line per finding of the latest verdict.json.",
+  "model": "claude-sonnet-5.5",
+  "tools": ["read", "write", "shell"],
+  "resources": ["file://.kiro/steering/ml-integrity.md"],
+  "permissions": {
+    "rules": [
+      { "capability": "fs_read", "effect": "allow" },
+      {
+        "capability": "fs_write",
+        "match": ["apps/**/*.py", "**/apps/**/*.py"],
+        "effect": "allow"
+      },
+      {
+        "capability": "fs_write",
+        "match": [
+          "**/hex.toml",
+          "**/verdict.json",
+          "**/model_card.md",
+          "apps/**/runs/**", "**/apps/**/runs/**",
+          "apps/**/.hex/**", "**/apps/**/.hex/**",
+          "apps/**/data/**", "**/apps/**/data/**",
+          "apps/**/haunted/**", "**/apps/**/haunted/**",
+          "**/fetch_data.py",
+          "apps/**/hexperiment.py", "**/apps/**/hexperiment.py",
+          "apps/**/hexperiment/**", "**/apps/**/hexperiment/**",
+          ".kiro/**", "**/.kiro/**",
+          "hexperiment/src/**", "**/hexperiment/src/**",
+          "hexperiment/tests/**", "**/hexperiment/tests/**",
+          "hexperiment/pyproject.toml", "**/hexperiment/pyproject.toml",
+          "**/.venv/**", "**/site-packages/**"
+        ],
+        "effect": "deny"
+      },
+      {
+        "capability": "shell",
+        "match": [
+          "hexperiment run apps/*",
+          "hexperiment run --fast apps/*",
+          ".venv/Scripts/hexperiment run apps/*",
+          ".venv/Scripts/hexperiment run --fast apps/*",
+          ".venv\\Scripts\\hexperiment run apps/*",
+          ".venv\\Scripts\\hexperiment run --fast apps/*",
+          ".venv/bin/hexperiment run apps/*",
+          ".venv/bin/hexperiment run --fast apps/*"
+        ],
+        "effect": "allow"
+      },
+      {
+        "capability": "shell",
+        "match": [
+          "*&*", "*;*", "*|*", "*>*", "*<*", "*`*", "*$(*", "*..*",
+          "git*", "rm *", "rmdir*", "del *", "Remove-Item*",
+          "curl*", "wget*", "Invoke-WebRequest*", "Invoke-RestMethod*", "iwr *", "irm *",
+          "pip*", "python*", "hexperiment init*", "hexperiment hook*"
+        ],
+        "effect": "deny"
+      }
+    ]
+  }
+}
