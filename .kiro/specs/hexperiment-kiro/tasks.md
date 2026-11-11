@@ -86,3 +86,8 @@
     4. After `kiro-cli powers install`, ask the agent to call `list_apps` and confirm that the reported `workspace` is the project folder. If not, record it for the owner.
   - Report the results of the owner checks to the owner.
   - _Requirements: 3.6, 6.4, 7.4_
+
+  **Status note (2026-11-12, after the review fixes).** Task 9 is not done.
+  - Steps that pass: `ruff check hexperiment` reports no problems; `import hexperiment` leaves `mcp` and `anyio` unloaded; `hexperiment-mcp` with the SDK hidden prints the install hint and exits 2; `hexperiment run --help`, `hook --help` and `init --help` print usage and exit 0; the runtime dependencies are `pandas`, `numpy`, `scikit-learn`; `kiro-cli agent validate --path .kiro/agents/ghost-hunter.json` exits 0.
+  - Step that fails: the whole suite passes (1938 tests) but takes 94 to 108 s on an idle machine, above the 90 s limit of Requirement 7.4. The slowest tests are the `test_canary_scripts.py` class setups (17 to 37 s each) and `test_init.py::test_the_generated_app_is_approved_end_to_end` (about 21 s). Each of them starts `train.py` two or three times, and on the measuring laptop every new Python process spends 8 to 9 s importing scikit-learn, against 0.2 s for a bare interpreter, because two antivirus products scan each file on access. Limiting the numeric libraries to one thread did not change the time. Hypothesis settings were not changed and no stage was added.
+  - Owner steps still open: `kiro-cli powers install power/hexperiment`; the ghost hunter refusing `ls` and `git status`; the live Kiro checks 1, 3 and 4 above.
