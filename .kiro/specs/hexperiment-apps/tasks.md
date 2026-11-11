@@ -66,11 +66,12 @@
     - No `runs/`, `verdict.json` or `.hex/` appeared under the app.
     - End of task: `pytest apps/tests -q` 131 passed in about 12 s; `ruff check apps` clean.
 
-- [ ] 5. READMEs and the remaining tests
+- [x] 5. READMEs and the remaining tests
   - Write `apps/hotel-cancellations/README.md` and `apps/flight-delays/README.md` following the outline in `design.md`: question, data with source, licence and the exact attribution of Requirement 4.1, fetch and run commands, a table of the leaks with the ghost that catches each, the honest changes, a results table, the replay instructions (copy `haunted/train.py` over `train.py`, then the `exorcise` workflow or fix by hand, then `.venv/Scripts/hexperiment run apps/<app>`), limits, and a files table. Use the numbers recorded in tasks 3 and 4 for the results table and the run time; the final numbers are updated in task 6.
   - Create `apps/tests/test_readme.py` and `apps/tests/test_history.py` as described in `design.md`. With no `runs/` folder, `test_history.py` must skip with a reason.
   - Run `.venv/Scripts/python -m pytest apps/tests -q` and confirm the whole suite finishes in under 20 seconds (`--durations=5` shows the slowest tests) and that skipped tests are only those of `test_history.py`.
   - _Requirements: 4.1, 4.2, 5.1, 5.3_
+  - **Result (task 5):** both READMEs use the numbers of tasks 3 and 4 and say they are from a run on 2026-11-11 (task 6 replaces them). The hotels README explains the 8,128 of 23,933 test rows dropped and the 15,805 rows of the honest AUC. `test_history.py` also runs its checker on synthetic histories in `tmp_path`, so only the two checks on the real apps skip (no `runs/` yet). `pytest apps/tests -q --durations=5`: 159 passed, 2 skipped (both in `test_history.py`), 11.8 s in the last run (15.9 s in the first); `ruff check apps` clean. No `runs/`, `verdict.json` or `.hex/` under either app.
 
 - [ ] 6. Final verification and record
   - Run `.venv/Scripts/python apps/verify.py hotel-cancellations` and `.venv/Scripts/python apps/verify.py flight-delays` once more, in full mode, for every variant. Check each result against the "demo arc" table in `design.md`: statuses, exit codes, ghosts, warnings.

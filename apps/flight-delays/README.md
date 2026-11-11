@@ -1,0 +1,118 @@
+# flight-delays
+
+Will a 2013 New York flight arrive more than 15 minutes late? The model decides from the schedule alone: carrier, origin, destination, scheduled departure and arrival time, distance, and the date.
+
+This app starts **haunted**: its training script splits the flights at random although they are ordered in time, and adds a statistic computed over all rows. Hexperiment flags it as `REJECTED`. The honest script splits by time and reaches an AUC of 0.6192 with the verdict `APPROVED`.
+
+## The data
+
+- **Dataset:** nycflights13, every flight that left New York City (EWR, JFK, LGA) in 2013. The source has 336,776 flights and 20 columns.
+- **Source:** <https://vincentarelbundock.github.io/Rdatasets/csv/nycflights13/flights.csv> (33,206,996 bytes), via Rdatasets. `fetch_data.py` checks the file against a pinned SHA-256 (`b791a2590c9167aa0bd3cb45af3f64101180878cf088c183eae4011e3a654f42`).
+- **Licence and attribution:** nycflights13, CC0, original data from the US Bureau of Transportation Statistics.
+- The data is downloaded, not committed (`apps/*/data/` is ignored by git).
+- **Preparation.** `fetch_data.py` drops the row-number column, drops the 9,430 flights without an arrival delay (cancelled or diverted), and adds the target `late` (1 when `arr_delay` is above 15 minutes, otherwise 0). It drops `dep_time`, `dep_delay`, `arr_time`, `arr_delay` and `air_time`, which are known only after departure. The prepared file has 327,346 rows and 15 columns, and 23.71% of the flights are late. `time_hour` is the scheduled hour as an ISO 8601 UTC timestamp, for example `2013-01-01T10:00:00Z`.
+
+## Run it
+
+From the repository root, with the root virtual environment:
+
+```
+.venv/Scripts/python apps/flight-delays/fetch_data.py
+.venv/Scripts/hexperiment run apps/flight-delays
+```
+
+`fetch_data.py` downloads `flights.csv` into `apps/flight-delays/data/` unless the file is already there with the pinned checksum, then writes `data/prepared.csv`. `hexperiment run` executes `train.py`, runs the canary test, and writes `verdict.json` and a model card. With the honest `train.py` the expected verdict is `APPROVED` with exit code 0.
+
+The target is `late`. The metric is ROC AUC with a threshold of 0.60. `hex.toml` sets `time_column = "time_hour"`, so the latest 20% of the flights form the test set: 261,877 training rows and 65,469 test rows.
+
+**Run time.** One full run of the honest script (`hexperiment run`, which runs `train.py` normally and once more with the test rows scrambled) took 49.0 s on 2026-11-11, on Windows, CPU only, with pandas 3.1.1. Another process was using the CPU during that run, so an idle machine may be faster. The limit in `hex.toml` is `timeout_seconds = 120`. These numbers are from that run on 2026-11-11 and will be replaced by the final measurements.
+
+## The haunted script
+
+`haunted/train.py` is the honest script plus the leaks marked `# LEAK:`. When it is run, `hexperiment run` rejects it, and the two leaks show up one after the other.
+
+| Leak | Where | Ghost | How it is caught |
+|---|---|---|---|
+| A random split with scikit-learn's `train_test_split` instead of `hexperiment.split`. Flights from after the earliest test flight are in the training set. | `train.py:71`, the line ending in `# LEAK: random split` | The Prophet | The check compares the times of the training and test rows. The error names `time_hour`. The canary test reports `not applied`, because the scrambled test rows are mostly inside the random training set. |
+| `carrier_day_late_rate`, the late rate of each carrier on each day, computed over all rows before the split. The test labels reach the training features. | `train.py:69` | The Peeking Spirit | It appears once the split is fixed. The canary run scrambles the test rows, and the training predictions change because the rate of every carrier-day that has both training and test flights changes. The finding lists `train.py:69` among the suspect lines. |
+
+The haunted run also reports two warnings: `split_order` (a statistic computed over all rows before the split, at `train.py:69`) and `metric` (the AUC is above 0.75, too good to be true).
+
+## The honest script
+
+`train.py` differs from the haunted script in these ways:
+
+- It splits with `hexperiment.split`, so every training flight is earlier than every test flight.
+- It has no `carrier_day_late_rate`.
+- The features are known when the flight is scheduled: `carrier`, `origin`, `dest`, `month`, `day`, `sched_dep_time`, `sched_arr_time` and `distance`.
+- `flight` and `tailnum` are identifiers and are left out. `hour` and `minute` are already inside `sched_dep_time`.
+- `month` and `day` stay on purpose. A scheduled flight repeats every day with the same other columns, so without a date identical rows would sit in both train and test and The Doppelganger would reject the model. The script does not combine `year`, `month` and `day` into one date.
+- Every learned step sits in one scikit-learn `Pipeline` fitted on training rows only. The model is a `HistGradientBoostingClassifier` with `random_state=0` and no early stopping, so two runs give the same scores.
+- After the split, `drop_seen_test_rows` removes every test row that also occurs in the training rows. It removes 7 of the 65,469 test rows and leaves 65,462.
+
+## Results
+
+From a run on 2026-11-11 (full mode, `hexperiment run` through `apps/verify.py` in a scratch copy of the app). These numbers will be replaced by the final measurements.
+
+| Script | Verdict | AUC | Threshold | Findings | Wall time |
+|---|---|---|---|---|---|
+| `haunted/train.py` | `REJECTED` (exit 1) | 0.7969 | 0.60 | The Prophet on `time_hour`. Warnings: `split_order`, `canary` (not applied), `metric` | 81.6 s |
+| Haunted with only the split fixed | `REJECTED` (exit 1) | 0.7605 | 0.60 | The Peeking Spirit. No The Prophet. Warnings: `split_order`, `metric` | 69.9 s |
+| `train.py` (honest) | `APPROVED` (exit 0) | 0.6192 | 0.60 | none | 49.0 s |
+
+The second row is not a file in the repository. `apps/verify.py` builds it from the haunted script by replacing the line ending in `# LEAK: random split` with `train, test = hexperiment.split(df)`. It is the state an agent reaches after fixing the first finding.
+
+The haunted AUC is 0.1777 higher than the honest one. The honest model is only 0.0192 above the threshold. That is what the schedule alone can tell you about delays.
+
+## Replay the demo
+
+1. Copy the haunted script over the honest one.
+
+   Git Bash:
+
+   ```
+   cp apps/flight-delays/haunted/train.py apps/flight-delays/train.py
+   ```
+
+   PowerShell:
+
+   ```
+   Copy-Item apps/flight-delays/haunted/train.py apps/flight-delays/train.py
+   ```
+
+2. Run the check:
+
+   ```
+   .venv/Scripts/hexperiment run apps/flight-delays
+   ```
+
+   The verdict is `REJECTED` by The Prophet.
+
+3. Fix it. Either start the workflow in Kiro:
+
+   ```
+   /workflow run exorcise --app apps/flight-delays
+   ```
+
+   or fix the script by hand, one finding at a time, and run `.venv/Scripts/hexperiment run apps/flight-delays` again until the verdict is `APPROVED`. After the split is fixed, expect The Peeking Spirit. Do not lower the threshold in `hex.toml` and do not edit `verdict.json`.
+
+Every run adds a folder to `runs/`, so replaying adds to the history. `git restore apps/flight-delays/train.py` brings back the honest script.
+
+## Limits
+
+- One year (2013) and three New York airports. The model says nothing about other years or airports.
+- The model sees only the schedule. It does not see weather, aircraft or the delay of the previous flight, so its AUC is modest.
+- The test set is the latest 20% of the flights by scheduled hour, so it covers only the latest part of the year, and the AUC may differ for other periods.
+- The AUC is measured on the 65,462 test rows that remain after removing copies of training rows.
+
+## Files
+
+| File | Purpose |
+|---|---|
+| `hex.toml` | target, metric, threshold, time split and timeout |
+| `fetch_data.py` | downloads and checks `flights.csv`, writes `data/prepared.csv` |
+| `train.py` | the honest training script |
+| `haunted/train.py` | the haunted starting point of the demo |
+| `data/` | downloaded data (not committed) |
+| `runs/` | one folder per run with `verdict.json` and `model_card.md` (created by real runs) |
+| `verdict.json` | the latest verdict (created by real runs) |

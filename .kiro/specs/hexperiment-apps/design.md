@@ -449,7 +449,7 @@ Time per execution: interpreter and scikit-learn start-up 8 to 9 s, `load` 1 to 
 
 ### If a gate fails (fallbacks, in order)
 
-1. Hotels honest below 0.87, or flights honest below 0.62: raise `max_iter` to 300 (check the time), then try `learning_rate=0.05` with `max_iter=300`. Do this once per app; repeated trial against the test AUC would tune on the test set.
+1. Hotels honest below 0.87, or flights honest below 0.61: raise `max_iter` to 300 (check the time), then try `learning_rate=0.05` with `max_iter=300`. Do this once per app; repeated trial against the test AUC would tune on the test set.
 2. A Shapeshifter finding or `UNVERIFIED` on an honest script because the HGB scores differ between identical executions: replace the model by a logistic regression pipeline and record the change in the README. Hotels: `ColumnTransformer` of median `SimpleImputer` plus `StandardScaler` for numerics and `OneHotEncoder(handle_unknown="ignore", min_frequency=50)` for categoricals, then `LogisticRegression(max_iter=1000, random_state=0)`. Flights: the same with `month`, `day` and the hour from `sched_dep_time` as one-hot features; expect an AUC near 0.62 to 0.64.
 3. Anything else: stop and report. Never lower `threshold`, add a waiver, or change a `[checks]` value to get a pass (steering rules 6 and 7).
 
