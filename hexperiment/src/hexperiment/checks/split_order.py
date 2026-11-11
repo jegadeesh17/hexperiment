@@ -46,18 +46,20 @@ def check_split_order(source: str | None, script_name: str) -> CheckResult:
         tree = ast.parse(source)
     except (SyntaxError, ValueError, RecursionError):
         return _inconclusive(script_name, "the script could not be parsed")
+    modules = _imported_modules(tree)
+    targets = _import_targets(tree)
     calls = sorted(
         (node for node in ast.walk(tree) if isinstance(node, ast.Call)),
         key=lambda node: (node.lineno, node.col_offset),
     )
-    first_split = next((node for node in calls if _is_split_call(node)), None)
+    first_split = next((node for node in calls if _is_split_call(node, targets)), None)
     if first_split is None:
         return _inconclusive(script_name, "the script has no call to a split function")
-    modules = _imported_modules(tree)
+    nested = _argument_calls(first_split)
     findings = tuple(
         _finding(script_name, name, node.lineno, first_split.lineno)
         for node in calls
-        if node.lineno < first_split.lineno
+        if (node.lineno < first_split.lineno or id(node) in nested)
         and (name := _suspect_method(node, modules)) is not None
     )
     return CheckResult(CHECK, None, Outcome.PASSED, findings)
@@ -88,13 +90,42 @@ def _finding(script_name: str, call: str, line: int, first_split_line: int) -> F
     )
 
 
-def _is_split_call(node: ast.Call) -> bool:
+def _is_split_call(node: ast.Call, targets: dict[str, str]) -> bool:
+    """Whether the call is ``split``, ``hexperiment.split`` or ``train_test_split``.
+
+    A bare ``split`` or ``train_test_split`` name and any ``.train_test_split``
+    attribute count as before. An import alias is resolved first, so
+    ``hx.split`` (``import hexperiment as hx``), ``hsplit`` (``from hexperiment
+    import split as hsplit``) and ``tts`` (``from sklearn.model_selection import
+    train_test_split as tts``) count too (Requirement 8.1).
+    """
     func = node.func
-    if isinstance(func, ast.Name):
-        return func.id in _SPLIT_NAMES
-    if isinstance(func, ast.Attribute):
-        return func.attr == "train_test_split" or _dotted_name(func) == _QUALIFIED_SPLIT
-    return False
+    if isinstance(func, ast.Name) and func.id in _SPLIT_NAMES:
+        return True
+    if isinstance(func, ast.Attribute) and func.attr == "train_test_split":
+        return True
+    dotted = _dotted_name(func)
+    if dotted is None:
+        return False
+    root, _, rest = dotted.partition(".")
+    if root in targets:
+        dotted = targets[root] + (f".{rest}" if rest else "")
+    return dotted == _QUALIFIED_SPLIT or dotted.rpartition(".")[2] == "train_test_split"
+
+
+def _argument_calls(call: ast.Call) -> frozenset[int]:
+    """Identities of the calls nested in the arguments of ``call``.
+
+    They run before ``call`` does, so they count as earlier calls even when they
+    are on the same line or below it (Requirement 8.2).
+    """
+    arguments = [*call.args, *(keyword.value for keyword in call.keywords)]
+    return frozenset(
+        id(node)
+        for argument in arguments
+        for node in ast.walk(argument)
+        if isinstance(node, ast.Call)
+    )
 
 
 def _dotted_name(node: ast.expr) -> str | None:
@@ -117,6 +148,27 @@ def _imported_modules(tree: ast.AST) -> frozenset[str]:
             for alias in node.names:
                 names.add(alias.asname or alias.name.split(".")[0])
     return frozenset(names)
+
+
+def _import_targets(tree: ast.AST) -> dict[str, str]:
+    """Map each name an import binds to the dotted name it stands for.
+
+    ``import hexperiment as hx`` gives ``hx -> hexperiment``; ``from hexperiment
+    import split as hsplit`` gives ``hsplit -> hexperiment.split``.
+    """
+    targets: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname:
+                    targets[alias.asname] = alias.name
+                else:
+                    root = alias.name.split(".")[0]
+                    targets[root] = root
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            for alias in node.names:
+                targets[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+    return targets
 
 
 def _suspect_method(node: ast.Call, modules: frozenset[str]) -> str | None:

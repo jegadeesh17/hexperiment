@@ -262,15 +262,17 @@ def test_a_waiver_with_a_column_waives_only_that_column() -> None:
 
 
 def test_a_waiver_without_a_column_waives_every_finding_of_its_check() -> None:
+    # Only row_overlap and temporal waivers can lack a column (Requirement 11.1).
+    second = finding("row_overlap", location="elsewhere", ghost="The Doppelganger")
     findings, records = apply_waivers(
-        [proxy("a"), proxy("b"), overlap()], [waiver("target_proxy")]
+        [overlap(), second, proxy("a")], [waiver("row_overlap")]
     )
     assert [f.severity for f in findings] == [
         Severity.WAIVED,
         Severity.WAIVED,
         Severity.ERROR,
     ]
-    assert records == (WaiverRecord("target_proxy", None, REASON, 2),)
+    assert records == (WaiverRecord("row_overlap", None, REASON, 2),)
 
 
 @pytest.mark.parametrize("check", ["row_overlap", "temporal"])
@@ -364,7 +366,7 @@ def test_an_input_error_gives_a_rejected_verdict_with_one_finding() -> None:
     verdict = build(
         DataAuditResult(None, None, (), (), None, error),
         skipped_outcome(),
-        make_config((waiver("target_proxy"),), max_test_uses=1),
+        make_config((waiver("target_proxy", "x"),), max_test_uses=1),
         test_set_uses=9,
     )
 
@@ -470,7 +472,7 @@ def test_waived_findings_do_not_reject_and_the_check_passes() -> None:
         failed("target_proxy", "The Possession", proxy("a"), proxy("b")),
         *clean_checks()[2:],
     )
-    config = make_config((waiver("target_proxy"),))
+    config = make_config((waiver("target_proxy", "a"), waiver("target_proxy", "b")))
     verdict = build(audit_result(checks), config=config)
 
     assert verdict.status is Status.APPROVED
@@ -478,7 +480,10 @@ def test_waived_findings_do_not_reject_and_the_check_passes() -> None:
     assert verdict.checks[1] == CheckSummary(
         "target_proxy", "The Possession", Outcome.PASSED
     )
-    assert verdict.waivers == (WaiverRecord("target_proxy", None, REASON, 2),)
+    assert verdict.waivers == (
+        WaiverRecord("target_proxy", "a", REASON, 1),
+        WaiverRecord("target_proxy", "b", REASON, 1),
+    )
 
 
 def test_a_check_with_one_waived_and_one_open_error_stays_failed() -> None:
@@ -594,7 +599,7 @@ def test_assemble_does_not_modify_the_result() -> None:
         (failed("target_proxy", "The Possession", proxy("a")), *clean_checks()[2:])
     )
     before = result.to_dict()
-    build(result, config=make_config((waiver("target_proxy"),)))
+    build(result, config=make_config((waiver("target_proxy", "a"),)))
     assert result.to_dict() == before
 
 
@@ -650,7 +655,9 @@ def test_the_json_has_every_field_of_requirement_13_2() -> None:
         *clean_checks()[2:],
     )
     verdict = build(
-        audit_result(checks), FAILED_CANARY, make_config((waiver("target_proxy"),))
+        audit_result(checks),
+        FAILED_CANARY,
+        make_config((waiver("target_proxy", "a"),)),
     )
     raw = json.loads(to_json(verdict))
 

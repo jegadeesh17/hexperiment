@@ -1,13 +1,14 @@
 import numpy as np
 import pandas as pd
 import pytest
-from hypothesis import assume, given
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 from sklearn.metrics import roc_auc_score
 
 from hexperiment.checks.target_proxy import check_target_proxy, standalone_score
 from hexperiment.config import SplitConfig
 from hexperiment.data import split_frame
+from hexperiment.errors import HexInputError
 from hexperiment.models import CheckResult, Outcome, Severity
 
 
@@ -119,12 +120,14 @@ def test_a_numeric_score_is_the_larger_of_auc_and_one_minus_auc() -> None:
     assert score(train.assign(f=0.0), test) == pytest.approx(1 - auc)
 
 
-def test_a_numeric_score_ignores_rows_with_a_missing_value() -> None:
+def test_a_numeric_score_counts_rows_with_a_missing_value_as_one_tied_group() -> None:
+    # Present values 0.1 (class 0) and 0.9 (class 1); the two missing rows, one of
+    # each class, tie at the bottom or at the top. Both rankings give 2.5 / 4.
     train = pd.DataFrame({"f": [0.0, 1.0], "y": [0, 1]})
     test = pd.DataFrame(
         {"f": [0.1, 0.9, np.nan, np.nan], "y": [0, 1, 1, 0]},
     )
-    assert score(train, test) == 1.0
+    assert score(train, test) == 0.625
 
 
 def test_infinite_values_are_ordinary_extremes() -> None:
@@ -226,13 +229,175 @@ def test_a_test_feature_that_is_always_missing_is_skipped() -> None:
     assert score(train, test) is None
 
 
-def test_a_numeric_feature_with_one_class_left_after_dropping_missing_is_skipped() -> (
-    None
-):
+def test_a_numeric_feature_with_a_missing_value_for_each_class_is_not_skipped() -> None:
+    # Requirement 6.3: the missing rows are the whole class 0, so the feature
+    # separates the classes and scores 1.0 instead of being skipped.
     train = pd.DataFrame({"f": [0.0, 1.0], "y": [0, 1]})
     test = pd.DataFrame({"f": [0.1, 0.2, np.nan, np.nan], "y": [1, 1, 0, 0]})
-    assert score(train, test) is None
-    assert check(train, test, auc_max=0.5).outcome is Outcome.PASSED
+    assert score(train, test) == 1.0
+    (finding,) = check(train, test).findings
+    assert finding.location == "f"
+    assert finding.evidence["score"] == 1.0
+
+
+@pytest.mark.parametrize("filled_class", [1, 0], ids=["lowest", "highest"])
+def test_a_feature_that_is_missing_for_one_class_only_is_flagged_either_way(
+    filled_class: int,
+) -> None:
+    # Missing rows are the other class, ranked lowest (class 1 filled in) or
+    # highest (class 0 filled in); both rankings are tried (Requirement 6.1).
+    train, test = noisy_frames(seed=4)
+
+    def fill(frame: pd.DataFrame) -> pd.Series:
+        return frame["clean"].where(frame["y"] == filled_class)
+
+    result = check(train.assign(f=fill(train)), test.assign(f=fill(test)))
+    assert [f.location for f in result.findings] == ["f"]
+    assert result.findings[0].evidence["score"] == 1.0
+
+
+def test_partly_missing_independent_noise_is_not_flagged() -> None:
+    train, test = noisy_frames(n=400, seed=5)
+    gen = np.random.default_rng(50)
+
+    def holes(frame: pd.DataFrame) -> pd.Series:
+        return frame["clean"].mask(gen.random(len(frame)) < 0.3)
+
+    train, test = train.assign(f=holes(train)), test.assign(f=holes(test))
+    assert test["f"].isna().any()
+    assert score(train, test) < 0.65
+    assert check(train, test).findings == ()
+
+
+def test_a_single_class_test_target_is_an_input_error_not_a_skip() -> None:
+    train = pd.DataFrame({"f": [0.0, 1.0, 2.0], "y": [0, 1, 0]})
+    test = pd.DataFrame({"f": [0.0, 1.0, 2.0], "y": [1, 1, 1]})
+    with pytest.raises(HexInputError, match="single class"):
+        score(train, test)
+
+
+# --- datetime and timedelta features (Requirement 6.1) --------------------------------
+
+
+def day_offsets(frame: pd.DataFrame, seed: int) -> pd.Series:
+    """Days 0 to 19 for class 0 and days 30 to 49 for class 1."""
+    gen = np.random.default_rng(seed)
+    days = frame["y"].to_numpy() * 30 + gen.integers(0, 20, size=len(frame))
+    return pd.Series(days, index=frame.index, dtype="float64")
+
+
+@pytest.mark.parametrize("tz", [None, "UTC", "Europe/Paris", "Asia/Kolkata"])
+def test_a_datetime_that_separates_the_classes_is_flagged(tz: str | None) -> None:
+    train, test = noisy_frames(seed=6)
+
+    def stamps(frame: pd.DataFrame) -> pd.Series:
+        when = pd.Timestamp("2024-01-01") + pd.to_timedelta(day_offsets(frame, 1), "D")
+        return when if tz is None else when.dt.tz_localize(tz)
+
+    train, test = train.assign(f=stamps(train)), test.assign(f=stamps(test))
+    assert (test["f"].dt.tz is None) == (tz is None)
+    assert score(train, test) == 1.0
+    assert [f.location for f in check(train, test).findings] == ["f"]
+
+
+def test_a_datetime_with_a_missing_value_for_one_class_is_flagged() -> None:
+    train, test = noisy_frames(seed=6)
+
+    def stamps(frame: pd.DataFrame) -> pd.Series:
+        when = pd.Timestamp("2024-01-01") + pd.to_timedelta(day_offsets(frame, 2), "D")
+        return when.where(frame["y"] == 1)  # NaT for class 0
+
+    train, test = train.assign(f=stamps(train)), test.assign(f=stamps(test))
+    assert test["f"].isna().any()
+    assert score(train, test) == 1.0
+
+
+def test_datetimes_one_nanosecond_apart_are_still_ordered() -> None:
+    # Float64 cannot tell these apart (they are about 1.7e18 ns from the epoch).
+    base = pd.Timestamp("2024-01-01").as_unit("ns")
+    stamps = [base + pd.Timedelta(nanoseconds=i % 2) for i in range(8)]
+    frame = pd.DataFrame({"f": stamps, "y": [0, 1] * 4})
+    assert score(frame, frame) == 1.0
+
+
+def test_a_timedelta_that_separates_the_classes_is_flagged() -> None:
+    train, test = noisy_frames(seed=6)
+
+    def gaps(frame: pd.DataFrame) -> pd.Series:
+        return pd.to_timedelta(day_offsets(frame, 3), "D")
+
+    train, test = train.assign(f=gaps(train)), test.assign(f=gaps(test))
+    assert test["f"].dtype.kind == "m"
+    assert score(train, test) == 1.0
+    assert [f.location for f in check(train, test).findings] == ["f"]
+
+
+def test_an_independent_datetime_is_not_flagged() -> None:
+    train, test = noisy_frames(n=400, seed=8)
+    gen = np.random.default_rng(80)
+
+    def stamps(frame: pd.DataFrame) -> pd.Series:
+        days = pd.Series(gen.integers(0, 365, size=len(frame)), index=frame.index)
+        return pd.Timestamp("2024-01-01") + pd.to_timedelta(days, "D")
+
+    train, test = train.assign(f=stamps(train)), test.assign(f=stamps(test))
+    assert check(train, test).findings == ()
+
+
+# --- numeric codes (Requirement 6.1) --------------------------------------------------
+
+
+def coded_frames(
+    positive: list[int], negative: list[int], n: int = 200, seed: int = 9
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    gen = np.random.default_rng(seed)
+
+    def build() -> pd.DataFrame:
+        y = gen.integers(0, 2, size=n)
+        f = np.where(y == 1, gen.choice(positive, size=n), gen.choice(negative, size=n))
+        return pd.DataFrame({"f": f, "y": y})
+
+    return build(), build()
+
+
+def test_integer_codes_1_and_3_positive_and_2_and_4_negative_are_flagged() -> None:
+    train, test = coded_frames([1, 3], [2, 4])
+    # As ordered values the codes only reach AUC 0.75; the category score is 1.0.
+    assert _value_only_score(test) < 0.95
+    assert score(train, test) == 1.0
+    assert [f.location for f in check(train, test).findings] == ["f"]
+
+
+def _value_only_score(test: pd.DataFrame) -> float:
+    auc = roc_auc_score(test["y"], test["f"])
+    return max(auc, 1 - auc)
+
+
+@pytest.mark.parametrize(("levels", "flagged"), [(50, True), (51, False)])
+def test_the_category_score_applies_up_to_50_distinct_numeric_values(
+    levels: int, flagged: bool
+) -> None:
+    # The class is the parity of the code, so the order of the codes says little.
+    codes = np.tile(np.arange(levels), 6)
+    frame = pd.DataFrame({"f": codes, "y": codes % 2})
+    assert _value_only_score(frame) < 0.6
+    assert (check(frame, frame).outcome is Outcome.FAILED) is flagged
+
+
+@pytest.mark.parametrize("numeric", [True, False], ids=["numeric", "string"])
+def test_a_high_cardinality_id_column_is_not_flagged(numeric: bool) -> None:
+    train, test = noisy_frames(n=300, seed=7)
+    ids = np.random.default_rng(70).permutation(2 * len(train))
+
+    def column(positions: slice) -> pd.Series | list[str]:
+        chosen = ids[positions]
+        return chosen if numeric else [f"user-{i}" for i in chosen]
+
+    train = train.assign(f=column(slice(0, len(train))))
+    test = test.assign(f=column(slice(len(train), None)))
+    assert test["f"].nunique() == len(test)
+    assert score(train, test) < 0.6
+    assert check(train, test).findings == ()
 
 
 def test_a_feature_with_a_low_score_is_not_flagged() -> None:
@@ -308,30 +473,44 @@ def test_a_feature_equal_to_the_target_is_always_detected(
 
 
 feature_values = st.tuples(
-    st.one_of(st.none(), st.integers(-3, 3).map(float)),
-    st.sampled_from(["p", "q", "r", None]),
+    st.one_of(st.none(), st.integers(-3, 3).map(float)),  # num, with missing
+    st.sampled_from(["p", "q", "r", None]),  # cat, with missing
+    st.one_of(st.none(), st.integers(1, 4)),  # code, nullable integer
+    st.one_of(st.none(), st.integers(0, 4)),  # day, for the datetime columns
+    st.one_of(st.none(), st.integers(0, 4)),  # gap, for the timedelta column
     st.integers(0, 1),
 )
+REORDER_FEATURES = ["num", "cat", "code", "when", "when_tz", "gap"]
 
 
+def reorder_frame(rows: list[tuple]) -> pd.DataFrame:
+    df = pd.DataFrame(rows, columns=["num", "cat", "code", "day", "gap_days", "y"])
+    days = df.pop("day").astype("float64")
+    when = pd.Timestamp("2024-01-01") + pd.to_timedelta(days, "D")
+    df["num"] = df["num"].astype(float)
+    df["code"] = df["code"].astype("Int64")
+    df["when"] = when
+    df["when_tz"] = when.dt.tz_localize("Asia/Kolkata")
+    df["gap"] = pd.to_timedelta(df.pop("gap_days").astype("float64"), "D")
+    return df
+
+
+@settings(max_examples=30, deadline=None)
 @given(
     train=st.lists(feature_values, min_size=2, max_size=25),
     test=st.lists(feature_values, min_size=2, max_size=25),
-    auc_max=st.sampled_from([0.5, 0.75, 0.95]),
     order=st.randoms(use_true_random=False),
 )
 def test_reordering_rows_never_changes_the_result(
-    train: list[tuple], test: list[tuple], auc_max: float, order
+    train: list[tuple], test: list[tuple], order
 ) -> None:
-    def build(rows: list[tuple]) -> pd.DataFrame:
-        df = pd.DataFrame(rows, columns=["num", "cat", "y"])
-        df["num"] = df["num"].astype(float)
-        return df
+    assume(0 in {row[-1] for row in test} and 1 in {row[-1] for row in test})
 
     def run(train_rows: list[tuple], test_rows: list[tuple]):
-        tr, te = build(train_rows), build(test_rows)
-        scores = {f: score(tr, te, f) for f in ("num", "cat")}
-        return scores, check(tr, te, ["num", "cat"], auc_max)
+        tr, te = reorder_frame(train_rows), reorder_frame(test_rows)
+        # With auc_max = 0 every scored feature is reported, so the findings carry
+        # the score of each feature and a skipped feature is the one that is absent.
+        return check(tr, te, REORDER_FEATURES, auc_max=0.0)
 
     expected = run(train, test)
     shuffled_train, shuffled_test = train[:], test[:]

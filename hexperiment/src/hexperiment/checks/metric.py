@@ -18,6 +18,9 @@ FIX = (
 
 _EVIDENCE_DECIMALS = 6
 
+# A metric above this value is too good whatever the threshold (Requirement 9.3).
+TOO_GOOD_CAP = 0.99
+
 
 def compute_metric(y_true: NDArray[np.bool_], y_score: NDArray[np.float64]) -> float:
     """Return the ROC AUC of ``y_score`` against ``y_true`` (Requirement 9.1)."""
@@ -41,13 +44,15 @@ def check_metric(
     """Apply the threshold and report a metric far above it as a warning.
 
     The metric passes when ``value >= threshold`` (Requirement 9.2). A value above
-    ``threshold + too_good_margin`` also yields a ``warning`` (Requirement 9.3).
+    the lower of ``threshold + too_good_margin`` and ``TOO_GOOD_CAP`` also yields a
+    ``warning`` (Requirement 9.3).
     """
     value = float(value)
     result = MetricResult(
         name=name, value=value, threshold=threshold, passed=value >= threshold
     )
-    if not value > threshold + too_good_margin:
+    limit = min(threshold + too_good_margin, TOO_GOOD_CAP)
+    if not value > limit:
         return result, ()
     finding = Finding(
         check=CHECK,
@@ -55,8 +60,8 @@ def check_metric(
         severity=Severity.WARNING,
         location=LOCATION,
         message=(
-            f"too good to be true: {name} {value:.4f} is more than "
-            f"{too_good_margin:g} above the threshold {threshold:g}"
+            f"too good to be true: {name} {value:.4f} is above {limit:.4f}, the "
+            f"most that the threshold {threshold:g} and the margin allow"
         ),
         evidence={
             "value": round(value, _EVIDENCE_DECIMALS),

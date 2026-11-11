@@ -356,6 +356,13 @@ def _parse_waiver(item: Mapping[str, Any], index: int, source: Path) -> Waiver:
                 f'check = "target_proxy", but check is {check!r}.',
                 "Remove the column key from this waiver.",
             )
+    elif check == "target_proxy":
+        raise HexInputError(
+            f"{label}.column is missing from {source}: a target_proxy waiver must "
+            "name the column it covers.",
+            "Add `column = ...` with the name of the feature to this waiver, so "
+            "that it cannot cover a leaking column that appears later.",
+        )
     return Waiver(check=check, reason=reason, column=column)
 
 

@@ -115,6 +115,33 @@ def test_a_zero_margin_flags_any_value_above_the_threshold() -> None:
     assert len(check_metric(0.81, "roc_auc", 0.8, 0.0)[1]) == 1
 
 
+def warns(value: float, threshold: float, margin: float) -> bool:
+    return bool(check_metric(value, "roc_auc", threshold, margin)[1])
+
+
+def test_a_perfect_auc_warns_when_threshold_plus_margin_exceeds_the_cap() -> None:
+    # 0.9 + 0.15 = 1.05, so the limit is 0.99 and a perfect AUC is above it.
+    result, findings = check_metric(1.0, "roc_auc", 0.9, 0.15)
+    assert result.passed is True
+    (finding,) = findings
+    assert finding.message.startswith("too good to be true")
+    assert finding.evidence == {"value": 1.0, "threshold": 0.9}
+
+
+def test_an_auc_of_exactly_the_cap_does_not_warn() -> None:
+    assert not warns(0.99, 0.9, 0.15)
+    assert warns(float(np.nextafter(0.99, 1.0)), 0.9, 0.15)
+
+
+def test_the_cap_does_not_lower_a_limit_that_is_already_below_it() -> None:
+    # 0.7 + 0.15 = 0.85 is below 0.99, so 0.85 stays the limit.
+    limit = 0.7 + 0.15
+    assert not warns(0.84, 0.7, 0.15)
+    assert not warns(limit, 0.7, 0.15)
+    assert warns(0.86, 0.7, 0.15)
+    assert warns(float(np.nextafter(limit, 1.0)), 0.7, 0.15)
+
+
 def test_evidence_is_rounded_to_six_decimals_and_the_value_is_not() -> None:
     result, findings = check_metric(0.987654321, "roc_auc", 0.8, 0.1)
     assert result.value == 0.987654321
@@ -125,16 +152,19 @@ def test_evidence_is_rounded_to_six_decimals_and_the_value_is_not() -> None:
 
 
 @given(
-    value=st.floats(0.0, 1.0),
-    threshold=st.floats(0.01, 0.99),
-    margin=st.floats(0.0, 0.5),
+    value=st.one_of(
+        st.floats(0.0, 1.0),
+        st.sampled_from([0.99, float(np.nextafter(0.99, 1.0)), 0.995, 1.0]),
+    ),
+    threshold=st.one_of(st.floats(0.01, 0.99), st.sampled_from([0.8, 0.9, 0.95])),
+    margin=st.one_of(st.floats(0.0, 0.5), st.sampled_from([0.15, 0.25])),
 )
 def test_the_gate_and_the_warning_follow_the_comparisons(
     value: float, threshold: float, margin: float
 ) -> None:
     result, findings = check_metric(value, "roc_auc", threshold, margin)
     assert result.passed == (value >= threshold)
-    assert bool(findings) == (value > threshold + margin)
+    assert bool(findings) == (value > min(threshold + margin, 0.99))
     assert result.value == value
     assert result.threshold == threshold
 

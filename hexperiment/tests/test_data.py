@@ -1582,7 +1582,7 @@ REJECTED_AUDIT_INPUTS = {
     ),
     "y_score is None": (
         lambda: {"y_score": None},
-        ["y_score must be one-dimensional"],
+        ["y_score is missing", "None", "predict_proba(X)[:, 1]", "y_score"],
     ),
     # Requirement 4.5
     "feature not in either frame": (
@@ -1854,6 +1854,14 @@ REJECTED_SNAPSHOT_INPUTS = {
         lambda: {"features": "x"},
         ["features is the string 'x'"],
     ),
+    "features is an empty list": (
+        lambda: {"features": []},
+        ["features is empty", "features=['age', 'plan']"],
+    ),
+    "features is an empty tuple": (
+        lambda: {"features": ()},
+        ["features is empty"],
+    ),
     "y_score_train too short": (
         lambda: {"y_score_train": SCORES_TRAIN[:7]},
         ["y_score_train has 7 value(s) but train has 8 row(s)"],
@@ -1896,6 +1904,15 @@ def test_validate_snapshot_inputs_rejects_training_side_problems(
     for needle in needles:
         assert needle in str(error.value), (needle, str(error.value))
     assert error.value.fix
+
+
+def test_an_empty_features_list_has_the_same_message_in_both_modes() -> None:
+    with pytest.raises(HexInputError) as normal:
+        run_validate(features=[])
+    with pytest.raises(HexInputError) as snapshot:
+        validate_snapshot_inputs(**snapshot_args(features=[]))
+    assert str(snapshot.value) == str(normal.value)
+    assert snapshot.value.fix == normal.value.fix
 
 
 def test_validate_snapshot_inputs_returns_features_and_a_score_copy() -> None:

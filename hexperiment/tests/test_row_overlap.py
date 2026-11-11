@@ -7,6 +7,7 @@ from hypothesis import strategies as st
 from hexperiment.checks.row_overlap import check_row_overlap
 from hexperiment.config import SplitConfig
 from hexperiment.data import split_frame
+from hexperiment.errors import HexInputError
 from hexperiment.models import CheckResult, Outcome, Severity
 
 FEATURES = ["a", "b"]
@@ -170,6 +171,158 @@ def test_the_arguments_are_not_modified() -> None:
     pd.testing.assert_frame_equal(test, before[1])
 
 
+# --- columns with different or unusual dtypes (Requirement 5.1) ------------------
+
+
+def keyed(train_a: object, test_a: object) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Frames that differ only in column ``a``; ``b`` and ``y`` are constant."""
+
+    def build(values: object) -> pd.DataFrame:
+        return pd.DataFrame({"a": values, "b": "p", "y": 1})
+
+    return build(train_a), build(test_a)
+
+
+def overlap_count(train: pd.DataFrame, test: pd.DataFrame) -> int:
+    result = check(train, test)
+    return result.findings[0].evidence["rows"] if result.findings else 0
+
+
+def stamps(*text: str, tz: str | None = None, unit: str = "ns") -> pd.DatetimeIndex:
+    index = pd.to_datetime(list(text)).as_unit(unit)
+    return index if tz is None else index.tz_localize(tz)
+
+
+MIXED_DTYPE_CASES = {
+    "bool": ([True, True], [True, False], 1),
+    "nullable boolean": (
+        pd.array([True, None], dtype="boolean"),
+        pd.array([True, None, False], dtype="boolean"),
+        2,
+    ),
+    "categorical with other categories": (
+        pd.Categorical(["x", "y"]),
+        pd.Categorical(["x", "z"]),
+        1,
+    ),
+    "categorical vs text": (pd.Categorical(["x", "y"]), ["x", "z", "y"], 2),
+    "text vs categorical": (["x", "y"], pd.Categorical(["y", "z"]), 1),
+    "categorical with missing": (
+        pd.Categorical(["x", None]),
+        pd.Categorical(["x", None, "y"]),
+        2,
+    ),
+    "nullable string": (
+        pd.array(["x", None], dtype="string"),
+        pd.array(["x", None, "q"], dtype="string"),
+        2,
+    ),
+    "nullable string vs object": (
+        pd.array(["x", None], dtype="string"),
+        pd.Series(["x", None, "q"], dtype=object),
+        2,
+    ),
+    "tz-aware, same zone": (
+        stamps("2024-01-01", "2024-01-02", tz="Europe/Paris"),
+        stamps("2024-01-01", "2024-01-09", tz="Europe/Paris"),
+        1,
+    ),
+    "tz-aware, other zone, same instant": (
+        stamps("2024-01-01 00:00", tz="Europe/Paris"),
+        stamps("2023-12-31 23:00", "2024-01-01 00:00", tz="UTC"),
+        1,
+    ),
+    "tz-aware with NaT": (
+        stamps("2024-01-01", None, tz="UTC"),
+        stamps("2024-01-01", None, "2024-02-02", tz="UTC"),
+        2,
+    ),
+    "naive datetimes, other units": (
+        stamps("2024-01-01", "2024-01-02", unit="us"),
+        stamps("2024-01-02", "2024-03-03", unit="ns"),
+        1,
+    ),
+    "int64 vs float64": ([1, 2, 3], [1.0, 3.0, 4.5], 2),
+    "float64 vs int64": ([1.0, 2.5], [1, 2], 1),
+    "nullable Int64 vs float64": (
+        pd.array([1, None], dtype="Int64"),
+        [1.0, np.nan, 7.0],
+        2,
+    ),
+    "object numbers vs int64": (pd.Series([1, 2], dtype=object), [1, 3], 1),
+    "object text vs int64": (pd.Series(["1", "2"], dtype=object), [1, 2], 0),
+    "object text vs datetimes": (["2024-01-01"], stamps("2024-01-01"), 0),
+    "timedeltas": (
+        pd.to_timedelta([1, 2], unit="h"),
+        pd.to_timedelta([2, 3], unit="h"),
+        1,
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    ("train_a", "test_a", "expected"),
+    MIXED_DTYPE_CASES.values(),
+    ids=MIXED_DTYPE_CASES.keys(),
+)
+def test_columns_with_unusual_or_different_dtypes_are_compared_by_value(
+    train_a: object, test_a: object, expected: int
+) -> None:
+    train, test = keyed(train_a, test_a)
+    assert overlap_count(train, test) == expected
+
+
+def test_an_int64_value_and_an_equal_float64_value_count_as_overlap() -> None:
+    train, test = keyed([1, 2, 3], [1.0, 3.0, 4.5])
+    assert train["a"].dtype != test["a"].dtype
+    assert check(train, test).findings[0].evidence == {
+        "rows": 2,
+        "test_rows": 3,
+        "fraction": round(2 / 3, 6),
+    }
+
+
+@pytest.mark.parametrize("naive_in_train", [True, False], ids=["train", "test"])
+def test_naive_and_tz_aware_datetimes_raise_an_input_error(
+    naive_in_train: bool,
+) -> None:
+    naive, aware = stamps("2024-01-01"), stamps("2024-01-01", tz="UTC")
+    train, test = keyed(*((naive, aware) if naive_in_train else (aware, naive)))
+    with pytest.raises(HexInputError) as caught:
+        check(train, test)
+    message = str(caught.value)
+    assert "'a'" in message
+    assert "timezone-naive" in message
+    assert str(train["a"].dtype) in message
+    assert str(test["a"].dtype) in message
+    assert caught.value.fix
+
+
+def test_values_that_cannot_be_hashed_raise_an_input_error_naming_the_column() -> None:
+    train, test = keyed([[1], [2]], [[1], [3]])
+    with pytest.raises(HexInputError) as caught:
+        check(train, test)
+    message = str(caught.value)
+    assert "'a'" in message
+    assert "'b'" not in message
+    assert "train dtype object, test dtype object" in message
+    assert caught.value.fix
+
+
+def test_unhashable_values_in_one_frame_name_both_dtypes() -> None:
+    train, test = keyed([1, 2], [[1], [3]])
+    with pytest.raises(HexInputError, match="train dtype object, test dtype object"):
+        check(train, test)
+
+
+def test_the_key_frames_are_not_modified_by_the_dtype_handling() -> None:
+    train, test = keyed(pd.Categorical(["x", "y"]), [1.5, 2.5])
+    before = (train.copy(deep=True), test.copy(deep=True))
+    check(train, test)
+    pd.testing.assert_frame_equal(train, before[0])
+    pd.testing.assert_frame_equal(test, before[1])
+
+
 # --- a clean synthetic dataset (Requirement 17.4) ------------------------------------
 
 
@@ -235,3 +388,19 @@ def test_reordering_rows_never_changes_the_result(
     assert (expected.outcome is Outcome.FAILED) == (
         overlapping / len(test) > max_fraction
     )
+
+
+@given(
+    train=st.lists(row, min_size=1, max_size=12),
+    test=st.lists(row, min_size=1, max_size=12),
+)
+def test_the_dtype_of_a_column_never_changes_the_count(
+    train: list[tuple], test: list[tuple]
+) -> None:
+    same = check(frame(train), frame(test))
+    as_float = check(frame(train), frame(test).astype({"a": "float64", "b": "float64"}))
+    as_category = check(frame(train).astype({"a": "category"}), frame(test))
+    as_nullable = check(frame(train), frame(test).astype({"a": "Int64"}))
+    assert as_float == same
+    assert as_category == same
+    assert as_nullable == same

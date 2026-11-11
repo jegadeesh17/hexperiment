@@ -366,6 +366,7 @@ def validate_snapshot_inputs(
         _require_length(scores_train, "y_score_train", len(train), "train")
         _require_probabilities(scores_train, "y_score_train")
     names = _feature_names(features)
+    _require_some_features(names)
     _require_features(names, (("train", train),))
     return SnapshotInputs(features=names, y_score_train=scores_train)
 
@@ -494,6 +495,13 @@ def _require_target_values(frame: pd.DataFrame, label: str, column: str) -> None
 
 def _as_scores(values: ArrayLike1D, name: str) -> NDArray[np.float64]:
     """Return ``values`` as a one-dimensional float64 copy."""
+    if values is None:
+        raise HexInputError(
+            f"{name} is missing (None), so there are no predicted probabilities "
+            "to audit.",
+            f"Pass {name} as the predicted probability of the positive class, one "
+            f"per row, for example model.predict_proba(X)[:, 1] as {name}.",
+        )
     try:
         if isinstance(values, pd.Series):
             array = values.to_numpy(dtype=np.float64, na_value=np.nan)

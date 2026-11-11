@@ -148,7 +148,8 @@ def test_config_values_reach_the_checks() -> None:
     )
     assert result.checks[0].outcome is Outcome.PASSED  # 20 of 20 is not above 1.0
     assert result.checks[1].outcome is Outcome.FAILED  # a score of 1.0 equals 1.0
-    assert result.extra_findings == ()  # 1.0 is not above 0.7 + 0.5
+    # Margin 0.5 would allow up to 1.2, but the 0.99 cap applies (Requirement 9.3).
+    assert [f.check for f in result.extra_findings] == ["metric"]
 
 
 def test_the_result_holds_only_json_values() -> None:

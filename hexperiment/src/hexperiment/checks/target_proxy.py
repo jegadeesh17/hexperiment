@@ -9,6 +9,7 @@ import pandas as pd
 from numpy.typing import NDArray
 from sklearn.metrics import roc_auc_score
 
+from hexperiment.errors import HexInputError
 from hexperiment.models import CheckResult, Finding, Outcome, Severity
 
 CHECK = "target_proxy"
@@ -17,7 +18,20 @@ FIX = (
     "check whether this column is recorded after the outcome; if so, drop it"
 )
 
+# A numeric feature with at most this many distinct non-missing test values also
+# gets the category score (Requirement 6.1).
+MAX_CATEGORY_LEVELS = 50
+
 _EVIDENCE_DECIMALS = 6
+
+# numpy dtype kinds, which pandas extension dtypes also report.
+_KIND_BOOL = "b"
+_KIND_DATETIME = "M"
+_KIND_TIMEDELTA = "m"
+_KINDS_NUMERIC = frozenset("iuf")
+_VALUE_KINDS = frozenset(
+    {_KIND_BOOL, _KIND_DATETIME, _KIND_TIMEDELTA, *_KINDS_NUMERIC}
+)
 
 
 def standalone_score(
@@ -30,22 +44,34 @@ def standalone_score(
 ) -> float | None:
     """Score how well ``feature`` alone predicts the target on the test rows.
 
-    Numeric and boolean features: ``max(AUC, 1 - AUC)`` of the raw value against
-    the test target, with rows that have a missing value left out. Other dtypes:
-    the AUC of the training-set positive rate of each category applied to the test
-    rows; unseen categories and missing values get the overall training positive
-    rate (Requirement 6.1). Returns ``None`` when the feature has a single unique
-    value in the test rows, or when fewer than two classes are left to rank
-    (Requirement 6.3). ``target`` names the label column; the labels themselves
-    arrive as ``y_true_train`` and ``y_true_test``.
+    Numeric, boolean, datetime and timedelta features get the value score:
+    ``max(AUC, 1 - AUC)`` of the raw value against the test target, computed once
+    with missing values ranked lowest and once ranked highest, keeping the higher
+    result. Other features get the category score: the AUC of the training-set
+    positive rate of each category applied to the test rows, where unseen
+    categories and missing values get the training positive rate. A numeric
+    feature with at most ``MAX_CATEGORY_LEVELS`` distinct non-missing test values
+    gets both scores and keeps the higher (Requirement 6.1).
+
+    Returns ``None`` only when the feature has a single unique value in the test
+    rows, counting a missing value as a value (Requirement 6.3). ``target`` names
+    the label column; the labels themselves arrive as ``y_true_train`` and
+    ``y_true_test``. A test target with one class raises ``HexInputError``,
+    because no feature may be skipped for that reason (Requirements 4.3, 6.3).
     """
     test_values = test[feature]
-    if test_values.nunique(dropna=False) < 2:
+    if test_values.nunique(dropna=False) == 1:
         return None
-    train_values = train[feature]
-    if _is_numeric(train_values) and _is_numeric(test_values):
-        return _numeric_score(test_values, y_true_test)
-    return _category_score(train_values, test_values, y_true_train, y_true_test)
+    _require_two_classes(y_true_test, target)
+    kind = _kind(test_values)
+    scores: list[float] = []
+    if kind is not None:
+        scores.append(_value_score(test_values, kind, y_true_test))
+    if kind is None or _few_levels(test_values, kind):
+        scores.append(
+            _category_score(train[feature], test_values, y_true_train, y_true_test)
+        )
+    return max(scores)
 
 
 def check_target_proxy(
@@ -88,32 +114,81 @@ def _finding(feature: str, score: float, auc_max: float) -> Finding:
     )
 
 
-def _is_numeric(values: pd.Series) -> bool:
-    return bool(pd.api.types.is_numeric_dtype(values.dtype)) and not (
-        pd.api.types.is_complex_dtype(values.dtype)
+def _require_two_classes(y_true_test: NDArray[np.bool_], target: str) -> None:
+    if y_true_test.any() and not y_true_test.all():
+        return
+    raise HexInputError(
+        f"the test target {target!r} has a single class, so no feature can be "
+        "scored against it.",
+        "Make sure the test rows hold both classes, and that [target] positive "
+        "in hex.toml is a value that occurs in the target column.",
     )
 
 
-def _has_both_classes(y_true: NDArray[np.bool_]) -> bool:
-    return bool(y_true.any() and not y_true.all())
+# --- the value score ----------------------------------------------------------------
 
 
-def _numeric_score(
-    values: pd.Series, y_true_test: NDArray[np.bool_]
-) -> float | None:
-    """``max(AUC, 1 - AUC)`` of the raw values, leaving out missing values.
+def _kind(values: pd.Series) -> str | None:
+    """Return the dtype kind when the feature gets the value score, else ``None``.
+
+    Categorical, string, object and complex features have other kinds and get the
+    category score only.
+    """
+    dtype = values.dtype
+    if isinstance(dtype, pd.CategoricalDtype):
+        return None
+    kind = getattr(dtype, "kind", None)
+    return kind if kind in _VALUE_KINDS else None
+
+
+def _few_levels(values: pd.Series, kind: str) -> bool:
+    """True for a numeric feature with at most ``MAX_CATEGORY_LEVELS`` levels."""
+    return kind in _KINDS_NUMERIC and values.nunique() <= MAX_CATEGORY_LEVELS
+
+
+def _value_score(
+    values: pd.Series, kind: str, y_true_test: NDArray[np.bool_]
+) -> float:
+    """``max(AUC, 1 - AUC)`` of the raw values, with missing values ranked both ways.
 
     AUC depends only on the order of the values, so the values are replaced by
-    their ranks first: ties stay ties and infinite values cannot fail.
+    their ranks first: ties stay ties, infinite values cannot fail, and integer
+    nanosecond values lose no precision. Missing values form one tied group,
+    placed below every value and then above every value; the higher score wins
+    (Requirement 6.1).
     """
-    x = values.to_numpy(dtype=np.float64, na_value=np.nan)
-    present = ~np.isnan(x)
-    y = y_true_test[present]
-    if not _has_both_classes(y):
-        return None
-    ranks = pd.Series(x[present]).rank(method="average").to_numpy()
-    auc = float(roc_auc_score(y, ranks))
-    return max(auc, 1.0 - auc)
+    present = values.notna().to_numpy(dtype=bool)
+    ranks = _sortable(values[present], kind).rank(method="average")
+    ranks = ranks.to_numpy(dtype=np.float64)
+    best = 0.0
+    for missing_rank in (0.0, float(len(ranks) + 1)):
+        full = np.full(len(values), missing_rank)
+        full[present] = ranks
+        auc = float(roc_auc_score(y_true_test, full))
+        best = max(best, auc, 1.0 - auc)
+    return best
+
+
+def _sortable(present: pd.Series, kind: str) -> pd.Series:
+    """Map non-missing values to a numpy dtype that keeps their order exactly.
+
+    Datetimes go to UTC and then to ``int64`` nanoseconds, timedeltas to ``int64``
+    nanoseconds, booleans to 0 and 1 (Requirement 6.1).
+    """
+    if kind == _KIND_DATETIME:
+        if present.dt.tz is not None:
+            present = present.dt.tz_convert("UTC").dt.tz_localize(None)
+        return present.astype("datetime64[ns]").astype(np.int64)
+    if kind == _KIND_TIMEDELTA:
+        return present.astype("timedelta64[ns]").astype(np.int64)
+    if kind == _KIND_BOOL:
+        return present.astype(np.int64)
+    if kind == "f":
+        return present.astype(np.float64)
+    return present.astype(getattr(present.dtype, "numpy_dtype", present.dtype))
+
+
+# --- the category score -------------------------------------------------------------
 
 
 def _category_score(
@@ -121,14 +196,12 @@ def _category_score(
     test_values: pd.Series,
     y_true_train: NDArray[np.bool_],
     y_true_test: NDArray[np.bool_],
-) -> float | None:
+) -> float:
     """AUC of the training positive rate of each category, applied to test rows.
 
     Rates are integer ratios (positives over count), so they are exact and a
     reordering of the rows cannot change a tie (Requirement 6.4).
     """
-    if not _has_both_classes(y_true_test):
-        return None
     training = pd.DataFrame(
         {
             "value": train_values.astype(object).to_numpy(),

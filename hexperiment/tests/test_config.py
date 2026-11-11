@@ -308,8 +308,21 @@ def test_only_three_checks_can_be_waived(check: str) -> None:
 
 @pytest.mark.parametrize("check", ["row_overlap", "target_proxy", "temporal"])
 def test_waivable_checks_are_accepted(check: str) -> None:
-    config = parse(with_waiver(check=check, reason="A long enough reason."))
-    assert config.waivers == (Waiver(check, "A long enough reason."),)
+    column = {"column": "age"} if check == "target_proxy" else {}
+    config = parse(with_waiver(check=check, reason="A long enough reason.", **column))
+    assert config.waivers == (
+        Waiver(check, "A long enough reason.", column.get("column")),
+    )
+
+
+def test_a_target_proxy_waiver_without_a_column_is_rejected() -> None:
+    error = rejects(
+        with_waiver(check="target_proxy", reason="A long enough reason."),
+        "waivers[1].column",
+        "target_proxy",
+    )
+    assert "name the column" in str(error)
+    assert "column = " in error.fix
 
 
 @pytest.mark.parametrize("reason", ["", "short", "   padded   ", "123456789", 12345])

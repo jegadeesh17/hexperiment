@@ -180,8 +180,8 @@ def test_the_first_split_call_does_not_depend_on_the_order_of_the_tree() -> None
     assert result.findings == ()  # the first split call is at line 2, before the mean
 
 
-def test_a_call_on_the_same_line_as_the_split_is_not_earlier() -> None:
-    result = check("train, test = split(df.fillna(df.x.mean()))\n")
+def test_an_earlier_statement_on_the_same_line_as_the_split_is_not_earlier() -> None:
+    result = check("m = df.x.mean(); train, test = split(df)\n")
     assert result.findings == ()
     assert result.outcome is Outcome.PASSED
 
@@ -195,7 +195,140 @@ def test_a_multi_line_split_call_is_dated_by_its_first_line() -> None:
         )
         """
     )
-    assert lines_of(result) == [1]
+    # Line 1 is before the split; line 3 is nested in its arguments.
+    assert lines_of(result) == [1, 3]
+    assert [f.evidence["first_split_line"] for f in result.findings] == [2, 2]
+
+
+# --- import aliases (Requirement 8.1) ------------------------------------------------
+
+ALIASED_SPLITS = {
+    "import hexperiment as hx": ("import hexperiment as hx", "hx.split(df)"),
+    "from hexperiment import split as hsplit": (
+        "from hexperiment import split as hsplit",
+        "hsplit(df)",
+    ),
+    "from sklearn.model_selection import train_test_split as tts": (
+        "from sklearn.model_selection import train_test_split as tts",
+        "tts(X, y)",
+    ),
+    "import sklearn.model_selection as ms": (
+        "import sklearn.model_selection as ms",
+        "ms.train_test_split(X, y)",
+    ),
+    "from sklearn import model_selection as ms": (
+        "from sklearn import model_selection as ms",
+        "ms.train_test_split(X, y)",
+    ),
+    "from hexperiment import split": ("from hexperiment import split", "split(df)"),
+    "import hexperiment": ("import hexperiment", "hexperiment.split(df)"),
+}
+
+
+@pytest.mark.parametrize(
+    ("statement", "call"), ALIASED_SPLITS.values(), ids=ALIASED_SPLITS.keys()
+)
+def test_an_aliased_split_call_is_the_first_split(statement: str, call: str) -> None:
+    result = check(f"{statement}\nm = df.x.mean()\ntrain, test = {call}\n")
+    assert result.outcome is Outcome.PASSED
+    assert lines_of(result) == [2]
+    assert result.findings[0].evidence == {"call": "mean", "first_split_line": 3}
+
+
+@pytest.mark.parametrize(
+    ("statement", "call"),
+    [
+        ("import hexperiment as hx", "hx.split(df)"),
+        ("from hexperiment import split as hsplit", "hsplit(df)"),
+        ("from sklearn.model_selection import train_test_split as tts", "tts(X)"),
+    ],
+)
+def test_an_aliased_split_hides_nothing_after_it(statement: str, call: str) -> None:
+    result = check(f"{statement}\ntrain, test = {call}\nm = train.x.mean()\n")
+    assert result.findings == ()
+
+
+@pytest.mark.parametrize(
+    ("statement", "call"),
+    [
+        ("import hexperiment as hx", "hx.load()"),
+        ("from hexperiment import load as hload", "hload()"),
+        ("from re import split as rsplit", "rsplit(',', text)"),
+        ("import numpy as np", "np.split(values, 3)"),
+    ],
+)
+def test_an_alias_of_something_other_than_a_split_is_not_a_split(
+    statement: str, call: str
+) -> None:
+    result = check(f"{statement}\nm = df.x.mean()\ndata = {call}\n")
+    assert result.outcome is Outcome.INCONCLUSIVE
+
+
+# --- calls nested in the arguments of the split call (Requirement 8.2) ---------------
+
+
+def test_a_call_nested_in_the_split_arguments_is_reported_like_an_earlier_call() -> (
+    None
+):
+    result = check("train, test = split(df.fillna(df.mean()))\n")
+    (finding,) = result.findings
+    assert finding.location == "train.py:1"
+    assert finding.evidence == {"call": "mean", "first_split_line": 1}
+    assert finding.severity is Severity.WARNING
+    assert finding.fix == FIX
+    assert result.outcome is Outcome.PASSED
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        "split(df.fillna(df.mean()))",
+        "hx.split(df.fillna(df.mean()))",
+        "hexperiment.split(df.fillna(df.mean()))",
+        "tts(df.fillna(df.mean()))",
+        "split(df, weights=df.x.std())",
+        "split(prep(Scaler().fit_transform(df)))",
+        "split(df.assign(z=(df.x - df.x.mean()) / df.x.std()))",
+    ],
+)
+def test_nested_suspects_are_found_for_every_split_spelling(call: str) -> None:
+    result = check(
+        "import hexperiment as hx\n"
+        "from sklearn.model_selection import train_test_split as tts\n"
+        f"train, test = {call}\n"
+    )
+    assert result.findings
+    assert set(lines_of(result)) == {3}
+    assert all(f.evidence["first_split_line"] == 3 for f in result.findings)
+
+
+def test_nested_and_earlier_calls_are_reported_in_line_order() -> None:
+    result = check(
+        """
+        m = df.x.mean()
+        train, test = split(
+            df.fillna(df.mean()),
+            weights=df.x.std(),
+        )
+        """
+    )
+    assert lines_of(result) == [1, 3, 4]
+    assert [f.evidence["call"] for f in result.findings] == ["mean", "mean", "std"]
+
+
+def test_harmless_nested_calls_are_not_reported() -> None:
+    result = check("train, test = split(df.dropna().reset_index(drop=True))\n")
+    assert result.findings == ()
+
+
+def test_calls_in_the_arguments_of_a_later_split_are_not_reported() -> None:
+    result = check(
+        """
+        train, test = split(df)
+        more, rest = split(train.fillna(train.mean()))
+        """
+    )
+    assert result.findings == ()
 
 
 # --- calls that are ignored (Requirement 8.2) ----------------------------------------

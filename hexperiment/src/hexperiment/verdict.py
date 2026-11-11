@@ -11,7 +11,13 @@ import math
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from hexperiment.canary import CanaryOutcome
+from hexperiment.canary import (
+    CANARY_CHECK,
+    DETERMINISM_CHECK,
+    PEEKING_SPIRIT,
+    SHAPESHIFTER,
+    CanaryOutcome,
+)
 from hexperiment.config import HexConfig, Waiver
 from hexperiment.errors import HexInputError
 from hexperiment.models import (
@@ -45,11 +51,6 @@ FINDING_ORDER: tuple[str, ...] = (
 
 # Only these checks can be waived (Requirements 10.7, 11.1).
 _WAIVABLE_CHECKS = frozenset({"row_overlap", "target_proxy", "temporal"})
-
-_CANARY_CHECK = "canary"
-_DETERMINISM_CHECK = "determinism"
-_CANARY_GHOST = "The Peeking Spirit"
-_DETERMINISM_GHOST = "The Shapeshifter"
 
 _WAIVER_CHECK = "waiver"
 _WAIVER_FIX = "remove this waiver from hex.toml if the finding no longer occurs"
@@ -312,9 +313,9 @@ def _summaries(
         )
         for c in result.checks
     ]
-    summaries.append(CheckSummary(_CANARY_CHECK, _CANARY_GHOST, canary.outcome))
+    summaries.append(CheckSummary(CANARY_CHECK, PEEKING_SPIRIT, canary.outcome))
     summaries.append(
-        CheckSummary(_DETERMINISM_CHECK, _DETERMINISM_GHOST, canary.determinism)
+        CheckSummary(DETERMINISM_CHECK, SHAPESHIFTER, canary.determinism)
     )
     return tuple(summaries)
 
