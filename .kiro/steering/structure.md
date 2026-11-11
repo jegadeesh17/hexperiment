@@ -17,6 +17,7 @@ hexperiment/               the skeleton: the reusable kit
     verdict.py             combines findings + metric into APPROVED / REJECTED
     card.py                writes the model card (Markdown)
     cli.py                 `hexperiment run <app_dir>`
+    console.py             print_text(), the only caller of print
   tests/
 apps/                      two applications built on the skeleton
   <app-one>/               hex.toml, fetch_data.py, train.py, runs/

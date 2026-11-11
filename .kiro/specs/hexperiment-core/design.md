@@ -49,7 +49,8 @@ flowchart TB
 
     subgraph EDGES["Modules that touch files or processes"]
         CLI["cli.py<br/>main()"]
-        AUD["auditor.py<br/>audit(), print_text()"]
+        AUD["auditor.py<br/>audit()"]
+        CON["console.py<br/>print_text()"]
         DATA["data.py<br/>load, split, validate_audit_inputs"]
         CFG["config.py<br/>load_config, current_mode"]
         CAN["canary.py<br/>executions, .hex/ protocol,<br/>snapshot comparison, control rerun"]
@@ -72,7 +73,8 @@ flowchart TB
     CLI --> CAN
     CLI --> RUNS
     CLI --> VER
-    CLI -->|"print_text"| AUD
+    CLI -->|"print_text"| CON
+    AUD -->|"print_text"| CON
 
     AUD --> CFG
     AUD --> DATA
@@ -654,7 +656,7 @@ def exit_code_for(status: Status) -> int: ...
 def main(argv: Sequence[str] | None = None) -> int: ...
 ```
 
-`main` and a standalone `audit` (which prints `format_summary` after finalizing a `fast` run) are the only functions in the package that print, and both print through the shared helper `auditor.print_text(text, file=None)` (see `auditor.py`). `cli.py` imports it from there. Its flow, in order:
+`main` and a standalone `audit` (which prints `format_summary` after finalizing a `fast` run) are the only functions in the package that print, and both print through the shared helper `console.print_text(text, file=None)` (see `console.py`). `cli.py` and `auditor.py` import it from there. Its flow, in order:
 
 1. Parse arguments. `--fast` and `--full` are a mutually exclusive group; the default is full (16.1).
 2. Check that `app_dir` is an existing directory, then call `runs.clear_app_verdict(app_dir)`, which deletes `<app_dir>/verdict.json` if it exists. This happens before anything else can fail, so every path that ends with exit code 2 leaves no app-level verdict (Resolved question 3). If `app_dir` is not a directory, print the error to stderr and return 2.
@@ -752,8 +754,6 @@ Holds `audit`, the in-script half of a run. It is the only module in the child p
 def audit(train: Frame, test: Frame, y_score: ArrayLike1D, features: Sequence[str],
           script: str | os.PathLike[str],
           y_score_train: ArrayLike1D | None = None) -> Verdict | None: ...
-
-def print_text(text: str, file: TextIO | None = None) -> None: ...
 ```
 
 Behaviour (the return value is a `Verdict` only for a standalone normal run, otherwise `None`):
@@ -765,7 +765,7 @@ Behaviour (the return value is a `Verdict` only for a standalone normal run, oth
 5. In normal mode, read the script text (an edge read as UTF-8, accepting a byte order mark; a failure becomes `None` for `check_split_order`), call `run_data_checks`, and write `result.json`.
 6. If `run_id` is set, return `None`; the parent finalizes. Otherwise wrap the result as `ExecutionReport(result, skipped_outcome(), RunMode.FAST)`, call `runs.finalize_run`, print `format_summary` through `print_text`, and return the `Verdict`.
 
-**`print_text(text, file=None)`** prints `text` and a newline to `file`, which defaults to the current `sys.stdout`. If the stream's encoding cannot represent the text (for example a legacy Windows console and a column name outside its code page), it encodes the text with `errors="replace"` and writes the bytes to the stream's buffer, so printing never raises `UnicodeEncodeError` and a finished run cannot turn into a crash. It is the only caller of `print` in the package. `cli.main` (stdout and stderr) and the standalone `audit` print through it (16.4).
+**`console.print_text(text, file=None)`** lives in `console.py`, a small module with no other imports from the package, so that `cli.py` does not depend on `auditor.py` for printing. It prints `text` and a newline to `file`, which defaults to the current `sys.stdout`. If the stream's encoding cannot represent the text (for example a legacy Windows console and a column name outside its code page), it encodes the text with `errors="replace"` and writes the bytes to the stream's buffer, so printing never raises `UnicodeEncodeError` and a finished run cannot turn into a crash. It is the only caller of `print` in the package. `cli.main` (stdout and stderr) and the standalone `audit` print through it (16.4).
 
 `audit` never modifies `train`, `test`, `y_score` or `y_score_train`: it converts scores to float64 copies and reads the frames through `.loc` and `[]` only (2.5).
 
