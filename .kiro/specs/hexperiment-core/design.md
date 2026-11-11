@@ -427,7 +427,7 @@ def check_metric(value: float, name: str, threshold: float,
 **`check_row_overlap`** (The Doppelganger)
 
 - Build the key frame `features + [target]` (a name listed twice counts once) for both sides. A column is compared as object values when its dtype differs between train and test or either side is categorical, so `1` equals `1.0` and a category equals the same text. A datetime column that is timezone-aware on one side and naive on the other raises `HexInputError`, because treating the two as different would hide a duplicate row and the check will not guess the timezone. Deduplicate train, then left-merge test onto it with an indicator column. A test row counts as overlapping when the indicator is `both`. pandas treats NaN as equal to NaN in merge keys, so two rows with the same missing values are identical. The merge is exact, so there are no hash collisions. Values that cannot be merged (unhashable objects such as lists, or types that cannot be compared) raise `HexInputError` naming the column or columns and both dtypes.
-- Evidence: `{"rows": count, "test_rows": n, "fraction": count / n}`. Error when `fraction > max_fraction`. Fix: "drop exact duplicates before splitting".
+- Evidence: `{"rows": count, "test_rows": n, "fraction": count / n}`. Error when `fraction > max_fraction`. Fix: "after the split, drop every test row that also appears in the training rows". Deduplicating the whole frame before the split is not the fix: in the canary execution the scrambled test rows deduplicate differently, the training row set changes and the run ends `UNVERIFIED`.
 - The count is a function of the two row sets, so reordering either frame cannot change it (Requirement 5.3).
 
 **`check_target_proxy`** (The Possession)

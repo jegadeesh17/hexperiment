@@ -426,7 +426,7 @@ Run with `.venv/Scripts/python -m pytest apps/tests -q`. No test uses the networ
 
 ### Why duplicates are removed after the split
 
-The hotels file has many exact duplicate rows (about a quarter, per the dataset's known structure; task 1 measures it). `drop_duplicates()` before `hexperiment.split` keeps the first of each group of duplicates. In the canary execution the test rows have other values, so a test row that was the first of a duplicate group no longer matches its training twin, and the training twin survives. The set of training row ids then differs between the normal and the canary execution, and `decide_canary` step 3 stops with "the split depends on data values" and an `UNVERIFIED` verdict. Removing overlap after the split changes only test rows: training rows are never dropped because of a test row. Steering rule 2 says "before splitting"; see Open question 1.
+The hotels file has many exact duplicate rows (about a quarter, per the dataset's known structure; task 1 measures it). `drop_duplicates()` before `hexperiment.split` keeps the first of each group of duplicates. In the canary execution the test rows have other values, so a test row that was the first of a duplicate group no longer matches its training twin, and the training twin survives. The set of training row ids then differs between the normal and the canary execution, and `decide_canary` step 3 stops with "the split depends on data values" and an `UNVERIFIED` verdict. Removing overlap after the split changes only test rows: training rows are never dropped because of a test row. Steering rule 2 now says to remove the overlap after the split, and so does the fix hint of The Doppelganger (see Open question 1).
 
 ## Expected numbers
 
