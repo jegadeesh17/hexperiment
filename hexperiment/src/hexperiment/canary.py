@@ -6,14 +6,22 @@ the training predictions. The canary execution scrambles the test rows at load
 time; in a leak-free pipeline its snapshot equals the normal one (Requirement 10).
 
 Layer 1 (snapshots, comparison, the canary decision) is pure: it has no file,
-process or clock access.
+process or clock access. Layer 2 is the ``.hex/`` exchange protocol: the files
+that a training execution leaves for the parent process, and the readers that
+refuse files from another run or another format.
 """
 
 from __future__ import annotations
 
+import json
 import re
-from collections.abc import Callable, Sequence
+import shutil
+import zipfile
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from importlib.metadata import version as package_version
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -48,6 +56,16 @@ SHAPESHIFTER = "The Shapeshifter"
 _SPLIT_ORDER_CHECK = "split_order"
 _LINE_LOCATION = re.compile(r".+:\d+")
 _EVIDENCE_DECIMALS = 6
+
+# The .hex/ exchange protocol (Requirement 2.3). Every file carries a run id and
+# this format version; a reader rejects any other version.
+FORMAT_VERSION = 1
+_HEX_DIRNAME = ".hex"
+_META_FILE = "meta.json"
+_SNAPSHOT_FILE = "snapshot.npz"
+_MARKER_FILE = "loaded.json"
+_SCRAMBLED_FILE = "scrambled_ids.npy"
+_RESULT_FILE = "result.json"
 
 
 @dataclass(frozen=True, slots=True)
@@ -380,3 +398,275 @@ def _shapeshifter(train_rows: int, diff: SnapshotDiff) -> Finding:
         },
         fix="training is not deterministic; set random_state everywhere",
     )
+
+
+# --- Layer 2: the .hex/ exchange protocol (file I/O) ---------------------------------
+
+
+class ExecutionFailed(RuntimeError):
+    """A training execution, or a file it left in ``.hex/``, cannot be used.
+
+    Not exported, and not a ``HexInputError``, which is reserved for invalid input.
+    The command line maps it to exit code 2 (Requirement 16.5).
+    """
+
+
+def hex_dir(app_dir: Path, mode: ExecMode) -> Path:
+    """Return the folder ``<app_dir>/.hex/<mode>/`` that one execution writes to."""
+    return Path(app_dir) / _HEX_DIRNAME / mode.value
+
+
+def clear_mode_dir(app_dir: Path, mode: ExecMode) -> None:
+    """Delete the folder of one mode, so a stale file can never be read.
+
+    The folders of the other modes are left alone. A missing folder is fine.
+    """
+    try:
+        shutil.rmtree(hex_dir(app_dir, mode))
+    except FileNotFoundError:
+        pass
+
+
+def write_snapshot(app_dir: Path, snapshot: Snapshot) -> None:
+    """Write ``snapshot.npz`` and then ``meta.json`` (Requirement 2.3).
+
+    ``meta.json`` comes last: a reader that finds it can rely on the arrays being
+    complete. ``y_score_train`` is stored only when the snapshot has it.
+    """
+    directory = _prepare(app_dir, snapshot.mode)
+    arrays = {
+        "train_ids": np.asarray(snapshot.train_ids, dtype=np.int64),
+        "test_ids": np.asarray(snapshot.test_ids, dtype=np.int64),
+        "train_row_hash": np.asarray(snapshot.train_row_hash, dtype=np.uint64),
+    }
+    if snapshot.y_score_train is not None:
+        arrays["y_score_train"] = np.asarray(snapshot.y_score_train, dtype=np.float64)
+    np.savez(directory / _SNAPSHOT_FILE, **arrays)
+    _write_json(
+        directory / _META_FILE,
+        {
+            "features": list(snapshot.features),
+            "format_version": FORMAT_VERSION,
+            "has_y_score_train": snapshot.y_score_train is not None,
+            "hexperiment_version": package_version("hexperiment"),
+            "mode": snapshot.mode.value,
+            "n_test": len(snapshot.test_ids),
+            "n_train": len(snapshot.train_ids),
+            "run_id": snapshot.run_id,
+            "script": SCRIPT_NAME,
+        },
+    )
+
+
+def read_snapshot(app_dir: Path, mode: ExecMode, run_id: str) -> Snapshot:
+    """Read the snapshot an execution left, for the run ``run_id``.
+
+    Raises ``ExecutionFailed`` when the files are absent, unreadable, written in
+    another format version, or written for another run (Requirement 2.3).
+    """
+    directory = hex_dir(app_dir, mode)
+    meta_path = directory / _META_FILE
+    meta = _read_envelope(
+        meta_path, run_id, f"train.py did not call hexperiment.audit in {mode} mode"
+    )
+    try:
+        features = tuple(_string_list(meta["features"]))
+        has_scores = _boolean(meta["has_y_score_train"])
+    except (KeyError, TypeError) as error:
+        raise _corrupt(
+            meta_path, f"key {error} is missing or has the wrong type"
+        ) from None
+    arrays_path = directory / _SNAPSHOT_FILE
+    try:
+        with np.load(arrays_path, allow_pickle=False) as npz:
+            train_ids = _array(npz, "train_ids", np.int64, arrays_path)
+            test_ids = _array(npz, "test_ids", np.int64, arrays_path)
+            hashes = _array(npz, "train_row_hash", np.uint64, arrays_path)
+            has_array = "y_score_train" in npz.files
+            scores = (
+                _array(npz, "y_score_train", np.float64, arrays_path)
+                if has_array
+                else None
+            )
+    except FileNotFoundError:
+        raise ExecutionFailed(
+            f"{arrays_path} does not exist, but {meta_path} does. Another run may "
+            "be using this app; run only one hexperiment run per app at a time."
+        ) from None
+    except _UNREADABLE_ARRAYS as error:
+        raise _corrupt(arrays_path, str(error)) from None
+    if has_array != has_scores:
+        raise _corrupt(arrays_path, "y_score_train does not match meta.json")
+    if len(hashes) != len(train_ids) or (
+        scores is not None and len(scores) != len(train_ids)
+    ):
+        raise _corrupt(arrays_path, "the training arrays have different lengths")
+    return Snapshot(
+        mode=mode,
+        run_id=run_id,
+        features=features,
+        train_ids=train_ids,
+        test_ids=test_ids,
+        train_row_hash=hashes,
+        y_score_train=scores,
+    )
+
+
+def write_load_marker(app_dir: Path, marker: LoadMarker) -> None:
+    """Record that an execution loaded its data with ``hexperiment.load``.
+
+    ``scrambled_ids.npy`` is written only when the marker carries ids (canary
+    mode); ``loaded.json`` comes last and records how many ids to expect.
+    """
+    directory = _prepare(app_dir, marker.mode)
+    ids = marker.scrambled_ids
+    if ids is not None:
+        np.save(
+            directory / _SCRAMBLED_FILE,
+            np.asarray(ids, dtype=np.int64),
+            allow_pickle=False,
+        )
+    _write_json(
+        directory / _MARKER_FILE,
+        {
+            "format_version": FORMAT_VERSION,
+            "mode": marker.mode.value,
+            "n_scrambled": None if ids is None else len(ids),
+            "run_id": marker.run_id,
+        },
+    )
+
+
+def read_load_marker(app_dir: Path, mode: ExecMode, run_id: str) -> LoadMarker | None:
+    """Read the load marker of one execution; ``None`` when there is none.
+
+    An absent marker means the script never called ``hexperiment.load``
+    (Requirement 10.6). A marker of another run or format raises ``ExecutionFailed``.
+    """
+    directory = hex_dir(app_dir, mode)
+    path = directory / _MARKER_FILE
+    if not path.exists():
+        return None
+    meta = _read_envelope(path, run_id, "")
+    try:
+        expected = meta["n_scrambled"]
+    except KeyError as error:
+        raise _corrupt(path, f"key {error} is missing") from None
+    if expected is None:
+        return LoadMarker(mode=mode, run_id=run_id, scrambled_ids=None)
+    ids_path = directory / _SCRAMBLED_FILE
+    try:
+        ids = np.load(ids_path, allow_pickle=False)
+    except FileNotFoundError:
+        raise _corrupt(path, f"{ids_path.name} is missing") from None
+    except _UNREADABLE_ARRAYS as error:
+        raise _corrupt(ids_path, str(error)) from None
+    if ids.dtype != np.int64 or ids.shape != (expected,):
+        raise _corrupt(
+            ids_path, f"it does not hold the {expected} ids that loaded.json announced"
+        )
+    return LoadMarker(mode=mode, run_id=run_id, scrambled_ids=ids)
+
+
+def write_result(app_dir: Path, result: DataAuditResult, run_id: str | None) -> None:
+    """Write ``result.json`` of the normal execution.
+
+    The file carries ``run_id`` (the caller's, which wins over ``result.run_id``)
+    and the format version next to the fields of ``DataAuditResult.to_dict``.
+    """
+    directory = _prepare(app_dir, ExecMode.NORMAL)
+    payload = {
+        **result.to_dict(),
+        "format_version": FORMAT_VERSION,
+        "run_id": run_id,
+    }
+    _write_json(directory / _RESULT_FILE, payload)
+
+
+def read_result(app_dir: Path, run_id: str) -> DataAuditResult:
+    """Read the ``result.json`` of the normal execution for the run ``run_id``."""
+    path = hex_dir(app_dir, ExecMode.NORMAL) / _RESULT_FILE
+    payload = _read_envelope(
+        path, run_id, "train.py did not call hexperiment.audit in normal mode"
+    )
+    payload.pop("format_version")
+    try:
+        return DataAuditResult.from_dict(payload)
+    except (KeyError, TypeError, ValueError) as error:
+        raise _corrupt(path, f"it is not a valid audit result ({error!r})") from None
+
+
+# --- helpers for Layer 2 -------------------------------------------------------------
+
+_UNREADABLE_ARRAYS = (OSError, ValueError, EOFError, KeyError, zipfile.BadZipFile)
+
+
+def _prepare(app_dir: Path, mode: ExecMode) -> Path:
+    directory = hex_dir(app_dir, mode)
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
+    text = json.dumps(
+        payload, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False
+    )
+    path.write_text(text + "\n", encoding="utf-8")
+
+
+def _corrupt(path: Path, why: str) -> ExecutionFailed:
+    return ExecutionFailed(
+        f"{path} cannot be used: {why}. Another run may be using this app, or the "
+        "training script wrote the file badly; run it again."
+    )
+
+
+def _read_envelope(path: Path, run_id: str, missing: str) -> dict[str, Any]:
+    """Read a JSON file and check its format version and run id.
+
+    ``missing`` is the explanation used when the file does not exist.
+    """
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise ExecutionFailed(f"{path} does not exist: {missing}.") from None
+    except (OSError, ValueError) as error:
+        raise _corrupt(path, f"it is not readable JSON ({error})") from None
+    if not isinstance(raw, dict):
+        raise _corrupt(path, "it does not hold a JSON object")
+    found_version = raw.get("format_version")
+    if found_version != FORMAT_VERSION or isinstance(found_version, bool):
+        raise ExecutionFailed(
+            f"{path} has format_version {found_version!r}, but this hexperiment "
+            f"reads format_version {FORMAT_VERSION}. The command and the training "
+            "script use different hexperiment versions; reinstall hexperiment in "
+            "this environment so that both match."
+        )
+    found_run = raw.get("run_id")
+    if found_run != run_id:
+        raise ExecutionFailed(
+            f"{path} belongs to run {found_run!r}, but this run is {run_id!r}: "
+            "another run is using this app. Run only one hexperiment run per app "
+            "at a time, then run it again."
+        )
+    return raw
+
+
+def _array(npz: Any, name: str, dtype: type, path: Path) -> NDArray[Any]:
+    array = npz[name]
+    if array.dtype != dtype or array.ndim != 1:
+        wanted = f"a one-dimensional {np.dtype(dtype)} array"
+        raise _corrupt(path, f"{name} is not {wanted}")
+    return array
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+        raise TypeError("expected a list of strings")
+    return value
+
+
+def _boolean(value: Any) -> bool:
+    if not isinstance(value, bool):
+        raise TypeError("expected a boolean")
+    return value

@@ -1,25 +1,37 @@
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
-from hypothesis import given
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from hexperiment import HexInputError
 from hexperiment.canary import (
     SCORE_TOLERANCE,
     CanaryOutcome,
+    ExecutionFailed,
     LoadMarker,
     Snapshot,
     build_snapshot,
+    clear_mode_dir,
     compare_snapshots,
     decide_canary,
+    hex_dir,
     hint_locations,
+    read_load_marker,
+    read_result,
+    read_snapshot,
     skipped_outcome,
+    write_load_marker,
+    write_result,
+    write_snapshot,
 )
 from hexperiment.config import WAIVABLE_CHECKS, ExecMode
 from hexperiment.models import (
     CheckResult,
     DataAuditResult,
+    DataSummary,
     Finding,
     MetricResult,
     Outcome,
@@ -600,3 +612,438 @@ def test_control_runs_at_most_once_and_only_when_needed(
         control_differs = compare_snapshots(normal, control.snapshot).differs
         expected = Outcome.INCONCLUSIVE if control_differs else Outcome.FAILED
         assert outcome.outcome is expected
+
+
+# --- the .hex/ protocol (Requirements 2.3, 2.4, 10.6) ------------------------------
+
+RUN = "20251101-093012-a1b2c3"
+OTHER_RUN = "20251101-093055-ffffff"
+
+
+def assert_same_snapshot(actual: Snapshot, expected: Snapshot) -> None:
+    """Compare snapshots bit for bit, so that -0.0 and NaN payloads count too."""
+    assert actual.mode is expected.mode
+    assert actual.run_id == expected.run_id
+    assert actual.features == expected.features
+    for name in ("train_ids", "test_ids", "train_row_hash", "y_score_train"):
+        a, e = getattr(actual, name), getattr(expected, name)
+        if e is None:
+            assert a is None
+        else:
+            assert a.dtype == e.dtype
+            assert a.tobytes() == e.tobytes()
+
+
+def error_finding() -> Finding:
+    return Finding(
+        check="input",
+        ghost=None,
+        severity=Severity.ERROR,
+        location="audit()",
+        message="y_score has 3 entries, but test has 5 rows",
+        evidence={"expected": 5, "found": 3},
+        fix="pass one score per test row",
+    )
+
+
+def audit_result(*, input_error: bool = False) -> DataAuditResult:
+    if input_error:
+        return DataAuditResult(
+            run_id=RUN,
+            metric=None,
+            checks=(),
+            extra_findings=(),
+            data=None,
+            input_error=error_finding(),
+        )
+    overlap = Finding(
+        check="row_overlap",
+        ghost="The Doppelganger",
+        severity=Severity.ERROR,
+        location="train vs test",
+        message="3 of 20 test rows also appear in train",
+        evidence={"rows": 3, "test_rows": 20, "fraction": 0.15},
+        fix="drop exact duplicates before splitting",
+    )
+    return DataAuditResult(
+        run_id=RUN,
+        metric=MetricResult("roc_auc", 0.912345, 0.8, True),
+        checks=(
+            CheckResult("row_overlap", "The Doppelganger", Outcome.FAILED, (overlap,)),
+            CheckResult("temporal", "The Prophet", Outcome.NOT_APPLICABLE),
+        ),
+        extra_findings=(),
+        data=DataSummary(80, 20, 0.25, 0.3, ("2024-01-01", "2024-03-01"), None),
+        input_error=None,
+    )
+
+
+def read_json(path):
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def rewrite_json(path, **changes) -> None:
+    payload = read_json(path)
+    payload.update(changes)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_hex_dir_is_one_folder_per_mode_below_dot_hex(tmp_path):
+    assert hex_dir(tmp_path, ExecMode.CANARY) == tmp_path / ".hex" / "canary"
+    assert hex_dir(tmp_path, ExecMode.NORMAL) == tmp_path / ".hex" / "normal"
+
+
+# snapshots
+
+
+def test_snapshot_round_trip_with_training_scores(tmp_path):
+    train = make_frame(ids=(3, 0, 2))
+    scores = np.array([0.1 + 0.2, 0.0, 1.0 / 3.0])  # 0.1 + 0.2 is not exact
+    written = build_snapshot(
+        ExecMode.NORMAL, RUN, train, make_frame(ids=(9, 5)), FEATURES, scores
+    )
+    write_snapshot(tmp_path, written)
+    read = read_snapshot(tmp_path, ExecMode.NORMAL, RUN)
+    assert_same_snapshot(read, written)
+    assert read.train_row_hash.dtype == np.uint64
+    assert read.train_row_hash.max() > 2**63  # a real hash needs the full range
+
+
+def test_snapshot_round_trip_without_training_scores(tmp_path):
+    written = make_snapshot(scores=None, mode=ExecMode.CONTROL)
+    write_snapshot(tmp_path, written)
+    assert_same_snapshot(read_snapshot(tmp_path, ExecMode.CONTROL, RUN), written)
+    with np.load(hex_dir(tmp_path, ExecMode.CONTROL) / "snapshot.npz") as npz:
+        assert sorted(npz.files) == ["test_ids", "train_ids", "train_row_hash"]
+    meta = read_json(hex_dir(tmp_path, ExecMode.CONTROL) / "meta.json")
+    assert meta["has_y_score_train"] is False
+
+
+def test_snapshot_meta_json_describes_the_snapshot(tmp_path):
+    write_snapshot(tmp_path, make_snapshot(mode=ExecMode.CANARY))
+    path = hex_dir(tmp_path, ExecMode.CANARY) / "meta.json"
+    meta = read_json(path)
+    assert set(meta) == {
+        "features",
+        "format_version",
+        "has_y_score_train",
+        "hexperiment_version",
+        "mode",
+        "n_test",
+        "n_train",
+        "run_id",
+        "script",
+    }
+    assert meta["format_version"] == 1
+    assert meta["features"] == FEATURES
+    assert meta["has_y_score_train"] is True
+    assert (meta["mode"], meta["n_train"], meta["n_test"]) == ("canary", 4, 2)
+    assert (meta["run_id"], meta["script"]) == (RUN, "train.py")
+    assert list(meta) == sorted(meta)  # keys are written sorted
+
+
+def test_write_snapshot_replaces_an_earlier_snapshot_of_the_same_mode(tmp_path):
+    write_snapshot(tmp_path, make_snapshot(scores=(0.1, 0.2, 0.3, 0.4)))
+    second = make_snapshot(train_ids=(0, 1), hashes=[5, 6], scores=None)
+    write_snapshot(tmp_path, second)
+    assert_same_snapshot(read_snapshot(tmp_path, ExecMode.NORMAL, RUN), second)
+
+
+def test_read_snapshot_rejects_a_snapshot_of_another_run(tmp_path):
+    write_snapshot(tmp_path, make_snapshot())
+    with pytest.raises(ExecutionFailed, match="another run is using this app") as info:
+        read_snapshot(tmp_path, ExecMode.NORMAL, OTHER_RUN)
+    assert RUN in str(info.value)
+    assert OTHER_RUN in str(info.value)
+
+
+def test_read_snapshot_rejects_a_standalone_snapshot(tmp_path):
+    standalone = build_snapshot(
+        ExecMode.NORMAL, None, make_frame(), make_frame(ids=(8, 9)), FEATURES, None
+    )
+    write_snapshot(tmp_path, standalone)
+    with pytest.raises(ExecutionFailed, match="another run is using this app"):
+        read_snapshot(tmp_path, ExecMode.NORMAL, RUN)
+
+
+@pytest.mark.parametrize("version", [2, 0, "1", None, True])
+def test_read_snapshot_rejects_another_format_version(tmp_path, version):
+    write_snapshot(tmp_path, make_snapshot())
+    meta = hex_dir(tmp_path, ExecMode.NORMAL) / "meta.json"
+    rewrite_json(meta, format_version=version)
+    with pytest.raises(ExecutionFailed, match="format_version.*reinstall hexperiment"):
+        read_snapshot(tmp_path, ExecMode.NORMAL, RUN)
+
+
+def test_read_snapshot_without_files_says_the_script_did_not_audit(tmp_path):
+    with pytest.raises(ExecutionFailed, match="did not call hexperiment.audit"):
+        read_snapshot(tmp_path, ExecMode.NORMAL, RUN)
+
+
+def test_read_snapshot_reads_only_the_requested_mode(tmp_path):
+    write_snapshot(tmp_path, make_snapshot(mode=ExecMode.NORMAL))
+    with pytest.raises(ExecutionFailed, match="canary mode"):
+        read_snapshot(tmp_path, ExecMode.CANARY, RUN)
+
+
+def test_read_snapshot_reports_a_missing_array_file(tmp_path):
+    write_snapshot(tmp_path, make_snapshot())
+    (hex_dir(tmp_path, ExecMode.NORMAL) / "snapshot.npz").unlink()
+    with pytest.raises(ExecutionFailed, match=r"snapshot\.npz does not exist"):
+        read_snapshot(tmp_path, ExecMode.NORMAL, RUN)
+
+
+def test_read_snapshot_refuses_pickled_arrays(tmp_path):
+    write_snapshot(tmp_path, make_snapshot())
+    npz = hex_dir(tmp_path, ExecMode.NORMAL) / "snapshot.npz"
+    np.savez(
+        npz,
+        train_ids=np.array([0, 1, 2, 3], dtype=np.int64),
+        test_ids=np.array([4, 5], dtype=np.int64),
+        train_row_hash=np.array([{"a": 1}] * 4, dtype=object),
+        y_score_train=np.zeros(4),
+    )
+    with pytest.raises(ExecutionFailed, match="cannot be used"):
+        read_snapshot(tmp_path, ExecMode.NORMAL, RUN)
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "not json",
+        "not an object",
+        "missing features",
+        "bad array",
+        "wrong dtype",
+        "length mismatch",
+        "scores disagree with meta",
+    ],
+)
+def test_read_snapshot_rejects_damaged_files(tmp_path, damage):
+    write_snapshot(tmp_path, make_snapshot())
+    folder = hex_dir(tmp_path, ExecMode.NORMAL)
+    arrays = {
+        "train_ids": np.array([0, 1, 2, 3], dtype=np.int64),
+        "test_ids": np.array([4, 5], dtype=np.int64),
+        "train_row_hash": np.array([1, 2, 3, 4], dtype=np.uint64),
+        "y_score_train": np.zeros(4),
+    }
+    if damage == "not json":
+        (folder / "meta.json").write_text("{", encoding="utf-8")
+    elif damage == "not an object":
+        (folder / "meta.json").write_text("[1, 2]", encoding="utf-8")
+    elif damage == "missing features":
+        meta = read_json(folder / "meta.json")
+        del meta["features"]
+        (folder / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    elif damage == "bad array":
+        (folder / "snapshot.npz").write_bytes(b"this is not an npz file")
+    elif damage == "wrong dtype":
+        np.savez(folder / "snapshot.npz", **{**arrays, "train_ids": np.arange(4.0)})
+    elif damage == "length mismatch":
+        np.savez(folder / "snapshot.npz", **{**arrays, "y_score_train": np.zeros(3)})
+    else:
+        del arrays["y_score_train"]
+        np.savez(folder / "snapshot.npz", **arrays)
+    with pytest.raises(ExecutionFailed, match="cannot be used"):
+        read_snapshot(tmp_path, ExecMode.NORMAL, RUN)
+
+
+# load markers
+
+
+def test_normal_marker_round_trip_writes_no_scrambled_ids(tmp_path):
+    marker = LoadMarker(ExecMode.NORMAL, RUN, None)
+    write_load_marker(tmp_path, marker)
+    assert read_load_marker(tmp_path, ExecMode.NORMAL, RUN) == marker
+    folder = hex_dir(tmp_path, ExecMode.NORMAL)
+    assert not (folder / "scrambled_ids.npy").exists()
+    assert read_json(folder / "loaded.json") == {
+        "format_version": 1,
+        "mode": "normal",
+        "n_scrambled": None,
+        "run_id": RUN,
+    }
+
+
+def test_canary_marker_round_trip_keeps_the_scrambled_ids(tmp_path):
+    write_load_marker(tmp_path, clean_marker(scrambled=(9, 4, 17)))
+    read = read_load_marker(tmp_path, ExecMode.CANARY, RUN)
+    assert read.mode is ExecMode.CANARY
+    assert read.run_id == RUN
+    assert read.scrambled_ids.dtype == np.int64
+    assert read.scrambled_ids.tolist() == [9, 4, 17]
+    meta = read_json(hex_dir(tmp_path, ExecMode.CANARY) / "loaded.json")
+    assert meta["n_scrambled"] == 3
+
+
+def test_canary_marker_with_no_scrambled_rows_is_not_a_missing_marker(tmp_path):
+    write_load_marker(tmp_path, clean_marker(scrambled=()))
+    read = read_load_marker(tmp_path, ExecMode.CANARY, RUN)
+    assert read is not None
+    assert read.scrambled_ids.tolist() == []
+
+
+def test_read_load_marker_returns_none_when_the_script_never_loaded(tmp_path):
+    assert read_load_marker(tmp_path, ExecMode.CANARY, RUN) is None
+    write_snapshot(tmp_path, make_snapshot(mode=ExecMode.CANARY))  # same folder
+    assert read_load_marker(tmp_path, ExecMode.CANARY, RUN) is None
+
+
+def test_read_load_marker_rejects_a_marker_of_another_run(tmp_path):
+    write_load_marker(tmp_path, clean_marker())
+    with pytest.raises(ExecutionFailed, match="another run is using this app"):
+        read_load_marker(tmp_path, ExecMode.CANARY, OTHER_RUN)
+
+
+def test_read_load_marker_rejects_another_format_version(tmp_path):
+    write_load_marker(tmp_path, clean_marker())
+    rewrite_json(hex_dir(tmp_path, ExecMode.CANARY) / "loaded.json", format_version=2)
+    with pytest.raises(ExecutionFailed, match="format_version 2"):
+        read_load_marker(tmp_path, ExecMode.CANARY, RUN)
+
+
+@pytest.mark.parametrize("damage", ["ids missing", "ids count", "ids dtype"])
+def test_read_load_marker_rejects_damaged_scrambled_ids(tmp_path, damage):
+    write_load_marker(tmp_path, clean_marker(scrambled=(4, 5)))
+    ids = hex_dir(tmp_path, ExecMode.CANARY) / "scrambled_ids.npy"
+    if damage == "ids missing":
+        ids.unlink()
+    elif damage == "ids count":
+        np.save(ids, np.array([4, 5, 6], dtype=np.int64))
+    else:
+        np.save(ids, np.array([4.0, 5.0]))
+    with pytest.raises(ExecutionFailed, match="cannot be used"):
+        read_load_marker(tmp_path, ExecMode.CANARY, RUN)
+
+
+# results
+
+
+def test_result_round_trip(tmp_path):
+    written = audit_result()
+    write_result(tmp_path, written, RUN)
+    assert read_result(tmp_path, RUN) == written
+
+
+def test_result_round_trip_with_an_input_error(tmp_path):
+    written = audit_result(input_error=True)
+    write_result(tmp_path, written, RUN)
+    read = read_result(tmp_path, RUN)
+    assert read == written
+    assert read.input_error == error_finding()
+    assert read.metric is None
+
+
+def test_result_json_is_sorted_utf8_json_with_run_id_and_version(tmp_path):
+    write_result(tmp_path, audit_result(), RUN)
+    path = hex_dir(tmp_path, ExecMode.NORMAL) / "result.json"
+    text = path.read_text(encoding="utf-8")
+    payload = json.loads(text)
+    assert payload["format_version"] == 1
+    assert payload["run_id"] == RUN
+    assert list(payload) == sorted(payload)
+    assert text.endswith("}\n")
+
+
+def test_result_file_carries_the_callers_run_id(tmp_path):
+    write_result(tmp_path, audit_result(), OTHER_RUN)
+    assert read_result(tmp_path, OTHER_RUN).run_id == OTHER_RUN
+    with pytest.raises(ExecutionFailed, match="another run is using this app"):
+        read_result(tmp_path, RUN)
+
+
+def test_read_result_rejects_a_standalone_result(tmp_path):
+    write_result(tmp_path, audit_result(), None)
+    with pytest.raises(ExecutionFailed, match="another run is using this app"):
+        read_result(tmp_path, RUN)
+
+
+def test_read_result_rejects_another_format_version(tmp_path):
+    write_result(tmp_path, audit_result(), RUN)
+    rewrite_json(hex_dir(tmp_path, ExecMode.NORMAL) / "result.json", format_version=3)
+    with pytest.raises(ExecutionFailed, match="format_version 3"):
+        read_result(tmp_path, RUN)
+
+
+def test_read_result_without_a_file_says_the_script_did_not_audit(tmp_path):
+    with pytest.raises(ExecutionFailed, match="did not call hexperiment.audit"):
+        read_result(tmp_path, RUN)
+
+
+def test_read_result_rejects_a_file_that_is_not_an_audit_result(tmp_path):
+    write_result(tmp_path, audit_result(), RUN)
+    path = hex_dir(tmp_path, ExecMode.NORMAL) / "result.json"
+    payload = read_json(path)
+    del payload["checks"]
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ExecutionFailed, match="not a valid audit result"):
+        read_result(tmp_path, RUN)
+
+
+# clear_mode_dir
+
+
+def test_clear_mode_dir_removes_stale_files_of_that_mode_only(tmp_path):
+    write_snapshot(tmp_path, make_snapshot(mode=ExecMode.NORMAL))
+    write_result(tmp_path, audit_result(), RUN)
+    write_snapshot(tmp_path, make_snapshot(mode=ExecMode.CANARY))
+    write_load_marker(tmp_path, clean_marker())
+    stale = hex_dir(tmp_path, ExecMode.NORMAL) / "left_over.txt"
+    stale.write_text("stale", encoding="utf-8")
+
+    clear_mode_dir(tmp_path, ExecMode.NORMAL)
+
+    assert not hex_dir(tmp_path, ExecMode.NORMAL).exists()
+    with pytest.raises(ExecutionFailed, match="did not call hexperiment.audit"):
+        read_snapshot(tmp_path, ExecMode.NORMAL, RUN)
+    with pytest.raises(ExecutionFailed, match="did not call hexperiment.audit"):
+        read_result(tmp_path, RUN)
+    assert read_snapshot(tmp_path, ExecMode.CANARY, RUN).mode is ExecMode.CANARY
+    assert read_load_marker(tmp_path, ExecMode.CANARY, RUN) is not None
+
+
+def test_clear_mode_dir_accepts_a_missing_folder(tmp_path):
+    clear_mode_dir(tmp_path, ExecMode.CONTROL)
+    clear_mode_dir(tmp_path, ExecMode.CONTROL)
+    assert not (tmp_path / ".hex").exists()
+
+
+def test_clear_mode_dir_leaves_a_folder_that_can_be_written_again(tmp_path):
+    write_snapshot(tmp_path, make_snapshot())
+    clear_mode_dir(tmp_path, ExecMode.NORMAL)
+    again = make_snapshot(scores=None)
+    write_snapshot(tmp_path, again)
+    assert_same_snapshot(read_snapshot(tmp_path, ExecMode.NORMAL, RUN), again)
+
+
+# property
+
+
+@st.composite
+def written_snapshots(draw) -> Snapshot:
+    int64 = st.integers(-(2**63), 2**63 - 1)
+    train_ids = sorted(draw(st.sets(int64, max_size=15)))
+    test_ids = sorted(draw(st.sets(int64, max_size=15)))
+    n = len(train_ids)
+    hashes = draw(st.lists(st.integers(0, 2**64 - 1), min_size=n, max_size=n))
+    has_scores = draw(st.booleans())
+    scores = draw(st.lists(st.floats(), min_size=n, max_size=n)) if has_scores else None
+    return Snapshot(
+        mode=draw(st.sampled_from(list(ExecMode))),
+        run_id=draw(st.text(min_size=1, max_size=30)),
+        features=tuple(draw(st.lists(st.text(max_size=10), max_size=4))),
+        train_ids=np.array(train_ids, dtype=np.int64),
+        test_ids=np.array(test_ids, dtype=np.int64),
+        train_row_hash=np.array(hashes, dtype=np.uint64),
+        y_score_train=None if scores is None else np.array(scores, dtype=np.float64),
+    )
+
+
+@settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(snapshot=written_snapshots())
+def test_write_then_read_snapshot_returns_equal_arrays(tmp_path, snapshot):
+    clear_mode_dir(tmp_path, snapshot.mode)
+    write_snapshot(tmp_path, snapshot)
+    read = read_snapshot(tmp_path, snapshot.mode, snapshot.run_id)
+    assert_same_snapshot(read, snapshot)
