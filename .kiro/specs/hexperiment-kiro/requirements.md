@@ -55,9 +55,9 @@ Scope: the `hexperiment hook` and `hexperiment init` commands, the Kiro hook, wo
 
 1. THE repository SHALL contain `.kiro/agents/ghost-hunter.json`, a custom agent in the Kiro CLI V3 permission format, used by the workflow.
 2. THE ghost hunter SHALL be allowed to write only Python files inside app folders.
-3. THE ghost hunter SHALL be denied writing `hex.toml`, `verdict.json`, `model_card.md`, anything under an app's `runs/`, `.hex/` or `data/` folders, anything under `.kiro/`, and the `hexperiment` package itself; deny rules SHALL take precedence over allow rules.
+3. THE ghost hunter SHALL be denied writing `hex.toml`, `verdict.json`, `model_card.md`, anything under an app's `runs/`, `.hex/`, `data/` or `haunted/` folders, anything under `.kiro/`, and the `hexperiment` package itself; deny rules SHALL take precedence over allow rules.
 4. THE ghost hunter's shell access SHALL be limited to `hexperiment run` and `hexperiment run --fast` on an app, and SHALL deny every other command, including version control, deletion and network commands.
-5. THE ghost hunter's prompt SHALL state that thresholds and waivers are the human's decision, that removing features or the `audit` call does not count as a fix, and that it must report a finding it cannot fix instead of working around it.
+5. THE ghost hunter's prompt SHALL state that thresholds and waivers are the human's decision; that removing the `audit` call, or a feature that is not the cause of a finding, does not count as a fix; that dropping a column flagged by The Possession is a fix only when the column is recorded after the outcome, and the agent must say why it is; and that it must report a finding it cannot fix instead of working around it.
 6. THE agent file SHALL pass `kiro-cli agent validate`.
 
 ### Requirement 4: MCP server
