@@ -75,7 +75,7 @@
   - Add Hypothesis tests: any test row copied from train is detected; a feature equal to the target is always detected (both classes present, at least 2 unique values); reordering rows of `train` or `test` never changes any of the three results.
   - _Requirements: 5.1, 5.2, 5.3, 6.1, 6.2, 6.3, 6.4, 7.1, 7.2, 7.3, 17.1, 17.2_
 
-- [ ] 10. Checks, part 2: split-order hint, metric gate and the check registry
+- [x] 10. Checks, part 2: split-order hint, metric gate and the check registry
   - Create `hexperiment/src/hexperiment/checks/split_order.py` (`check_split_order`: `ast` only, never executes the script; first call to `split`, `hexperiment.split` or `train_test_split`; warnings for earlier `fit`, `fit_transform`, `fit_resample` and the listed methods; bare `min` / `max` and calls rooted at an imported module alias ignored; unparseable script or no split call gives one `inconclusive` warning) and `checks/metric.py` (`compute_metric`, `check_metric` with the "too good to be true" warning).
   - Fill in `checks/__init__.py` with `run_data_checks`, the only place that lists the checks, in the fixed order `row_overlap`, `target_proxy`, `temporal`, `split_order`, metric. It also builds the `DataSummary` (row counts, positive rates, time range of each split when a time column is set).
   - Create `hexperiment/tests/test_split_order.py` and `test_metric.py` with the leaking and clean cases and boundaries from the example table (syntax error, no split call, `hexperiment.split` and `train_test_split` recognized, `np.mean` ignored, `min(a, b)` ignored, `value == threshold` passes, AUC above `threshold + margin`).
@@ -83,7 +83,7 @@
   - Add a Hypothesis test that reordering rows (scores permuted the same way) never changes `check_metric`.
   - _Requirements: 2.3, 2.5, 3.2, 8.1, 8.2, 8.3, 9.1, 9.2, 9.3, 14.1, 17.1, 17.2, 17.4_
 
-- [ ] 11. Verdict assembly
+- [x] 11. Verdict assembly
   - Create `hexperiment/src/hexperiment/verdict.py` with `FINDING_ORDER`, `assemble`, `apply_waivers` (only `row_overlap`, `target_proxy` and `temporal` findings are candidates; an unmatched waiver becomes a `waiver` warning), `decide_status`, `to_json` (sorted keys, two-space indentation, UTF-8, no NaN), `from_dict` and `format_summary`. The module has no file, clock or process access.
   - `assemble` handles the input-error case (`REJECTED`, single `input` finding), adds the `test_set_uses` warning when the count exceeds `checks.max_test_uses`, builds the six check summaries, and sorts findings so equal inputs give equal findings.
   - Create `hexperiment/tests/test_verdict.py`: the full truth table of `decide_status` (metric pass or fail, error present or not, canary outcome, fast or full); `apply_waivers` severity change, untouched canary findings, stale waiver warning with location `<check>` or `<check>:<column>`; `assemble` for the input-error case and the `test_set_uses` warning; `format_summary` against the example in `design.md`.
