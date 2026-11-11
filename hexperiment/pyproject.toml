@@ -16,6 +16,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest",
+    "pytest-xdist==3.8.0",
     "hypothesis",
     "ruff",
 ]
@@ -34,3 +35,5 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The canary scenarios spawn real training runs; spread them across CPU cores.
+addopts = "-n auto --dist loadscope"
