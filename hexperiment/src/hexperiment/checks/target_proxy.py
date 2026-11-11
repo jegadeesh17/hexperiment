@@ -8,7 +8,6 @@ from collections.abc import Sequence
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
-from sklearn.metrics import roc_auc_score
 
 from hexperiment.errors import HexInputError
 from hexperiment.models import CheckResult, Finding, Outcome, Severity
@@ -203,6 +202,8 @@ def _value_score(
     placed below every value and then above every value; the higher score wins
     (Requirement 6.1).
     """
+    from sklearn.metrics import roc_auc_score  # imported late: slow (Requirement 4.8)
+
     present = values.notna().to_numpy(dtype=bool)
     ranks = _sortable(values[present], kind).rank(method="average")
     ranks = ranks.to_numpy(dtype=np.float64)
@@ -248,6 +249,8 @@ def _category_score(
     Rates are integer ratios (positives over count), so they are exact and a
     reordering of the rows cannot change a tie (Requirement 6.4).
     """
+    from sklearn.metrics import roc_auc_score  # imported late: slow (Requirement 4.8)
+
     training = pd.DataFrame(
         {
             "value": train_values.astype(object).to_numpy(),

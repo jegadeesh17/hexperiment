@@ -24,6 +24,7 @@ from hexperiment.errors import HexInputError
 from hexperiment.init import (
     APP_FILES,
     KIRO_FILES,
+    MCP_SETTINGS,
     InitReport,
     format_report,
     init_app,
@@ -42,6 +43,7 @@ KIRO_TARGETS = [
     "agents/ghost-hunter.json",
     "steering/ml-integrity.md",
 ]
+MCP_TARGET = "settings/mcp.json"
 
 
 def template_bytes(source: str) -> bytes:
@@ -131,12 +133,14 @@ def test_the_files_are_written_as_bytes_without_newline_translation(tmp_path):
 # --- init_kiro (Requirement 5.2, 5.3) ------------------------------------------------
 
 
-def test_init_kiro_creates_the_four_files_below_dot_kiro(tmp_path):
+def test_init_kiro_creates_the_four_files_and_the_mcp_settings_below_dot_kiro(
+    tmp_path,
+):
     report = init_kiro(tmp_path)
     kiro = tmp_path / ".kiro"
-    assert relative_names(report.created, kiro) == sorted(KIRO_TARGETS)
+    assert relative_names(report.created, kiro) == sorted([*KIRO_TARGETS, MCP_TARGET])
     assert report.skipped == ()
-    for target in KIRO_TARGETS:
+    for target in [*KIRO_TARGETS, MCP_TARGET]:
         assert (kiro / target).is_file()
 
 
@@ -146,19 +150,102 @@ def test_init_kiro_skips_existing_files_and_keeps_their_bytes(tmp_path):
     hook.write_bytes(b"{}\r\n")
     report = init_kiro(tmp_path)
     assert relative_names(report.skipped, tmp_path) == [".kiro/hooks/hexperiment.json"]
-    assert len(report.created) == 3
+    assert len(report.created) == 4
     assert hook.read_bytes() == b"{}\r\n"
 
 
-def test_the_kiro_files_are_the_four_templates_below_templates_kiro():
+def test_the_kiro_files_are_the_templates_below_templates_kiro():
     on_disk = {
         path.relative_to(TEMPLATES_DIR).as_posix()
         for path in (TEMPLATES_DIR / "kiro").rglob("*")
         if path.is_file()
     }
-    assert {item.source for item in KIRO_FILES} == on_disk
+    assert {item.source for item in KIRO_FILES} | {MCP_SETTINGS.source} == on_disk
+    assert MCP_SETTINGS not in KIRO_FILES
     assert sorted(item.target for item in KIRO_FILES) == sorted(KIRO_TARGETS)
+    assert MCP_SETTINGS.target == MCP_TARGET
     assert sorted(item.target for item in APP_FILES) == ["hex.toml", "train.py"]
+
+
+# --- .kiro/settings/mcp.json (Requirements 5.2, 5.4) ----------------------------------
+
+MCP_ENTRY = {"command": "hexperiment-mcp", "args": [], "env": {}}
+
+
+def mcp_file(project: Path) -> Path:
+    return project / ".kiro" / "settings" / "mcp.json"
+
+
+def test_a_missing_mcp_settings_file_is_created_from_the_template(tmp_path):
+    report = init_kiro(tmp_path)
+    assert mcp_file(tmp_path) in report.created
+    assert mcp_file(tmp_path).read_bytes() == template_bytes("kiro/settings/mcp.json")
+    settings = json.loads(mcp_file(tmp_path).read_text(encoding="utf-8"))
+    assert settings == {"mcpServers": {"hexperiment": MCP_ENTRY}}
+    assert report.notes == ()
+
+
+def test_an_mcp_settings_file_without_the_entry_is_left_alone_and_the_entry_printed(
+    tmp_path,
+):
+    other = b'{"mcpServers": {"context7": {"url": "https://x"}}}\r\n'
+    mcp_file(tmp_path).parent.mkdir(parents=True)
+    mcp_file(tmp_path).write_bytes(other)
+    report = init_kiro(tmp_path)
+    assert mcp_file(tmp_path).read_bytes() == other
+    assert mcp_file(tmp_path) in report.skipped
+    assert mcp_file(tmp_path) not in report.created
+    text = format_report(report, tmp_path)
+    assert "skipped  .kiro/settings/mcp.json (already exists)" in text
+    assert "has no \"hexperiment\" server" in text
+    assert '"command": "hexperiment-mcp"' in text
+
+
+def test_an_mcp_settings_file_with_the_entry_is_skipped_without_a_note(tmp_path):
+    existing = b'{"mcpServers": {"hexperiment": {"command": "mine"}}}'
+    mcp_file(tmp_path).parent.mkdir(parents=True)
+    mcp_file(tmp_path).write_bytes(existing)
+    report = init_kiro(tmp_path)
+    assert mcp_file(tmp_path).read_bytes() == existing
+    assert mcp_file(tmp_path) in report.skipped
+    assert report.notes == ()
+    text = format_report(report, tmp_path)
+    assert "skipped  .kiro/settings/mcp.json (already exists)" in text
+    assert "left alone" not in text
+
+
+@pytest.mark.parametrize(
+    "existing",
+    [b"{not json", b"", b"\xff\xfe\x00", b"[1, 2]", b'{"mcpServers": []}'],
+    ids=["broken", "empty", "not-utf8", "array", "servers-not-an-object"],
+)
+def test_an_mcp_settings_file_that_cannot_take_the_entry_is_skipped_with_a_note(
+    tmp_path, existing
+):
+    mcp_file(tmp_path).parent.mkdir(parents=True)
+    mcp_file(tmp_path).write_bytes(existing)
+    report = init_kiro(tmp_path)
+    assert mcp_file(tmp_path).read_bytes() == existing
+    assert mcp_file(tmp_path) in report.skipped
+    assert report.notes
+    assert '"command": "hexperiment-mcp"' in format_report(report, tmp_path)
+
+
+def test_an_mcp_settings_folder_is_refused_and_nothing_is_written(tmp_path):
+    mcp_file(tmp_path).mkdir(parents=True)
+    with pytest.raises(HexInputError, match="is a folder"):
+        init_kiro(tmp_path)
+
+
+def test_the_template_entry_equals_the_entry_of_the_repository_mcp_settings():
+    repository = json.loads(
+        (KIRO_REFERENCE_DIR / "settings" / "mcp.json").read_text(encoding="utf-8")
+    )
+    template = json.loads(template_bytes("kiro/settings/mcp.json"))
+    entry = template["mcpServers"]["hexperiment"]
+    assert entry == repository["mcpServers"]["hexperiment"]
+    assert entry == MCP_ENTRY
+    assert list(template["mcpServers"]) == ["hexperiment"]
 
 
 # --- the report ----------------------------------------------------------------------
@@ -207,7 +294,7 @@ def test_the_kiro_notes_are_silent_when_hexperiment_is_on_the_path(
     monkeypatch.setattr(init.shutil, "which", lambda name: "/bin/hexperiment")
     text = format_report(init_kiro(tmp_path), tmp_path)
     assert "PATH" not in text
-    assert text.count("\n") == 3  # four file lines and nothing else
+    assert text.count("\n") == 4  # five file lines and nothing else
 
 
 def test_the_notes_follow_from_skipped_files_too(tmp_path):
@@ -315,7 +402,7 @@ def test_the_package_data_pattern_covers_every_template_file():
     patterns = pyproject["tool"]["setuptools"]["package-data"]["hexperiment"]
     assert "templates/**/*" in patterns
     files = [p for p in TEMPLATES_DIR.rglob("*") if p.is_file()]
-    assert len(files) == len(APP_FILES) + len(KIRO_FILES)
+    assert len(files) == len(APP_FILES) + len(KIRO_FILES) + 1  # and MCP_SETTINGS
     for path in files:
         relative = PurePath(path.relative_to(PACKAGE_DIR).as_posix())
         assert any(relative.full_match(pattern) for pattern in patterns), relative
@@ -347,12 +434,12 @@ def test_init_kiro_keeps_existing_files_and_a_second_call_creates_nothing(existi
             (kiro / target).write_bytes(data)
         first = init_kiro(project)
         assert relative_names(first.skipped, kiro) == sorted(existing)
-        assert len(first.created) == len(KIRO_TARGETS) - len(existing)
+        assert len(first.created) == len(KIRO_TARGETS) + 1 - len(existing)
         for target, data in existing.items():
             assert (kiro / target).read_bytes() == data
         second = init_kiro(project)
         assert second.created == ()
-        assert len(second.skipped) == len(KIRO_TARGETS)
+        assert len(second.skipped) == len(KIRO_TARGETS) + 1
 
 
 @given(existing=st.dictionaries(st.sampled_from(["hex.toml", "train.py"]), st.binary()))
@@ -401,17 +488,19 @@ def test_init_creates_an_app_and_prints_each_file(project, capsys):
 def test_init_kiro_writes_the_kiro_files_into_the_current_folder(project, capsys):
     assert main(["init", "--kiro"]) == 0
     lines = capsys.readouterr().out.splitlines()
-    assert sorted(lines) == sorted(f"created  .kiro/{t}" for t in KIRO_TARGETS)
+    assert sorted(lines) == sorted(
+        f"created  .kiro/{t}" for t in [*KIRO_TARGETS, MCP_TARGET]
+    )
     assert (project / ".kiro" / "agents" / "ghost-hunter.json").is_file()
 
 
 def test_init_with_both_does_both_and_a_second_run_skips_everything(project, capsys):
     assert main(["init", "apps/churn", "--kiro"]) == 0
     first = capsys.readouterr().out
-    assert first.count("created  ") == 6
+    assert first.count("created  ") == 7
     assert main(["init", "apps/churn", "--kiro"]) == 0
     second = capsys.readouterr().out
-    assert second.count("skipped  ") == 6
+    assert second.count("skipped  ") == 7
     assert "created  " not in second
 
 

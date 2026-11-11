@@ -27,6 +27,8 @@ Use it when any of these is true:
 
 The ghost hunter and the workflow work on apps below `apps/`.
 
+If `list_apps` returns no apps, the server was started in the power's install folder, not in your project. Run `hexperiment init --kiro` in the project (or add the entry it prints to `.kiro/settings/mcp.json`) and use the workspace-level `hexperiment` tools.
+
 ## The ML-integrity rules
 
 These rules apply to every training script in `apps/`. They exist because an agent optimizing a metric will find a leak if one is available. A result that breaks a rule is not a result.

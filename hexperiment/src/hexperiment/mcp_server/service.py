@@ -17,6 +17,7 @@ from hexperiment.errors import HexInputError
 from hexperiment.ghosts import find_ghost, to_dict
 from hexperiment.runs import CARD_FILENAME, RUNS_DIRNAME, VERDICT_FILENAME, load_history
 from hexperiment.workspace import (
+    ENV_WORKSPACE,
     RunApp,
     discover_apps,
     relative_posix,
@@ -51,7 +52,22 @@ def list_apps(workspace: Path) -> dict[str, Any]:
                 "problem": " ".join(problems) if problems else None,
             }
         )
-    return {"workspace": str(root), "apps": apps}
+    result: dict[str, Any] = {"workspace": str(root), "apps": apps}
+    if not apps:
+        result["hint"] = _no_apps_hint(root)
+    return result
+
+
+def _no_apps_hint(root: Path) -> str:
+    """Why no app was found and how to point the server at the project (4.9)."""
+    return (
+        f"No app found below the workspace {root}. A Kiro power starts its server "
+        "in the power's install folder, not in your project. Run "
+        "`hexperiment init --kiro` in the project to add the hexperiment server to "
+        ".kiro/settings/mcp.json (or add that entry by hand), or set "
+        f"{ENV_WORKSPACE} to the project folder, then use the workspace-level "
+        "hexperiment tools."
+    )
 
 
 def get_verdict(workspace: Path, app: str) -> dict[str, Any]:

@@ -42,8 +42,30 @@ def workspace(tmp_path) -> Path:
 # --- list_apps -----------------------------------------------------------------------
 
 
-def test_list_apps_of_an_empty_workspace(workspace):
-    assert service.list_apps(workspace) == {"workspace": str(workspace), "apps": []}
+def test_list_apps_of_an_empty_workspace_has_a_hint_that_names_the_workspace(
+    workspace,
+):
+    result = service.list_apps(workspace)
+    assert result["workspace"] == str(workspace)
+    assert result["apps"] == []
+    assert str(workspace) in result["hint"]
+    assert "hexperiment init --kiro" in result["hint"]
+    assert ".kiro/settings/mcp.json" in result["hint"]
+    assert "HEXPERIMENT_WORKSPACE" in result["hint"]
+
+
+def test_list_apps_has_no_hint_when_an_app_is_found(workspace):
+    make_app(workspace / "apps" / "churn")
+    result = service.list_apps(workspace)
+    assert len(result["apps"]) == 1
+    assert "hint" not in result
+
+
+def test_list_apps_has_a_hint_when_the_only_folder_is_not_an_app(workspace):
+    (workspace / "apps" / "empty").mkdir(parents=True)
+    result = service.list_apps(workspace)
+    assert result["apps"] == []
+    assert str(workspace) in result["hint"]
 
 
 def test_list_apps_gives_name_path_status_and_problem_sorted_by_path(workspace):

@@ -7,6 +7,7 @@ writing (Requirements 5.1 to 5.3).
 
 from __future__ import annotations
 
+import json
 import shutil
 from dataclasses import dataclass
 from importlib import resources
@@ -30,6 +31,7 @@ class TemplateFile:
 class InitReport:
     created: tuple[Path, ...]
     skipped: tuple[Path, ...]
+    notes: tuple[str, ...] = ()  # extra lines for the reader, after the file lines
 
 
 APP_FILES: tuple[TemplateFile, ...] = (
@@ -47,6 +49,8 @@ KIRO_FILES: tuple[TemplateFile, ...] = (
 )
 
 KIRO_FOLDER = ".kiro"
+MCP_SETTINGS = TemplateFile("kiro/settings/mcp.json", "settings/mcp.json")
+_MCP_PATH = f"{KIRO_FOLDER}/{MCP_SETTINGS.target}"
 _HOOK_TARGET = f"{KIRO_FOLDER}/hooks/hexperiment.json"
 _APP_MARKER = APP_FILES[0].target
 
@@ -62,8 +66,20 @@ def init_app(app_dir: Path) -> InitReport:
 
 
 def init_kiro(project_dir: Path) -> InitReport:
-    """Add the files of ``KIRO_FILES`` that are absent below ``project_dir/.kiro``."""
-    return _write_all(KIRO_FILES, project_dir / KIRO_FOLDER)
+    """Add the files of ``KIRO_FILES`` that are absent below ``project_dir/.kiro``.
+
+    ``settings/mcp.json`` is handled apart (Requirements 5.2, 5.4): it is created
+    when absent, and an existing one is never rewritten, because it may hold the
+    project's other servers.
+    """
+    kiro = project_dir / KIRO_FOLDER
+    files = _write_all(KIRO_FILES, kiro)
+    settings = _init_mcp_settings(kiro / MCP_SETTINGS.target)
+    return InitReport(
+        created=files.created + settings.created,
+        skipped=files.skipped + settings.skipped,
+        notes=settings.notes,
+    )
 
 
 def format_report(report: InitReport, base: Path) -> str:
@@ -77,12 +93,52 @@ def format_report(report: InitReport, base: Path) -> str:
         f"skipped  {_shown(path, base)} (already exists)" for path in report.skipped
     ]
     touched = (*report.created, *report.skipped)
+    lines += report.notes
     for path in touched:
         if path.name == _APP_MARKER:
             lines += _app_notes(_shown(path.parent, base))
     if any(_shown(path, base).endswith(_HOOK_TARGET) for path in touched):
         lines += _kiro_notes()
     return "\n".join(lines)
+
+
+def _init_mcp_settings(target: Path) -> InitReport:
+    """Create the workspace-level MCP settings, or explain why they are left alone."""
+    template = _read_template(MCP_SETTINGS)
+    if target.is_dir():
+        raise HexInputError(
+            f"{target} is a folder, so the file cannot be created there.",
+            "Move or rename the folder, then run the command again.",
+        )
+    if _create(target, template):
+        return InitReport(created=(target,), skipped=())
+    return InitReport(
+        created=(),
+        skipped=(target,),
+        notes=_mcp_notes(target, template),
+    )
+
+
+def _mcp_notes(target: Path, template: bytes) -> tuple[str, ...]:
+    """Notes for an existing ``mcp.json``; none when it already has the server."""
+    entry = json.dumps(json.loads(template)["mcpServers"], indent=2)
+    try:
+        settings = json.loads(target.read_text(encoding="utf-8"))
+    except ValueError as error:
+        return (
+            "",
+            f"{_MCP_PATH} is not valid JSON ({error}), so it was left alone. Fix it, "
+            f"then add this to its \"mcpServers\":\n{entry}",
+        )
+    servers = settings.get("mcpServers") if isinstance(settings, dict) else None
+    if isinstance(servers, dict) and "hexperiment" in servers:
+        return ()
+    return (
+        "",
+        f"{_MCP_PATH} has no \"hexperiment\" server, so it was left alone. Add this "
+        f"to its \"mcpServers\" so that Kiro starts hexperiment-mcp in this "
+        f"project:\n{entry}",
+    )
 
 
 def _write_all(files: tuple[TemplateFile, ...], destination: Path) -> InitReport:

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import numpy as np
 from numpy.typing import NDArray
-from sklearn.metrics import roc_auc_score
 
 from hexperiment.errors import HexInputError
 from hexperiment.models import Finding, MetricResult, Severity
@@ -35,6 +34,8 @@ def compute_metric(y_true: NDArray[np.bool_], y_score: NDArray[np.float64]) -> f
             "Make sure the test rows hold both classes, and that [target] positive "
             "in hex.toml is a value that occurs in the target column.",
         )
+    from sklearn.metrics import roc_auc_score  # imported late: slow (Requirement 4.8)
+
     return float(roc_auc_score(y_true, y_score))
 
 

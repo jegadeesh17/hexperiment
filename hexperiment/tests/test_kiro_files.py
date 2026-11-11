@@ -286,9 +286,17 @@ def rules(capability: str, effect: str) -> list[dict[str, Any]]:
 
 
 def surely_denied(capability: str, subject: str) -> bool:
-    """A deny rule matches under the strict reading."""
+    """A deny rule matches under the strict reading.
+
+    For the shell the strict reading is the whole command line: a command is not a
+    path, so ``/`` in an argument does not end a ``*`` (``Set-Content*`` must deny
+    ``Set-Content apps/churn/verdict.json x``). Checked live with Kiro CLI 3.2.0 on
+    2026-11-12: ``git*`` refused ``git log -1 apps/x``. The match is case-sensitive
+    there too: ``GIT log -1`` matched no deny rule.
+    """
+    loose = capability == "shell"
     return any(
-        rule_matches(rule, subject, loose=False) for rule in rules(capability, "deny")
+        rule_matches(rule, subject, loose=loose) for rule in rules(capability, "deny")
     )
 
 
@@ -451,6 +459,45 @@ SHELL_NOT_ALLOWED = [
     "irm http://example.com",
     "cat apps/churn/hex.toml",
 ]
+
+# Commands that write, copy, move or delete files, start another interpreter or
+# reach the network. In a headless workflow step a command that matches no rule
+# runs, so each of these must hit a deny rule.
+SHELL_SURELY_DENIED = [
+    "Set-Content apps/churn/verdict.json x",
+    "Add-Content apps/churn/hex.toml x",
+    "Out-File apps/churn/verdict.json",
+    "Copy-Item a apps/churn/verdict.json",
+    "Move-Item a b",
+    "New-Item apps/churn/x.py",
+    "cp a b",
+    "mv a b",
+    "copy a b",
+    "echo x",
+    "cmd /c del verdict.json",
+    "powershell -c whoami",
+    "pwsh -c whoami",
+    "bash -c whoami",
+    "node -e 1",
+    "py -c 1",
+    "Start-Process notepad",
+    "Invoke-Expression whoami",
+    "iex whoami",
+    "[IO.File]::WriteAllText('v','x')",
+    "Remove-Item x",
+    "del x",
+    "rm x",
+    "git status",
+    "curl x",
+    "python -c 1",
+    "pip install x",
+]
+
+
+@pytest.mark.parametrize("command", SHELL_SURELY_DENIED)
+def test_commands_that_write_or_start_other_programs_are_surely_denied(command):
+    assert surely_denied("shell", command)
+    assert not possibly_allowed("shell", command)
 
 
 @pytest.mark.parametrize("command", SHELL_ALLOWED)
@@ -708,6 +755,13 @@ def test_the_skill_explains_how_to_start_with_hexperiment_init():
     _, body = read_skill()
     assert "hexperiment init apps/<name>" in body
     assert "hexperiment init --kiro" in body
+
+
+def test_the_skill_says_what_to_do_when_list_apps_finds_no_app():
+    _, body = read_skill()
+    assert "`list_apps` returns no apps" in body
+    assert "hexperiment init --kiro" in body
+    assert ".kiro/settings/mcp.json" in body
 
 
 def test_the_skill_does_not_tell_the_agent_to_ignore_a_fix_hint():

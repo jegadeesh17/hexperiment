@@ -42,6 +42,7 @@ from hexperiment.models import (
     Severity,
     Status,
 )
+from hexperiment.runs import app_lock
 
 HEX_TOML = """\
 [app]
@@ -1066,3 +1067,69 @@ def test_a_keyboard_interrupt_in_the_hook_is_not_swallowed(project, monkeypatch)
     feed_stdin(monkeypatch, "{}")
     with pytest.raises(KeyboardInterrupt):
         main(["hook"])
+
+
+# --- the run lock (Requirements 1.8, 8) -----------------------------------------------
+
+
+def test_a_held_lock_refuses_the_run_with_exit_2_and_changes_nothing(
+    tmp_path, run_with, fake_runner, capsys
+):
+    app = make_app(tmp_path)
+    before = (app / "verdict.json").read_bytes()
+    runner = run_with(**passing_plans(fake_runner))
+    with app_lock(app):
+        assert main(["run", str(app)]) == EXIT_RUN_FAILED
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.strip() == (
+        f"hexperiment: another hexperiment run is in progress on {app}; "
+        "wait for it to finish, then run again"
+    )
+    assert runner.calls == []
+    assert not (app / "runs").exists()
+    assert (app / "verdict.json").read_bytes() == before
+
+
+def test_run_app_returns_the_refusal_in_stderr_when_the_lock_is_held(tmp_path):
+    app = make_app(tmp_path)
+    with app_lock(app):
+        outcome = run_app(app, full=False)
+    assert outcome.exit_code == EXIT_RUN_FAILED
+    assert outcome.status is None
+    assert outcome.stdout == ""
+    assert "another hexperiment run is in progress" in outcome.stderr
+
+
+def test_the_lock_is_released_when_the_run_ends(tmp_path, run_with, fake_runner):
+    app = make_app(tmp_path)
+    run_with(**passing_plans(fake_runner))
+    assert main(["run", str(app)]) != EXIT_RUN_FAILED
+    with app_lock(app):
+        pass
+
+
+def test_the_lock_is_released_when_the_run_fails(tmp_path):
+    app = make_app(tmp_path, train=False)
+    assert main(["run", str(app)]) == EXIT_RUN_FAILED
+    with app_lock(app):
+        pass
+
+
+def test_the_hook_passes_on_the_refusal_of_a_held_lock_and_exits_0(
+    project, run_with, fake_runner, monkeypatch, capsys
+):
+    app = make_app(project)
+    runner = run_with(**passing_plans(fake_runner))
+    feed_stdin(monkeypatch, hook_event_for(app))
+    with app_lock(app):
+        assert main(["hook"]) == 0
+    captured = capsys.readouterr()
+    lines = captured.out.splitlines()
+    assert lines[0] == (
+        f"hexperiment: another hexperiment run is in progress on {app.resolve()}; "
+        "wait for it to finish, then run again"
+    )
+    assert lines[-1] == HOOK_NOTICE
+    assert runner.calls == []
+    assert not (app / "runs").exists()

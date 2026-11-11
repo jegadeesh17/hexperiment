@@ -1,5 +1,7 @@
 import json
 import re
+import subprocess
+import sys
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from importlib.metadata import version
@@ -28,6 +30,7 @@ from hexperiment.models import (
     Verdict,
 )
 from hexperiment.runs import (
+    app_lock,
     clear_app_verdict,
     count_test_set_uses,
     finalize_run,
@@ -548,3 +551,96 @@ def test_a_run_folder_that_appears_during_the_write_is_not_overwritten(
         finalize_run(tmp_path, make_config(tmp_path), fast_report(), run_id=RUN_A)
     assert [p.name for p in taken.iterdir()] == ["note.txt"]
     assert not (tmp_path / "verdict.json").exists()
+
+
+# --- app_lock (Requirement 8) ---------------------------------------------------------
+
+HOLDER = (
+    "import sys\n"
+    "from hexperiment.runs import app_lock\n"
+    "with app_lock(sys.argv[1]):\n"
+    "    print('locked', flush=True)\n"
+    "    sys.stdin.read()\n"
+)
+
+
+def start_holder(app: Path) -> subprocess.Popen:
+    holder = subprocess.Popen(
+        [sys.executable, "-c", HOLDER, str(app)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    assert holder.stdout is not None
+    assert holder.stdout.readline().strip() == "locked"
+    return holder
+
+
+def test_app_lock_creates_the_hex_folder_and_the_lock_file(tmp_path):
+    with app_lock(tmp_path):
+        assert (tmp_path / ".hex" / "run.lock").is_file()
+
+
+def test_app_lock_can_be_taken_again_after_it_is_released(tmp_path):
+    with app_lock(tmp_path):
+        pass
+    with app_lock(tmp_path):
+        pass
+
+
+def test_app_lock_is_released_when_the_body_raises(tmp_path):
+    with pytest.raises(RuntimeError), app_lock(tmp_path):
+        raise RuntimeError("boom")
+    with app_lock(tmp_path):
+        pass
+
+
+def test_app_lock_refuses_a_second_holder_in_the_same_process(tmp_path):
+    with app_lock(tmp_path):
+        with pytest.raises(HexInputError) as caught, app_lock(tmp_path):
+            pass
+    assert str(caught.value) == (
+        f"another hexperiment run is in progress on {tmp_path}; "
+        "wait for it to finish, then run again"
+    )
+
+
+def test_a_refused_lock_leaves_the_first_holder_in_place(tmp_path):
+    with app_lock(tmp_path):
+        with pytest.raises(HexInputError), app_lock(tmp_path):
+            pass
+        with pytest.raises(HexInputError), app_lock(tmp_path):
+            pass
+
+
+def test_app_lock_is_refused_while_another_process_holds_it(tmp_path):
+    holder = start_holder(tmp_path)
+    try:
+        with pytest.raises(HexInputError, match="another hexperiment run"), app_lock(
+            tmp_path
+        ):
+            pass
+    finally:
+        holder.communicate("")
+    with app_lock(tmp_path):
+        pass
+
+
+def test_app_lock_is_released_when_the_holder_is_killed(tmp_path):
+    holder = start_holder(tmp_path)
+    try:
+        with pytest.raises(HexInputError), app_lock(tmp_path):
+            pass
+    finally:
+        holder.kill()
+        holder.communicate()
+    with app_lock(tmp_path):
+        pass
+
+
+def test_app_lock_does_not_touch_run_history_or_verdict(tmp_path):
+    (tmp_path / "verdict.json").write_text("{}", encoding="utf-8")
+    with app_lock(tmp_path):
+        pass
+    assert (tmp_path / "verdict.json").read_text(encoding="utf-8") == "{}"
+    assert not (tmp_path / "runs").exists()

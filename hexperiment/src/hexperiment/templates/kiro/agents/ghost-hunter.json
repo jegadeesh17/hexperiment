@@ -56,7 +56,14 @@
           "*&*", "*;*", "*|*", "*>*", "*<*", "*`*", "*$(*", "*..*",
           "git*", "rm *", "rmdir*", "del *", "Remove-Item*",
           "curl*", "wget*", "Invoke-WebRequest*", "Invoke-RestMethod*", "iwr *", "irm *",
-          "pip*", "python*", "hexperiment init*", "hexperiment hook*"
+          "pip*", "python*", "hexperiment init*", "hexperiment hook*",
+          "Set-Content*", "Add-Content*", "Clear-Content*", "Out-File*", "Tee-Object*",
+          "Copy-Item*", "Move-Item*", "New-Item*", "Rename-Item*", "Set-Item*",
+          "sc *", "ac *", "ni *", "cp *", "mv *", "copy *", "move *", "ren *", "tee *",
+          "xcopy*", "robocopy*", "mklink*", "echo *", "Write-Output*",
+          "cmd*", "powershell*", "pwsh*", "bash*", "sh *", "wsl*", "node*", "py *",
+          "Start-Process*", "saps *", "start *", "Invoke-Expression*", "iex*",
+          "Invoke-Command*", "icm *", "*::*"
         ],
         "effect": "deny"
       }

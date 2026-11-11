@@ -6,13 +6,15 @@ or deletes an earlier run folder (Requirement 15.1).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
 import secrets
 import shutil
+import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
 from importlib.metadata import version as installed_version
 from pathlib import Path
@@ -31,6 +33,8 @@ CARD_FILENAME = "model_card.md"
 PARTIAL_PREFIX = ".partial-"
 DELETE_RETRIES = 5
 DELETE_PAUSE_SECONDS = 0.2
+LOCK_DIRNAME = ".hex"
+LOCK_FILENAME = "run.lock"
 
 _RUN_ID_PATTERN = re.compile(r"\d{8}-\d{6}-[0-9a-f]{6}")
 _TOKEN_PATTERN = re.compile(r"[0-9a-f]{6}")
@@ -93,6 +97,61 @@ def load_history(app_dir: str | os.PathLike[str]) -> list[Verdict]:
     )
     verdicts = [_read_verdict(path) for path in paths]
     return sorted(verdicts, key=lambda v: (v.created_at, v.run_id))
+
+
+def _try_lock(fd: int) -> bool:
+    """Take a non-blocking exclusive lock on the first byte of ``fd``."""
+    os.lseek(fd, 0, os.SEEK_SET)
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return False
+    return True
+
+
+def _unlock(fd: int) -> None:
+    os.lseek(fd, 0, os.SEEK_SET)
+    if sys.platform == "win32":
+        import msvcrt
+
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(fd, fcntl.LOCK_UN)
+
+
+@contextlib.contextmanager
+def app_lock(app_dir: str | os.PathLike[str]) -> Iterator[None]:
+    """Hold the run lock of an app: one ``hexperiment run`` at a time (Requirement 8).
+
+    The lock is an operating-system lock on ``<app_dir>/.hex/run.lock``, so the
+    system releases it when the process ends, also when it is killed
+    (Requirement 8.2). If another process holds it, ``HexInputError`` says so
+    before anything is written (Requirement 8.1).
+    """
+    directory = Path(app_dir) / LOCK_DIRNAME
+    directory.mkdir(parents=True, exist_ok=True)
+    fd = os.open(directory / LOCK_FILENAME, os.O_RDWR | os.O_CREAT)
+    try:
+        if not _try_lock(fd):
+            raise HexInputError(
+                f"another hexperiment run is in progress on {app_dir};",
+                "wait for it to finish, then run again",
+            )
+        try:
+            yield
+        finally:
+            _unlock(fd)
+    finally:
+        os.close(fd)
 
 
 def clear_app_verdict(app_dir: Path) -> None:

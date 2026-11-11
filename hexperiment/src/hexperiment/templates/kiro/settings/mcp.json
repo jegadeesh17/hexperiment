@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "hexperiment": {
+      "command": "hexperiment-mcp",
+      "args": [],
+      "env": {}
+    }
+  }
+}

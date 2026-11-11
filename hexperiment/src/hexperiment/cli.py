@@ -21,7 +21,7 @@ from hexperiment.errors import HexInputError
 from hexperiment.hook import handle_hook
 from hexperiment.init import InitReport, format_report, init_app, init_kiro
 from hexperiment.models import RunOutcome, Status, Verdict
-from hexperiment.runs import clear_app_verdict, finalize_run, new_run_id
+from hexperiment.runs import app_lock, clear_app_verdict, finalize_run, new_run_id
 from hexperiment.verdict import format_summary
 from hexperiment.workspace import resolve_workspace
 
@@ -175,6 +175,7 @@ def _init_command(app_dir: str | None, *, kiro: bool) -> int:
         report = InitReport(
             created=tuple(path for r in reports for path in r.created),
             skipped=tuple(path for r in reports for path in r.skipped),
+            notes=tuple(note for r in reports for note in r.notes),
         )
         text = format_report(report, Path.cwd())
     except (HexInputError, OSError) as error:
@@ -203,7 +204,15 @@ def _run(app_dir: Path, *, full: bool, timeout_cap: float | None = None) -> Verd
             f"the app folder {app_dir} does not exist or is not a folder.",
             "Pass the folder that holds hex.toml and train.py.",
         )
-    app_dir = app_dir.resolve()
+    # The lock comes before anything is deleted or written, so a refused run leaves
+    # the verdict and the run history as they were (Requirement 8.1).
+    with app_lock(app_dir):
+        return _run_locked(app_dir.resolve(), full=full, timeout_cap=timeout_cap)
+
+
+def _run_locked(
+    app_dir: Path, *, full: bool, timeout_cap: float | None = None
+) -> Verdict:
     clear_app_verdict(app_dir)
     config = load_config(app_dir)
     if timeout_cap is not None:

@@ -366,3 +366,53 @@ def test_mutable_module_variables_sees_mutable_values(source):
 )
 def test_mutable_module_variables_accepts_immutable_values(source):
     assert mutable_module_variables(ast.parse(source)) == []
+
+
+# Start-up cost (Requirement 4.8). Each test starts a fresh interpreter, because the
+# test process has long since imported everything.
+
+
+def loaded_after(code: str, names: tuple[str, ...]) -> list[str]:
+    """Run ``code`` in a fresh interpreter; return which of ``names`` it loaded."""
+    script = (
+        "import sys\n"
+        f"{code}\n"
+        f"print(','.join(m for m in {names!r} if m in sys.modules))\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stderr
+    return [name for name in result.stdout.strip().split(",") if name]
+
+
+def test_importing_the_server_module_loads_neither_sklearn_nor_scipy():
+    loaded = loaded_after(
+        "import hexperiment.mcp_server.server", ("sklearn", "scipy")
+    )
+    assert loaded == []
+
+
+def test_importing_hexperiment_loads_neither_pandas_nor_sklearn_nor_scipy():
+    loaded = loaded_after("import hexperiment", ("pandas", "sklearn", "scipy"))
+    assert loaded == []
+
+
+def test_the_lazy_public_functions_resolve_by_attribute_access():
+    code = (
+        "import hexperiment\n"
+        "assert 'load' in dir(hexperiment)\n"
+        "assert 'audit' in dir(hexperiment)\n"
+        "assert 'pandas' not in sys.modules\n"
+        "from hexperiment.data import load\n"
+        "assert hexperiment.load is load\n"
+        "assert hexperiment.split.__module__ == 'hexperiment.data'\n"
+        "assert hexperiment.audit.__module__ == 'hexperiment.auditor'\n"
+        "assert hexperiment.load_history.__module__ == 'hexperiment.runs'\n"
+    )
+    assert loaded_after(code, ("pandas",)) == ["pandas"]
+
+
+def test_an_unknown_package_attribute_still_raises_attribute_error():
+    with pytest.raises(AttributeError):
+        hexperiment.no_such_name  # noqa: B018
