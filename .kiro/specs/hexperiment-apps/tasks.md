@@ -1,0 +1,60 @@
+# Implementation Plan: hexperiment-apps
+
+## How to use this plan
+
+- Work the tasks in order. Each task ends with `.venv/Scripts/python -m pytest apps/tests -q` and `.venv/Scripts/python -m ruff check apps` both passing.
+- Run all commands from the repository root with the root virtual environment: `.venv/Scripts/python ...` and `.venv/Scripts/hexperiment run ...`. Do not install into the global interpreter. Make no git commits.
+- Signatures, script shapes, expected numbers and fallbacks are in `design.md`. This plan names what to build and where, not how. Numbers in `design.md` are targets to verify. Record what you measure; never copy a target into a README as a result.
+- Never run `hexperiment run apps/<app>` or `python apps/<app>/train.py` directly: each writes `runs/` and `verdict.json` into the app, and the committed history must come from the `exorcise` workflow later. Run scripts only through `apps/verify.py` (task 3), which uses scratch copies. If a `runs/`, `verdict.json` or `.hex/` folder appears under an app by accident, report it instead of editing it.
+- Do not edit `requirements.md`, anything under `hexperiment/`, `.kiro/steering/` or `.kiro/specs/hexperiment-kiro/`. Every change stays inside `apps/`; `.gitignore` already covers `apps/*/data/` and `apps/*/.hex/`.
+- The only runtime dependencies are `pandas`, `numpy` and `scikit-learn`; the download uses standard-library `urllib`. If a task seems to need another dependency, stop and record the reason in `docs/DECISIONS.md` first.
+- If a script or the checks give a result that differs from `design.md` (a gate fails), follow "If a gate fails" in `design.md`. Never lower a threshold, add a waiver, or change a `[checks]` value to get a pass.
+
+## Tasks
+
+- [ ] 1. Inspect the real sources, write both `hex.toml` files, and set up the test scaffolding
+  - With `.venv/Scripts/python -c ...`, read `apps/hotel-cancellations/data/hotels.csv` and `apps/flight-delays/data/flights.csv` and print: the header, dtypes, row count, the number of exact duplicate rows in hotels, the number of rows of hotels that are duplicates on `FEATURES + ["is_canceled"]` as listed in `design.md`, the format of three `time_hour` values in flights (with or without offset), and the name of the row-number column in flights. Print the SHA-256 of both files and confirm they equal the values in Requirement 1.2.
+  - Write the results as a short note under this task. If a column name in `design.md` differs from the real header, use the real header in `REQUIRED_COLUMNS`, the feature lists and the tests, and put the difference in the note.
+  - Create `apps/hotel-cancellations/hex.toml` and `apps/flight-delays/hex.toml` as in `design.md` (no `[checks]` table, no waivers, `timeout_seconds = 120`).
+  - Create `apps/tests/conftest.py`: `load_module(path, name)` using `importlib.util`, session fixtures for the two `fetch_data` modules and for `verify.py` (loaded lazily, so the tests can be written before those files exist), the parametrized `app` fixture, and the `raw_hotels` and `raw_flights` factories (they need `REQUIRED_COLUMNS`, so finish them in task 2).
+  - Create `apps/tests/test_hex_toml.py` as described in `design.md`. Only the `hex.toml` assertions that do not need `fetch_data.py` run now; the `data.path == "data/" + PREPARED_NAME` assertion is added in task 2.
+  - Confirm `.gitignore` ignores `apps/*/data/` and `apps/*/.hex/` and does not ignore `apps/*/runs/`.
+  - _Requirements: 1.8, 2.1, 3.1, 5.1_
+
+- [ ] 2. `fetch_data.py` for both apps, with offline tests, and the prepared files
+  - Create `apps/hotel-cancellations/fetch_data.py` and `apps/flight-delays/fetch_data.py` with the names and signatures in `design.md`: `Source`, `SOURCE` (URL, SHA-256 and size from Requirement 1.2), `PREPARED_NAME = "prepared.csv"`, `REQUIRED_COLUMNS`, `prepare`, `check_digest`, `sha256_of`, `download`, `write_atomic`, `fetch`, `main`. The source file keeps its name (`hotels.csv`, `flights.csv`) so the existing local files are not downloaded again.
+  - `download` streams to `<name>.part`, hashes while reading, stops when the pinned size is exceeded, and calls `os.replace` only after size and SHA-256 match. `write_atomic` writes `<name>.part` and calls `os.replace`. Both remove the `.part` file on any failure. Every failure is a `HexInputError` that names the URL (download problems) and says how to fix it; `main` prints `fetch_data: <problem> <fix>` to stderr and returns 1.
+  - `prepare` is a pure function of a DataFrame (no file, network or clock). Hotels returns a copy with every column. Flights drops the row-number column, drops rows without `arr_delay`, adds `late`, rewrites `time_hour` as `%Y-%m-%dT%H:%M:%SZ` (naive text taken as UTC), and drops `dep_time`, `dep_delay`, `arr_time`, `arr_delay`, `air_time`.
+  - Create `apps/tests/test_fetch_data.py` with every case listed for it in `design.md`, including the Hypothesis test for flights `prepare` (`max_examples=50`, `deadline=None`). Fake openers return `io.BytesIO`; no test touches the network or `data/`.
+  - Create `apps/tests/test_prepared_with_core.py` as described in `design.md`. Add the `data.path == "data/" + PREPARED_NAME` assertion to `test_hex_toml.py`.
+  - Run `.venv/Scripts/python apps/hotel-cancellations/fetch_data.py` and `.venv/Scripts/python apps/flight-delays/fetch_data.py`. Both must finish without a download (the checksum matches the local source) and write `data/prepared.csv`. Run each a second time to confirm the same behaviour. Record the row and column counts of both prepared files, and that the flights file has 327,346 rows and a late rate of about 0.237 (print it with `.venv/Scripts/python -c ...`).
+  - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 5.1_
+
+- [ ] 3. Scratch runner and the hotel-cancellations scripts
+  - Create `apps/verify.py` as described in `design.md`: scratch copy of an app (without `runs`, `.hex`, `verdict.json`, `haunted`, `__pycache__` and the source CSVs), a variant written as `train.py`, `hexperiment run` through the console script of the root virtual environment, wall time from `time.perf_counter`, and one printed row per variant with the exit code, status, mode, metric, seconds, ghosts and the run summary. Include `split_fixed_source` (pure; exactly one line ending in `# LEAK: random split`, otherwise `ValueError`) so task 4 can use it.
+  - Create `apps/hotel-cancellations/train.py` (honest) and `apps/hotel-cancellations/haunted/train.py` as in `design.md`. The haunted script is the honest one plus the leaks marked `# LEAK:`; its header comment says it must be copied over `../train.py` to run. Check the scikit-learn arguments (`OrdinalEncoder(min_frequency=...)`, `categorical_features` mask) against the installed version.
+  - Create `apps/tests/test_scripts.py` with the static tests for the two hotel scripts (parse, `load`, audit last with `script=__file__` and `y_score_train`, seeds, no `reset_index`, forbidden columns absent from the honest script as string constants, haunted uses `reservation_status` and `country_cancel_rate`, at least two `# LEAK:` comments). Do not add the haunted pin yet.
+  - Run `.venv/Scripts/python apps/verify.py hotel-cancellations` (haunted and honest). Expected: haunted `REJECTED` with The Possession on `reservation_status`, The Peeking Spirit and the "too good" warning; honest `APPROVED` with AUC at least 0.87. If the honest script is `UNVERIFIED` or shows The Shapeshifter, or the AUC is below the gate, apply "If a gate fails" in `design.md` once and note what changed. Record: both AUCs, the findings, the wall time of each run, and the number of test rows left after `drop_seen_test_rows`.
+  - _Requirements: 2.1, 2.2, 2.3, 2.4, 5.1, 5.2_
+
+- [ ] 4. The flight-delays scripts
+  - Create `apps/flight-delays/train.py` (honest) and `apps/flight-delays/haunted/train.py` as in `design.md`. The haunted script is the honest one plus the two marked leaks, with exactly one line ending in `# LEAK: random split`, and it imports `train_test_split` from scikit-learn instead of calling `hexperiment.split`. Neither script combines `year`, `month` and `day` into a date.
+  - Extend `apps/tests/test_scripts.py` with the flights cases (honest uses `hexperiment.split` and no `train_test_split`; haunted uses `train_test_split` and no `hexperiment.split`; one marker line; `split_fixed_source` yields a script with `hexperiment.split(` and without `train_test_split(`, and raises for zero or two marker lines).
+  - Run `.venv/Scripts/python apps/verify.py flight-delays` (haunted, split-fixed, honest). Expected: haunted `REJECTED` with The Prophet and a canary `not applied` warning; split-fixed `REJECTED` with The Peeking Spirit and no The Prophet; honest `APPROVED` with AUC at least 0.62. If the split-fixed variant shows no The Peeking Spirit, do not change the grouping: stop and report (Open question 10 in `design.md`). Apply "If a gate fails" for any other miss and note what changed. Record: the three AUCs, the findings of each, the wall time of each, and the number of rows removed by `drop_seen_test_rows`.
+  - _Requirements: 3.1, 3.2, 3.3, 3.4, 5.1, 5.2_
+
+- [ ] 5. READMEs and the remaining tests
+  - Write `apps/hotel-cancellations/README.md` and `apps/flight-delays/README.md` following the outline in `design.md`: question, data with source, licence and the exact attribution of Requirement 4.1, fetch and run commands, a table of the leaks with the ghost that catches each, the honest changes, a results table, the replay instructions (copy `haunted/train.py` over `train.py`, then the `exorcise` workflow or fix by hand, then `.venv/Scripts/hexperiment run apps/<app>`), limits, and a files table. Use the numbers recorded in tasks 3 and 4 for the results table and the run time; the final numbers are updated in task 6.
+  - Create `apps/tests/test_readme.py` and `apps/tests/test_history.py` as described in `design.md`. With no `runs/` folder, `test_history.py` must skip with a reason.
+  - Run `.venv/Scripts/python -m pytest apps/tests -q` and confirm the whole suite finishes in under 20 seconds (`--durations=5` shows the slowest tests) and that skipped tests are only those of `test_history.py`.
+  - _Requirements: 4.1, 4.2, 5.1, 5.3_
+
+- [ ] 6. Final verification and record
+  - Run `.venv/Scripts/python apps/verify.py hotel-cancellations` and `.venv/Scripts/python apps/verify.py flight-delays` once more, in full mode, for every variant. Check each result against the "demo arc" table in `design.md`: statuses, exit codes, ghosts, warnings.
+  - For each honest script, run `verify.py` a second time and confirm `status`, `metric` and the findings are identical (determinism). Confirm each honest full run finished within its `timeout_seconds` (120 s) in total, not only per execution.
+  - Put the final measured AUCs, statuses and wall times into the results table and the run-time sentence of each README (machine, date, number of executions). Replace every estimate with a measured value. Add a short record of these numbers under this task as a note, including the haunted-versus-honest AUC of both apps and the three flights verdicts.
+  - Set the SHA-256 pin constants for the two haunted scripts in `apps/tests/test_scripts.py`.
+  - Run `.venv/Scripts/python -m pytest apps/tests -q`, then `.venv/Scripts/python -m ruff check apps`, then `.venv/Scripts/python -m ruff check apps --select E,F,I,UP,B` (the rule set of the core package). All must report no problems.
+  - List `apps/hotel-cancellations` and `apps/flight-delays` and confirm neither contains `runs/`, `verdict.json` or `.hex/`, that `data/` holds only the source and `prepared.csv`, and that no file outside `apps/` was changed.
+  - Confirm the follow-up for the recording: the packaged `haunted/train.py` of each app runs from a copy over `train.py` (done by `verify.py`), and `test_history.py` is ready to validate the history that the `exorcise` workflow will produce.
+  - _Requirements: 2.3, 2.4, 3.3, 3.4, 4.1, 5.1, 5.2, 5.3, 5.4_
