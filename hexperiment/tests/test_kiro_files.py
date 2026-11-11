@@ -2,12 +2,14 @@
 
 The files under test are the repository's own ``.kiro/hooks/hexperiment.json``,
 ``.kiro/workflows/exorcise.workflow.json`` and ``.kiro/agents/ghost-hunter.json``
-(Requirements 1.1, 2.1 to 2.5, 3.1 to 3.5, 7.2). The tests find them from this
+(Requirements 1.1, 2.1 to 2.5, 3.1 to 3.5, 7.2), and the power in
+``power/hexperiment/`` (Requirements 6.1 to 6.3, 7.2). The tests find them from this
 file's location and fail with the path when one is missing.
 """
 
 import json
 import re
+import tomllib
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -15,6 +17,7 @@ from typing import Any
 import pytest
 
 from hexperiment import hook
+from hexperiment.ghosts import CATALOG
 
 # The trigger literal and the workflow input placeholder are named here once, so a
 # correction after a live check in Kiro changes one line each.
@@ -22,6 +25,9 @@ EXPECTED_TRIGGER = "PostFileSave"
 INPUT_REF = "{{app}}"
 
 KIRO_DIR = Path(__file__).resolve().parents[2] / ".kiro"
+PACKAGE_DIR = Path(__file__).resolve().parents[1]
+POWER_DIR = Path(__file__).resolve().parents[2] / "power" / "hexperiment"
+STEERING_FILE = KIRO_DIR / "steering" / "ml-integrity.md"
 HOOK_FILE = "hooks/hexperiment.json"
 WORKFLOW_FILE = "workflows/exorcise.workflow.json"
 AGENT_FILE = "agents/ghost-hunter.json"
@@ -385,6 +391,12 @@ SHELL_NOT_ALLOWED = [
     "hexperiment run apps/a < in",
     "hexperiment run apps/a `whoami`",
     "hexperiment run apps/$(whoami)",
+    "hexperiment run apps/a\nwhoami",  # a line feed starts a second command
+    "hexperiment run apps/a\r\nwhoami",
+    "hexperiment run apps/a\rwhoami",
+    "hexperiment run --fast apps/a\nwhoami",
+    ".venv/Scripts/hexperiment run apps/a\nwhoami",
+    "hexperiment run apps/a\n",
     "hexperiment run ../x",
     "hexperiment run apps/../../x",
     "hexperiment run churn",
@@ -445,6 +457,24 @@ def test_the_shell_deny_list_names_chaining_characters_and_command_families():
         assert needed in denied, needed
 
 
+def test_the_shell_deny_list_names_line_feed_and_carriage_return():
+    """A line break starts a second command in a shell (Requirement 3.4)."""
+    denied = {p for rule in rules("shell", "deny") for p in rule["match"]}
+    assert "*\n*" in denied  # a real line feed inside the JSON string
+    assert "*\r*" in denied  # a real carriage return inside the JSON string
+    assert "*\\n*" not in denied  # not the two characters backslash and n
+
+
+@pytest.mark.parametrize("line_break", ["\n", "\r", "\r\n"])
+def test_a_line_break_denies_a_command_that_the_allow_list_admits(line_break):
+    plain = "hexperiment run apps/a"
+    chained = f"{plain}{line_break}whoami"
+    assert any(rule_matches(r, chained, loose=True) for r in rules("shell", "allow"))
+    assert any(rule_matches(r, chained, loose=True) for r in rules("shell", "deny"))
+    assert possibly_allowed("shell", plain)
+    assert not possibly_allowed("shell", chained)
+
+
 # The helpers above must catch what they claim to catch.
 
 
@@ -473,3 +503,183 @@ def test_a_deny_rule_wins_over_an_allow_rule_in_the_simulator():
     path = "apps/churn/data/helper.py"
     assert any(rule_matches(r, path, loose=True) for r in rules("fs_write", "allow"))
     assert not possibly_allowed("fs_write", path)
+
+
+# --- the power (Requirements 6.1 to 6.3) ---------------------------------------------
+
+SEMVER = re.compile(
+    r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+)
+REQUIRED_KEYWORDS = (
+    "data leakage",
+    "train test split",
+    "model card",
+    "too good to be true",
+)
+SKILL_NAME = "hexperiment"
+RULE_LINE = re.compile(r"^(\d+)\. \*\*(.+?)\*\*", re.MULTILINE)
+
+
+def read_power_json(name: str) -> dict[str, Any]:
+    """Load a file of the power; fail with a clear message when it is unusable."""
+    path = POWER_DIR / name
+    if not path.is_file():
+        pytest.fail(
+            f"{path} is missing; create it from 'power/hexperiment/' in design.md.",
+            pytrace=False,
+        )
+    try:
+        loaded = json.loads(
+            path.read_text(encoding="utf-8"), object_pairs_hook=_no_duplicate_keys
+        )
+    except ValueError as error:
+        pytest.fail(f"{path} is not valid JSON ({error}).", pytrace=False)
+    assert isinstance(loaded, dict), f"{path} must hold a JSON object"
+    return loaded
+
+
+def package_version() -> str:
+    pyproject = tomllib.loads((PACKAGE_DIR / "pyproject.toml").read_text("utf-8"))
+    return pyproject["project"]["version"]
+
+
+def read_skill() -> tuple[dict[str, str], str]:
+    """The front matter and the body of the skill, with ``\\n`` line ends."""
+    path = POWER_DIR / "skills" / SKILL_NAME / "SKILL.md"
+    if not path.is_file():
+        pytest.fail(
+            f"{path} is missing; create it from 'power/hexperiment/' in design.md.",
+            pytrace=False,
+        )
+    text = path.read_text(encoding="utf-8").replace("\r\n", "\n")
+    assert text.startswith("---\n"), f"{path} must start with front matter"
+    head, separator, body = text[4:].partition("\n---\n")
+    assert separator, f"{path} front matter is not closed with ---"
+    front: dict[str, str] = {}
+    for line in head.splitlines():
+        key, colon, value = line.partition(":")
+        assert colon, f"{path} front matter line {line!r} is not 'key: value'"
+        value = value.strip()
+        front[key.strip()] = json.loads(value) if value.startswith('"') else value
+    return front, body
+
+
+def steering_rules() -> list[tuple[str, str, str]]:
+    """Number, bold title and full line of each rule of ``ml-integrity.md``."""
+    text = STEERING_FILE.read_text(encoding="utf-8").replace("\r\n", "\n")
+    lines = {line for line in text.splitlines() if RULE_LINE.match(line)}
+    rules_found = []
+    for line in sorted(lines):
+        match = RULE_LINE.match(line)
+        assert match
+        rules_found.append((match.group(1), match.group(2), line))
+    return rules_found
+
+
+def test_plugin_json_has_the_fields_of_the_agent_plugins_format():
+    config = read_power_json("plugin.json")
+    assert config["name"] == "hexperiment"
+    for key in ("description", "license"):
+        assert isinstance(config[key], str) and config[key].strip(), key
+    assert isinstance(config["author"]["name"], str) and config["author"]["name"]
+
+
+def test_the_plugin_version_is_semver_and_equals_the_package_version():
+    version = read_power_json("plugin.json")["version"]
+    assert SEMVER.match(version), version
+    assert version == package_version()
+
+
+def test_the_plugin_keywords_include_the_activation_phrases():
+    keywords = read_power_json("plugin.json")["keywords"]
+    assert all(isinstance(keyword, str) and keyword for keyword in keywords)
+    assert len(keywords) == len(set(keywords))
+    for needed in REQUIRED_KEYWORDS:
+        assert needed in keywords, needed
+
+
+def test_mcp_json_starts_one_stdio_server_with_the_hexperiment_mcp_command():
+    config = read_power_json("mcp.json")
+    servers = config["mcpServers"]
+    assert list(servers) == ["hexperiment"]
+    server = servers["hexperiment"]
+    assert server["type"] == "stdio"
+    assert server["command"] == "hexperiment-mcp"
+    assert server["args"] == []
+
+
+def test_mcp_json_needs_no_secrets():
+    read_power_json("mcp.json")
+    text = (POWER_DIR / "mcp.json").read_text(encoding="utf-8")
+    assert "${" not in text
+    assert read_power_json("mcp.json")["mcpServers"]["hexperiment"]["env"] == {}
+
+
+def test_the_plugin_files_hold_no_variable_placeholders():
+    for name in ("plugin.json", "mcp.json"):
+        read_power_json(name)
+        assert "${" not in (POWER_DIR / name).read_text(encoding="utf-8"), name
+
+
+def test_the_skill_front_matter_name_equals_its_folder():
+    front, _ = read_skill()
+    assert front["name"] == SKILL_NAME
+    assert (POWER_DIR / "skills" / front["name"] / "SKILL.md").is_file()
+    assert front["description"].strip()
+
+
+def test_the_steering_file_has_the_eight_numbered_rules():
+    numbers = [number for number, _, _ in steering_rules()]
+    assert numbers == [str(n) for n in range(8)]
+
+
+@pytest.mark.parametrize("number", [str(n) for n in range(8)])
+def test_every_rule_title_of_the_steering_file_appears_in_the_skill(number):
+    _, body = read_skill()
+    (title,) = [t for n, t, _ in steering_rules() if n == number]
+    assert f"{number}. **{title}**" in body
+
+
+@pytest.mark.parametrize("number", [str(n) for n in range(8)])
+def test_the_skill_states_each_rule_as_the_steering_file_does(number):
+    # This includes rule 2: drop the test rows that also appear in the training rows.
+    _, body = read_skill()
+    (line,) = [full for n, _, full in steering_rules() if n == number]
+    assert line in body.splitlines()
+
+
+def test_every_ghost_and_check_of_the_catalogue_appears_in_the_skill():
+    _, body = read_skill()
+    for entry in CATALOG:
+        assert f"`{entry.check}`" in body, entry.check
+        if entry.ghost is not None:
+            assert entry.ghost in body, entry.ghost
+
+
+def test_the_skill_names_the_three_statuses_and_the_exit_codes():
+    _, body = read_skill()
+    for status in ("APPROVED", "REJECTED", "UNVERIFIED"):
+        assert status in body
+    assert "Exit codes" in body
+
+
+def test_the_skill_says_that_only_hexperiment_run_produces_approved():
+    _, body = read_skill()
+    assert "Only `hexperiment run` in full mode produces an APPROVED verdict" in body
+
+
+def test_the_skill_explains_how_to_start_with_hexperiment_init():
+    _, body = read_skill()
+    assert "hexperiment init apps/<name>" in body
+    assert "hexperiment init --kiro" in body
+
+
+def test_the_skill_says_that_thresholds_and_waivers_belong_to_the_human():
+    _, body = read_skill()
+    assert "Thresholds and waivers belong to the human" in body
+
+
+def test_the_skill_names_the_command_that_starts_the_workflow():
+    _, body = read_skill()
+    assert "/workflow run exorcise --app apps/<name>" in body

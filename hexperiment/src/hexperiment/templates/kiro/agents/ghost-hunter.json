@@ -51,7 +51,7 @@
       {
         "capability": "shell",
         "match": [
-          "*&*", "*;*", "*|*", "*>*", "*<*", "*`*", "*$(*", "*..*",
+          "*&*", "*;*", "*|*", "*>*", "*<*", "*`*", "*$(*", "*..*", "*\n*", "*\r*",
           "git*", "rm *", "rmdir*", "del *", "Remove-Item*",
           "curl*", "wget*", "Invoke-WebRequest*", "Invoke-RestMethod*", "iwr *", "irm *",
           "pip*", "python*", "hexperiment init*", "hexperiment hook*"

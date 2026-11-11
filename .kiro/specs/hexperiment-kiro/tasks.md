@@ -69,7 +69,7 @@
   - If the SDK does not route a resource id that contains `%2F`, change only `resource_uri` and `app_from_resource_id` (use `~` for `/`) and keep the test for the round trip.
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 7.1, 7.3_
 
-- [ ] 8. The power
+- [x] 8. The power
   - Create `power/hexperiment/plugin.json`, `power/hexperiment/mcp.json` and `power/hexperiment/skills/hexperiment/SKILL.md` with the contents described under `power/hexperiment/` in `design.md`. The skill has the front matter, the sections listed there, the eight rules with the same bold titles as `.kiro/steering/ml-integrity.md`, and the ghost table.
   - Extend `hexperiment/tests/test_kiro_files.py` with the power checks: `plugin.json` fields, semver, version equal to the package version in `pyproject.toml`, the four required keywords; `mcp.json` has one stdio server `hexperiment` with command `hexperiment-mcp` and no `${`; `SKILL.md` front matter `name` equals its folder; every bold rule title of `ml-integrity.md` appears in the skill; every ghost name and check name of `ghosts.CATALOG` appears in the skill; the skill states that only `hexperiment run` produces `APPROVED`, mentions `hexperiment init`, and mentions the thresholds-and-waivers rule.
   - _Requirements: 6.1, 6.2, 6.3, 7.2_
