@@ -35,7 +35,7 @@ All review questions are resolved (see "Resolved questions"). Three resolutions 
 | Snapshot encoding | `meta.json` plus `snapshot.npz` loaded with `allow_pickle=False` | Exact float64 round trip, compact for large frames, no pickle. |
 | Row hash for the canary | `pandas.util.hash_pandas_object(..., index=False)` per training row | Stable across processes, handles mixed dtypes. |
 | Canary tolerance | Absolute `1e-9` on `y_score_train`, exact equality on row hashes | As required by Requirement 10.3. |
-| Exceptions for non-input failures | Private `ExecutionFailed` in `canary.py`, mapped to exit code 2 by the CLI | `HexInputError` stays reserved for invalid input. |
+| Exceptions for non-input failures | Private `ExecutionFailed` in `canary.py` (with its subclass `ExecutionTimedOut`), mapped to exit code 2 by the CLI | `HexInputError` stays reserved for invalid input. |
 
 
 ## Architecture
@@ -49,7 +49,7 @@ flowchart TB
 
     subgraph EDGES["Modules that touch files or processes"]
         CLI["cli.py<br/>main()"]
-        AUD["auditor.py<br/>audit()"]
+        AUD["auditor.py<br/>audit(), print_text()"]
         DATA["data.py<br/>load, split, validate_audit_inputs"]
         CFG["config.py<br/>load_config, current_mode"]
         CAN["canary.py<br/>executions, .hex/ protocol,<br/>snapshot comparison, control rerun"]
@@ -72,22 +72,29 @@ flowchart TB
     CLI --> CAN
     CLI --> RUNS
     CLI --> VER
+    CLI -->|"print_text"| AUD
 
     AUD --> CFG
     AUD --> DATA
     AUD --> CHK
     AUD --> CAN
     AUD --> RUNS
+    AUD --> VER
 
     DATA --> CFG
     DATA --> CAN
     CAN --> CFG
     CAN -. "spawns with HEX_MODE=normal, canary, control" .-> TRAIN
 
+    RUNS --> CFG
+    RUNS --> CAN
     RUNS --> VER
     RUNS --> CARD
 
+    CHK --> CFG
+    CHK --> DATA
     CHK --> MOD
+    VER --> CAN
     VER --> MOD
     CARD --> MOD
     CAN --> MOD
@@ -95,7 +102,7 @@ flowchart TB
 
 Dependency rules, enforced by `tests/test_architecture.py`:
 
-- Arrows point from caller to callee. There are no cycles.
+- Arrows point from caller to callee. There are no cycles. An arrow from a pure module to an edge module (`checks/` to `data.py`, `verdict.py` to `canary.py`) stands for types, constants and pure helpers such as `ValidatedInputs`, `parse_times` and `CanaryOutcome`, never for file or process access.
 - Only `canary.py` imports `subprocess`.
 - Modules in the "pure" group, and every module under `checks/`, import none of `os`, `pathlib`, `shutil`, `subprocess`, `tomllib`, `datetime` and do not call `open`. (`json` is allowed because it only serializes strings.)
 - `train.py` imports only names listed in `hexperiment.__all__`.
@@ -105,12 +112,13 @@ Dependency rules, enforced by `tests/test_architecture.py`:
 A run involves two kinds of process.
 
 - **Parent**: `hexperiment run`. It owns the `run_id`, spawns executions, reads their files, and writes the verdict.
-- **Child**: `python train.py`, started with `cwd=<app_dir>`, `sys.executable`, no shell, and two environment variables.
+- **Child**: `python train.py`, started with `cwd=<app_dir>`, `sys.executable`, no shell, stdin closed, stdout and stderr redirected to temporary files, and the environment variables below.
 
 | Variable | Set by | Meaning |
 |---|---|---|
 | `HEX_MODE` | parent per execution | `normal` (default when unset), `canary` or `control`. Any other value raises `HexInputError` in the child. |
-| `HEX_RUN_ID` | parent | The run's id. When unset, the child is a standalone run. |
+| `HEX_RUN_ID` | parent | The run's id. When unset, the child is a standalone run. A value that is empty or only whitespace raises `HexInputError`. |
+| `PYTHONIOENCODING` | parent, always `utf-8` | Makes the child write its stderr as UTF-8, so the parent can decode the tail it reports on any console. |
 
 The child and parent exchange data only through `<app_dir>/.hex/<mode>/`. The parent deletes that mode folder before each execution so that a stale file can never be read.
 
@@ -161,16 +169,16 @@ sequenceDiagram
     TR->>TR: audit() validates training inputs only and writes the snapshot
     TR-->>CAN: exit code 0
     CAN->>CAN: read_snapshot(canary), read_load_marker(canary)
-    CAN->>CAN: decide_canary(normal, canary, marker, run_control)
+    CAN->>CAN: decide_canary(normal, canary, marker, run_control, hint_locations(result))
 
-    alt canary snapshot differs from normal and training row ids are equal
+    alt canary differs from normal (rows, predictions or feature list), the marker is valid and training row ids are equal
         Note over CAN,TR: Execution 3, control (optional)
         CAN->>TR: spawn with HEX_MODE=control
         TR->>TR: same as normal, audit() writes the snapshot only
         TR-->>CAN: exit code 0
         alt control matches normal
             CAN->>CAN: outcome failed, finding The Peeking Spirit (error)
-        else control differs from normal
+        else control differs from normal or used other features
             CAN->>CAN: outcome inconclusive, finding The Shapeshifter (warning)
         end
     else snapshots match, or the canary is skipped or not applied
@@ -182,7 +190,7 @@ sequenceDiagram
     RUNS->>RUNS: load_history(app_dir)
     RUNS->>VER: assemble(result, canary, config, history count)
     VER-->>RUNS: Verdict (waivers applied, status decided)
-    RUNS->>CARD: render(verdict, history)
+    RUNS->>CARD: render(verdict, history, description=config.app.description)
     CARD-->>RUNS: Markdown text
     RUNS->>RUNS: write runs/RUN_ID/verdict.json and model_card.md, copy verdict.json to app dir
     RUNS-->>CLI: Verdict
@@ -193,8 +201,8 @@ sequenceDiagram
 Other paths through the same machinery:
 
 - **Fast run** (`--fast`): only execution 1. `decide_canary` is not called. The canary outcome is `skipped`, the status is `REJECTED` or `UNVERIFIED`, and `mode` is `fast`.
-- **Input error in execution 1**: `audit` writes `result.json` with an input error, then re-raises. The child exits non-zero. `run_executions` accepts that one case (normal mode, `result.json` present with a matching `run_id` and an input error), skips executions 2 and 3, and the verdict is `REJECTED` (Requirement 4.7).
-- **Any other failure** (non-zero exit, timeout, missing snapshot, `run_id` mismatch): `run_executions` raises the private `ExecutionFailed`. The CLI prints the tail of the child's stderr and exits with code 2. No verdict is written, and `<app_dir>/verdict.json` is already gone because `clear_app_verdict` ran first (Resolved question 3). Earlier `runs/<run_id>/` folders are untouched.
+- **Input error in execution 1**: `audit` writes `result.json` with an input error, then re-raises. The child exits non-zero. `run_executions` accepts that one case (normal mode, `result.json` present with a matching `run_id` and an input error), skips executions 2 and 3, and the verdict is `REJECTED` (Requirement 4.7). A timeout is never accepted as this case, even when a `result.json` exists.
+- **Any other failure** (non-zero exit, timeout, missing snapshot, `run_id` mismatch): `run_executions` raises the private `ExecutionFailed` (`ExecutionTimedOut` for a timeout). The CLI prints the error, which ends with the tail of the child's stderr, and exits with code 2. No verdict is written, and `<app_dir>/verdict.json` is already gone because `clear_app_verdict` ran first (Resolved question 3). Earlier `runs/<run_id>/` folders are untouched.
 - **Standalone run** (`python train.py`, no `HEX_RUN_ID`): `audit` itself calls `runs.finalize_run(..., mode=fast)` after writing its snapshot, and returns the `Verdict`. In canary and control mode it only writes the snapshot. A standalone run does not call `clear_app_verdict`; it overwrites `<app_dir>/verdict.json` when it finishes.
 
 ## Components and Interfaces
@@ -322,14 +330,14 @@ def validate_snapshot_inputs(train: Frame, y_score_train: ArrayLike1D | None,
 **`load(app_dir)`**
 
 1. Resolve `app_dir`. If `None`, use the directory of the calling script (`sys._getframe(1).f_globals["__file__"]`). If the caller has no `__file__` (a REPL), raise `HexInputError` asking for `app_dir`.
-2. `config.load_config`, then read the CSV at `data.path` (relative to `app_dir`). A missing file, an unreadable file or zero data rows raises `HexInputError` naming the resolved path (Requirement 1.6).
+2. `config.load_config`, then read the CSV at `data.path` (relative to `app_dir`). Every failure raises `HexInputError` naming the resolved path (Requirement 1.6): a missing file, an unopenable file, a file that is empty, a file with a header but no data rows, a file pandas cannot parse or decode as UTF-8, and a file whose rows have more fields than its header (pandas would then turn the first column into the index, but the row id must be the position in the file).
 3. Set the index to `RangeIndex(0, n)` in file order, so the row id is the position in the file.
 4. With a `time_column`, compute `cutoff = compute_cutoff(df, split)` from the full loaded frame, before anything else touches it. This is the only place the cutoff is derived from the whole file.
 5. In canary mode only: compute the test mask with `test_mask(df, split, cutoff)` and replace the frame with `scramble_test_rows(...)`. In normal and control mode the frame is returned as read. The time column is never scrambled, so the cutoff is the same in all three modes.
 6. When `HEX_RUN_ID` is set, write `loaded.json` (and `scrambled_ids.npy` in canary mode) through `canary.write_load_marker`.
 7. Store `{"app_dir": "<absolute path>", "cutoff": <TimeCutoff or None>}` in `df.attrs["hexperiment"]` and return.
 
-**`split(df)`** finds its config from `df.attrs["hexperiment"]["app_dir"]` and its time cutoff from `df.attrs["hexperiment"]["cutoff"]`. It passes both to `split_frame`, so rows dropped or filtered between `load` and `split` (`dropna()`, `drop_duplicates()`, a query) cannot move the time boundary: a remaining row is a test row exactly when its `(time, row id)` is at or after the stored cutoff. If the attribute was lost (some pandas operations drop `attrs`), `split` falls back to the calling script's directory, as `load` does, and recomputes the cutoff from the frame it receives. In that case the boundary can move when rows were removed, and `decide_canary` step 2 still guards the canary. `split` returns copies, and raises `HexInputError` if either side is empty (so the mistake is reported at the split, not later in `audit`). Filtering that removes every test row is reported there.
+**`split(df)`** finds its config from `df.attrs["hexperiment"]["app_dir"]` and its time cutoff from `df.attrs["hexperiment"]["cutoff"]`. It passes both to `split_frame`, so rows dropped or filtered between `load` and `split` (`dropna()`, `drop_duplicates()`, a query) cannot move the time boundary: a remaining row is a test row exactly when its `(time, row id)` is at or after the stored cutoff. If the attribute was lost (some pandas operations drop `attrs`), `split` falls back to the calling script's directory, as `load` does, and recomputes the cutoff from the frame it receives. In that case the boundary can move when rows were removed, and `decide_canary` step 2 still guards the canary. `split` returns copies, and raises `HexInputError` if either side is empty (so the mistake is reported at the split, not later in `audit`). Filtering that removes every test row is reported there. If `df.attrs["hexperiment"]` exists but is not what `load` stores (not a mapping with a string `app_dir` and a `cutoff` that is a `TimeCutoff` or `None`), `split` raises `HexInputError` instead of guessing.
 
 **`hash_fraction`**: for each row id `i`, take `x = (i + (seed + 1) * 0x9E3779B97F4A7C15) mod 2**64`, apply the SplitMix64 finalizer, and return `(x >> 11) / 2**53`, a value in `[0, 1)`. It uses `uint64` array arithmetic under `np.errstate(over="ignore")`. It never calls Python's `hash`, so it is the same in every process.
 
@@ -344,6 +352,8 @@ def validate_snapshot_inputs(train: Frame, y_score_train: ArrayLike1D | None,
 
 The function does not receive the target column or the positive value, and the signature does not change. The two-valued rule swaps a binary target like any other two-valued column, which exchanges the two class counts and keeps both classes. A target with three or more distinct test values (multi-class labels compared with `target.positive`) is tilted like any other column and can end up with one class; that is harmless in canary mode (Resolved question 14).
 
+`mask` is a boolean array with one entry per row, or a boolean Series without missing values that is aligned to `df` by index label. Any other mask (wrong dtype, wrong length, labels that are not the same unique row ids), a `time_column` that `df` lacks, or a non-integer index raises `HexInputError`.
+
 **`tilt_column(values, rng)`** receives the test values of one column and returns replacements of the same length and dtype. Let *k* be the number of distinct non-missing values and *m* the number of non-missing values.
 
 1. Missing values (`NaN`, `None`, `NA`, `NaT`) keep their positions, are not counted in *k* or *m*, and are never drawn.
@@ -353,24 +363,26 @@ The function does not receive the target column or the positive value, and the s
    - **Numeric dtype** (`pandas.api.types.is_numeric_dtype`): sort the non-missing values ascending as a list with repeats. The upper half is `sorted[floor(m/2):]`. Widen it downward: the pool starts at `min(floor(m/2), index of the first copy of the second-largest distinct value)`, so it holds at least two distinct values. The pool keeps repeats, so common values are drawn more often. Equal values are interchangeable, so a tie at the halfway point needs no rule.
    - **Other dtypes** (object, string, category, datetime): count each distinct value, rank by count descending with ties broken by ascending `str(value)`, and keep the top `ceil(k/2)` categories. Because *k* ≥ 3, at least two categories are kept, so no widening is needed. The pool is the non-missing test values that belong to a kept category, with repeats.
    - **Repair:** if every draw is the same value, replace the draw at the first non-missing position by the highest-ranked pool value that differs (the largest value for numeric dtypes, the most frequent category otherwise). Plain draws from a two-valued pool can all coincide when *m* is small. The repair is the only step that is not a random draw, and it guarantees that a column with two or more distinct test values never becomes constant (Requirement 17.2).
-5. Written values are always values the column already had in its test rows, so no unseen value, category or dtype change can appear. Row combinations across columns are new, because each column is replaced independently.
+5. Written values are always values the column already had in its test rows, so no unseen value, category or dtype change can appear. Row combinations across columns are new, because each column is replaced independently. A column whose values cannot be hashed (lists, dicts, arrays) cannot be tilted and raises `HexInputError` naming the column.
 
 Effect: the test rows of a numeric column move toward the old upper half, so its mean, median and quantiles move upward by a systematic amount; category frequencies shift toward the frequent categories; a two-valued column and a binary target flip. Any statistic computed over all rows (a global mean, a scaler, a target encoding) therefore differs between the normal and the canary execution. `scramble_test_rows` is the only function that implements Requirement 1.5.
 
 **`parse_times`** converts with `pd.to_datetime(series, utc=True)`. A value that cannot be parsed, or a missing value, raises `HexInputError` naming the column and frame. Using `utc=True` makes timezone-naive and aware inputs comparable.
 
-**`validate_audit_inputs`** (normal mode) raises `HexInputError` in this order, each message saying what is wrong and how to fix it:
+**`validate_audit_inputs`** (normal mode) raises `HexInputError` for the first problem found, in this order, each message saying what is wrong and how to fix it:
 
-1. `train` or `test` is empty, naming which (4.1).
-2. The target column is missing from either frame, naming column and frame (4.2), or holds a missing value in either frame.
-3. `y_score` length differs from `len(test)`, or `y_score_train` length differs from `len(train)`; any score is NaN or outside `[0, 1]` (4.4).
-4. `features` is empty, or a name in `features` is not a column of both frames (4.5).
-5. `time_column` is configured but missing from a frame or not parseable (4.6).
-6. The test target has one class, after comparing `test[target] == target.positive` (4.3). The message names the positive value and the test target's distinct values, because a wrong `positive` is the usual cause.
+1. `train` is empty, then `test` is empty, naming which (4.1).
+2. The target column is missing from `train`, then from `test`, naming column and frame (4.2). Then the target holds a missing value in either frame, with the count.
+3. A score argument is `None` (`y_score` only), cannot be converted to numbers, or is not one-dimensional.
+4. `y_score` length differs from `len(test)`, then `y_score_train` length differs from `len(train)` (4.4).
+5. `y_score` has a NaN or a value outside `[0, 1]`, then the same for `y_score_train`, naming the first position (4.4).
+6. `features` is a bare string, `features` is empty, or a name in `features` is not a column of both frames (4.5).
+7. `time_column` is configured but missing from a frame, or its values are unparseable or missing (4.6).
+8. The test target has one class, after comparing `test[target] == target.positive` (4.3). The message names the positive value, the number of matching test rows and up to ten distinct test target values, because a wrong `positive` is the usual cause.
 
 `build_snapshot` also raises `HexInputError` when a frame's index is not integer or the training index has duplicates. In normal mode `audit` records these like the rules above (4.7). In canary and control mode the test frame still needs an integer index; the scramble never changes the index, and normal mode has already rejected a bad one.
 
-**`validate_snapshot_inputs`** (canary and control mode) checks only what the snapshot needs, with the same messages as the matching rules above: `train` is not empty (rule 1, train only), `features` is not empty and every name in it is a column of `train` (rule 4, train only), and `y_score_train`, when given, has `len(train)` entries that are all in `[0, 1]` (rule 3, training part only). It does not look at the test target, at `y_score`, at the time column or at the test frame's columns. A scrambled test set (a test target with three or more distinct values can end up with one class after the tilt, and test scores can be unrelated to the scrambled values) therefore cannot crash the canary or control execution. An error in the checked part still raises `HexInputError`, and the parent reports exit 2.
+**`validate_snapshot_inputs`** (canary and control mode) checks only what the snapshot needs, with the same messages as the matching rules above, in this order: `train` is not empty (rule 1, train only); `y_score_train`, when given, can be converted, is one-dimensional, has `len(train)` entries and has none that are NaN or outside `[0, 1]` (rules 3 to 5, training part only; a NaN is rejected because the canary comparison counts a NaN as a change); `features` is not a bare string, is not empty and every name in it is a column of `train` (rule 6, train only). It does not look at the test target, at `y_score`, at the time column or at the test frame's columns. A scrambled test set (a test target with three or more distinct values can end up with one class after the tilt, and test scores can be unrelated to the scrambled values) therefore cannot crash the canary or control execution. An error in the checked part still raises `HexInputError`, and the parent reports exit 2.
 
 Satisfies: 1.1 to 1.6, 4.1 to 4.6, 7.1 (time parsing), 10.6 (marker). In canary and control mode, Requirements 4.1 to 4.6 apply only to the snapshot inputs above; this is Resolved question 14.
 
@@ -412,13 +424,13 @@ def check_metric(value: float, name: str, threshold: float,
 
 **`check_row_overlap`** (The Doppelganger)
 
-- Build the key frame `features + [target]` for both sides. Deduplicate train, then left-merge test onto it with an indicator column. A test row counts as overlapping when the indicator is `both`. pandas treats NaN as equal to NaN in merge keys, so two rows with the same missing values are identical. The merge is exact, so there are no hash collisions.
+- Build the key frame `features + [target]` (a name listed twice counts once) for both sides. A column is compared as object values when its dtype differs between train and test or either side is categorical, so `1` equals `1.0` and a category equals the same text. A datetime column that is timezone-aware on one side and naive on the other raises `HexInputError`, because treating the two as different would hide a duplicate row and the check will not guess the timezone. Deduplicate train, then left-merge test onto it with an indicator column. A test row counts as overlapping when the indicator is `both`. pandas treats NaN as equal to NaN in merge keys, so two rows with the same missing values are identical. The merge is exact, so there are no hash collisions. Values that cannot be merged (unhashable objects such as lists, or types that cannot be compared) raise `HexInputError` naming the column or columns and both dtypes.
 - Evidence: `{"rows": count, "test_rows": n, "fraction": count / n}`. Error when `fraction > max_fraction`. Fix: "drop exact duplicates before splitting".
 - The count is a function of the two row sets, so reordering either frame cannot change it (Requirement 5.3).
 
 **`check_target_proxy`** (The Possession)
 
-- For each feature, `standalone_score` returns `None` only when the feature has one unique value in the test rows, counting a missing value as a value (`nunique(dropna=False) == 1`, 6.3). Otherwise it returns a score in `[0.5, 1]`; no other feature is skipped.
+- For each feature, `standalone_score` returns `None` only when the feature has one unique value in the test rows, counting a missing value as a value (`nunique(dropna=False) == 1`, 6.3). Otherwise it returns a score in `[0, 1]` (a value score is at least 0.5; a category score is a plain AUC); no other feature is skipped. If the test target has a single class, the AUC is undefined and no feature may be skipped for that reason, so `standalone_score` raises `HexInputError` (after the constant-feature skip). `validate_audit_inputs` already rejects that target in normal mode, so this is a guard for direct callers of the check; if it is ever raised inside `audit`, it is recorded as an input error (4.7).
 - **Value score** (numeric, boolean, datetime and timedelta dtypes). Datetimes are converted to UTC and then, like timedeltas, to their `int64` nanosecond value; booleans to `0/1`. `load` reads CSV without parsing dates, so a text (object or string) feature whose non-missing values in train and test all parse with `pd.to_datetime(values, utc=True, format="ISO8601")` is treated as a datetime feature; one value that does not parse keeps it a text feature (category score only). Other date formats such as `03/01/2024` are not recognised. The values are ranked with missing values placed lowest, and `max(AUC, 1 - AUC)` is taken against `y_true_test` with `sklearn.metrics.roc_auc_score`. The same is repeated with missing values ranked highest, and the higher score is kept. A column that is filled in only for one class therefore scores `1.0`. When the column has no missing value, both rankings are the same.
 - **Category score** (all other dtypes, and also numeric features with at most 50 distinct non-missing test values). For each training value, `positives / count` is computed as an integer ratio and mapped onto the test rows. Unseen values and missing values get the overall training positive rate. The score is the AUC of that mapping. For a numeric feature that gets both scores, the higher one is kept, so integer codes whose meaning is not ordered (codes 1 and 3 positive, 2 and 4 negative) are caught. Computing means from integer counts keeps the values exact, so a reorder cannot flip a tie (Requirement 6.4).
 - Evidence: `{"score": s, "threshold": auc_max}`. Location is the column. Error when `score >= auc_max`. Fix: "check whether this column is recorded after the outcome; if so, drop it".
@@ -430,16 +442,16 @@ def check_metric(value: float, name: str, threshold: float,
 
 **`check_split_order`** (no ghost, warnings only)
 
-- `source is None` or `ast.parse` fails: one `warning` "the hint could not be applied" and outcome `inconclusive` (8.3). The script is parsed, never executed or imported.
-- Find the first call whose callee name is `split`, `hexperiment.split` or `train_test_split` (by smallest line number), including import aliases (`import hexperiment as hx` then `hx.split`; `from hexperiment import split as hsplit`; `from sklearn.model_selection import train_test_split as tts`). If none: the same warning (8.3).
+- `source is None` or `ast.parse` fails: one `warning` "the split-order hint could not be applied: <reason>" located at the script name (no line number) and outcome `inconclusive` (8.3). The script is parsed, never executed or imported.
+- Find the first call (by smallest line, then column) that is a split call. A bare `split` or `train_test_split`, and any attribute call ending in `.train_test_split`, count. Import aliases are resolved first from the script's own `import` and `from ... import` statements: `import hexperiment as hx` makes `hx.split` count as `hexperiment.split`; `from hexperiment import split as hsplit` makes `hsplit(...)` count; `from sklearn.model_selection import train_test_split as tts` makes `tts(...)` count. A method named `split` on another object (`text.split(",")`) is not a split call unless its alias resolves to `hexperiment.split`. If there is none: the same warning, with the reason "the script has no call to a split function" (8.3).
 - Calls nested in the arguments of the split call, such as `split(df.fillna(df.mean()))`, run before the split and are reported like earlier calls.
-- Any call, anywhere in the script, whose callee name is one of `read_csv`, `read_parquet`, `read_excel`, `read_json`, `read_feather`, `read_table`, `read_fwf`, `read_pickle`, `read_sql`, `read_orc`, `loadtxt` or `genfromtxt` gives a `warning` at `train.py:<line>` with the message "this reads data without hexperiment.load(); the canary test cannot scramble this copy" and the fix "load the data with hexperiment.load() and derive everything from that frame" (8.4). These warnings do not depend on the split call and are reported even when no split call is found.
-- Collect earlier calls: `fit`, `fit_transform`, `fit_resample` on any receiver; and `mean`, `median`, `std`, `quantile`, `min`, `max`, `transform` as methods whose receiver is a name, subscript, call or attribute chain not rooted at an imported module alias. A bare builtin `min(...)` or `max(...)` is not a method call and is ignored. Each is a `warning` at `train.py:<line>` with the hint "this runs before the split; make sure it does not use test rows" (8.2).
-- The comparison is by line number, not data flow. A helper function defined above the split but called below it is reported. This is acceptable for a hint; the canary test is the authority.
+- Any call, anywhere in the script, whose callee name is one of `read_csv`, `read_parquet`, `read_excel`, `read_json`, `read_feather`, `read_table`, `read_fwf`, `read_pickle`, `read_sql`, `read_orc`, `loadtxt` or `genfromtxt` gives a `warning` at `train.py:<line>` with the message "this reads data without hexperiment.load(); the canary test cannot scramble this copy" and the fix "load the data with hexperiment.load() and derive everything from that frame" (8.4). Only the callee name counts (`pd.read_csv` and `read_csv` are the same), and a bare name bound by `from pandas import read_csv as rc` is resolved to the name it stands for. These warnings do not depend on the split call and are reported even when no split call is found; in that case they follow the "could not be applied" warning in the same inconclusive result. Their evidence is `{"call": name}`.
+- Collect earlier calls: `fit`, `fit_transform`, `fit_resample` on any receiver; and `mean`, `median`, `std`, `quantile`, `min`, `max`, `transform` as methods whose receiver is a name, subscript, call or attribute chain not rooted at an imported module alias (only `import x` and `import x as y` bind a module alias). A bare builtin `min(...)` or `max(...)` is not a method call and is ignored. Each is a `warning` at `train.py:<line>` with the hint "this runs before the split; make sure it does not use test rows" (8.2). The warnings of a result, hints and readers together, are ordered by line.
+- The comparison is by line number, not data flow, except that calls nested in the arguments of the split call also count. A helper function defined above the split but called below it is reported. This is acceptable for a hint; the canary test is the authority. Every finding of this check whose location ends in `:<line>`, reader warnings included, is a suspect line in the fix of The Peeking Spirit (see `hint_locations` under `canary.py`).
 
 **`check_metric`** (not a ghost)
 
-- `compute_metric` returns the ROC AUC. `check_metric` returns `MetricResult(name, value, threshold, passed=value >= threshold)`. If `value > min(threshold + too_good_margin, 0.99)` it also returns a `warning` with check `metric`, message "too good to be true", evidence `{"value": v, "threshold": t}`, and fix "treat this as a leak until proven otherwise: look for a column that encodes the target".
+- `compute_metric` returns the ROC AUC. It raises `HexInputError` when `y_true` and `y_score` differ in length or when `y_true` has a single class (guards for direct callers; `validate_audit_inputs` rejects both in normal mode). `check_metric` returns `MetricResult(name, value, threshold, passed=value >= threshold)`. If `value > min(threshold + too_good_margin, 0.99)` it also returns a `warning` with check `metric`, message "too good to be true", evidence `{"value": v, "threshold": t}`, and fix "treat this as a leak until proven otherwise: look for a column that encodes the target".
 
 Satisfies: 2.3 (data checks), 2.5, 5.1 to 5.3, 6.1 to 6.4, 7.1 to 7.3, 8.1 to 8.3, 9.1 to 9.3.
 
@@ -451,6 +463,7 @@ The single home of canary orchestration: spawning executions, the `.hex/` file p
 SCORE_TOLERANCE = 1e-9
 
 class ExecutionFailed(RuntimeError): ...     # private: not exported, not a HexInputError
+class ExecutionTimedOut(ExecutionFailed): ...   # a train.py that ran past run.timeout_seconds
 
 @dataclass(frozen=True, slots=True)
 class Snapshot:
@@ -517,29 +530,38 @@ def run_executions(app_dir: Path, config: HexConfig, run_id: str, *, full: bool,
 
 **`build_snapshot`** sorts rows by id, then computes `pandas.util.hash_pandas_object(train[features], index=False)` per row, so the hash depends on values only. It also stores the sorted test ids.
 
-**`compare_snapshots`** compares row ids first. When the id sets are equal it counts rows whose hash differs, rows whose score differs by more than the tolerance, and the largest absolute score change. Scores are compared only when both snapshots have them.
+**`compare_snapshots`** compares row ids first. When the id sets are equal it counts rows whose hash differs, rows whose score differs by more than the tolerance (a NaN score counts as a change), and the largest absolute score change. Scores are compared only when both snapshots have them. The feature lists are not compared here; `decide_canary` compares them itself.
 
-**`decide_canary`** evaluates these steps in order and stops at the first that applies. `run_control` is called at most once, and only at step 5.
+**`decide_canary`** evaluates steps 1 to 4 in order and stops at the first that applies. The canary *differs* when `compare_snapshots(normal, canary)` shows a difference or the two feature lists are not equal. A changed feature list counts even when the hashes match, because features chosen from all rows (a leak) move when only test rows are altered. If none of steps 1 to 4 applies, the canary differs. `run_control` is then called once, and the cases after it are checked in the order 6a, 5a, 5, 6. `run_control` is therefore called at most once, and only when the marker is valid, the training ids are equal and the canary differs.
 
 | Step | Condition | Canary | Determinism | Findings |
 |---|---|---|---|---|
-| 1 | `marker is None` (the canary execution never called `load`) | not applied | skipped | warning: the script did not load its data with `hexperiment.load` (10.6) |
+| 1a | `marker is None` (the canary execution never called `load`) | not applied | skipped | warning: the script did not load its data with `hexperiment.load` (10.6) |
+| 1b | the marker was written in another mode than `canary`, or records no scrambled ids (`scrambled_ids` is `None` or empty) | not applied | skipped | warning: the marker does not show that any test row was scrambled (10.6) |
 | 2 | `marker.scrambled_ids` intersects `canary.train_ids` | not applied | skipped | warning: scrambled rows ended up in train, split with `hexperiment.split` (Resolved question 5) |
 | 3 | `normal.train_ids != canary.train_ids` | skipped | skipped | warning: inconclusive, the split depends on data values (10.2) |
-| 4 | `compare(normal, canary)` shows no difference | passed, or inconclusive when `normal.y_score_train is None` | passed | none, or the warning below when `normal.y_score_train is None` |
-| 5 | difference, and `compare(normal, control)` shows none | failed | passed | error The Peeking Spirit (10.5) |
-| 6 | difference, and control also differs from normal | inconclusive | failed | warning The Shapeshifter (10.4) |
+| 4a | the canary does not differ, and normal and canary both have `y_score_train` | passed | passed | none |
+| 4b | the canary does not differ, and neither has `y_score_train` | inconclusive | passed | warning: inconclusive without training predictions (2.6) |
+| 4c | the canary does not differ, and exactly one of them has `y_score_train` | inconclusive | inconclusive | warning: predictions were supplied in some executions only (2.6) |
+| 6a | the canary differs, and the control's feature list is not equal to normal's | inconclusive | failed | warning The Shapeshifter, naming the features that differ (10.4) |
+| 5a | the canary differs only in predictions (no feature hash changed and the feature lists are equal), the control matches normal, and exactly one of normal and control has `y_score_train` | inconclusive | inconclusive | warning: predictions were supplied in some executions only (2.6, 10.3) |
+| 5 | the canary differs, and `compare(normal, control)` shows no difference | failed | passed | error The Peeking Spirit (10.5) |
+| 6 | the canary differs, and the control also differs from normal | inconclusive | failed | warning The Shapeshifter (10.4) |
 
-In steps 4 to 6, if `normal.y_score_train is None`, add a warning (check `canary`, no ghost). In step 4 it says the canary compared only the training features and could not rule out a model fitted on test rows, so the result is inconclusive; in steps 5 and 6 it says the canary test is weaker without training predictions. In both cases the fix is "pass y_score_train=model.predict_proba(train[features])[:, 1] to hexperiment.audit" (Requirement 2.6). Without training predictions a run can therefore be at best `UNVERIFIED`. In step 5 the evidence is `{"train_rows", "rows_changed", "feature_rows_changed", "largest_change"}` from `compare(normal, canary)`, and the fix text is "test rows influenced training; fit preprocessing on training rows only, after the split." followed by "Suspect lines: <hint locations joined by comma>." when `hint_locations` is non-empty. Canary findings are created with the severity they will keep: they have no waivable check name, so `verdict.apply_waivers` cannot touch them (10.7).
+Step 5a exists because `compare_snapshots` compares predictions only when both snapshots have them. A canary that differs only in predictions means normal and canary both have `y_score_train`; if the control has none, it can only be compared by hash, so a control that "matches" proves nothing about determinism and a leak cannot be told apart from non-deterministic training.
 
-**`run_train_script`** runs `subprocess.run([sys.executable, "train.py"], cwd=app_dir, env=os.environ | {HEX_MODE, HEX_RUN_ID}, capture_output=True, text=True, timeout=timeout_seconds)` with no shell. It does not set `PYTHONHASHSEED`: hash-order dependence in a user script is real non-determinism and should surface as The Shapeshifter. A timeout or a non-zero exit raises `ExecutionFailed` carrying the stderr tail (last 40 lines).
+Every outcome after step 3 can also carry a warning about training predictions (check `canary`, no ghost), taken over the executions compared: normal and canary in step 4, normal, canary and control in the others (Requirement 2.6). If none of them has `y_score_train`, the warning says the canary test is weaker without training predictions, and the fix is "pass y_score_train=model.predict_proba(train[features])[:, 1] to hexperiment.audit"; in step 4b the warning says instead that the canary compared only the training features and could not rule out a model fitted on test rows. If some but not all have it, the warning names the executions that supplied it and those that did not, and the fix is "pass y_score_train to hexperiment.audit in every execution". Only step 4a gives `passed`, so a run reaches `APPROVED` only when normal and canary both supplied training predictions.
+
+In step 5 the evidence is `{"train_rows", "rows_changed", "feature_rows_changed", "largest_change"}` from `compare(normal, canary)`, and the fix text is "test rows influenced training; fit preprocessing on training rows only, after the split." followed by "Suspect lines: <hint locations joined by ', '>." when `hint_locations` is non-empty. `hint_locations(result)` returns the `<script>:<line>` location of every finding of the `split_order` check that has a line number, without duplicates and in order. That includes the data-reader warnings (8.4), and leaves out the warning that the hint could not be applied, which has no line. When the feature lists of normal and canary differ (the canary reached the control because of the feature list, with or without changed hashes), the message is "features selected changed when only test rows were altered: only in normal: ...; only in canary: ...", the evidence gains `normal_features` and `canary_features`, and the fix gains "Select features on the training rows only." before the suspect lines. In step 6a the evidence is `{"normal_features", "control_features"}`. Canary findings are created with the severity they will keep: they have no waivable check name, so `verdict.apply_waivers` cannot touch them (10.7).
+
+**`run_train_script`** starts `[sys.executable, "train.py"]` with `subprocess.Popen`, with `cwd=app_dir`, no shell, `env=os.environ` plus `HEX_MODE`, `HEX_RUN_ID` and `PYTHONIOENCODING=utf-8`, and `stdin=DEVNULL`. Stdout and stderr go to temporary files, not pipes. A child process that outlives the script (joblib or multiprocessing workers) can then neither keep the parent waiting on an open pipe nor wait for input. The parent waits up to `timeout_seconds`. On a timeout it kills the whole process tree (`taskkill /T /F` on Windows; a new session and `os.killpg` with `SIGKILL` elsewhere, followed by a direct kill of the script process in both cases), waits for it, and raises `ExecutionTimedOut`. A non-zero exit raises `ExecutionFailed`. Both messages end with the last 40 lines of stderr, read from the last 1 MiB of the file and decoded as UTF-8 with replacement. `ExecutionTimedOut` is a subclass of `ExecutionFailed`, so the CLI handles both the same way, and `run_executions` can tell a timeout apart (below). Stdout is discarded. `run_train_script` does not set `PYTHONHASHSEED`: hash-order dependence in a user script is real non-determinism and should surface as The Shapeshifter.
 
 **`run_executions`**
 
 1. `full=False`: run `normal`, read its `result.json`, return `ExecutionReport(mode=FAST, canary=skipped_outcome())`.
-2. `full=True`: run `normal`. If it left an input error in `result.json`, return a full report with `skipped_outcome()` and stop. Otherwise run `canary`, read both snapshots and the canary's load marker, and call `decide_canary` with `run_control` bound to run-and-read `control`.
-3. Before each execution call `clear_mode_dir`. After it, verify that the snapshot exists and carries this `run_id`; otherwise raise `ExecutionFailed` ("train.py did not call hexperiment.audit" or "another run is using this app").
-4. A non-zero exit of the normal execution is tolerated only in the input-error case above.
+2. `full=True`: run `normal`. If it left an input error in `result.json`, return a full report with `skipped_outcome()` and stop. Otherwise run `canary`, read both snapshots and the canary's load marker, and call `decide_canary` with `run_control` bound to run-and-read `control` and the suspect lines from `hint_locations(result)`.
+3. Before each execution call `clear_mode_dir`. After it, verify that the snapshot exists and carries this `run_id`; otherwise raise `ExecutionFailed` ("train.py did not call hexperiment.audit" or "another run is using this app"). For the normal execution `result.json` is read first, and a missing or foreign `result.json` fails the same way. A missing load marker is not a failure: it is the input of `decide_canary` step 1a.
+4. A non-zero exit of the normal execution is tolerated only in the input-error case above: `run_executions` catches `ExecutionFailed`, looks for a `result.json` of this run that holds an input error, and re-raises when there is none. `ExecutionTimedOut` is never tolerated (Requirement 16.3): a script that did not finish left nothing that counts as a result, even if it had already written a `result.json`. A normal execution that exits 0 with an input error in `result.json` is handled the same way as the tolerated case.
 5. `run_executions` never reads or writes `<app_dir>/verdict.json`. The CLI has already deleted it (`runs.clear_app_verdict`), so when `ExecutionFailed` propagates, no app-level verdict exists.
 
 The `runner` parameter lets tests replace the subprocess with a function that writes prepared snapshots, so orchestration is tested without spawning Python.
@@ -604,23 +626,23 @@ Satisfies: 4.7, 10.7, 11.2, 11.4, 12.1 (together with `runs.py`), 12.2, 13.1, 13
 ### `card.py`
 
 ```python
-def render(verdict: Verdict, history: Sequence[Verdict]) -> str: ...
+def render(verdict: Verdict, history: Sequence[Verdict], *, description: str = "") -> str: ...
 ```
 
-Pure function that returns GitHub-flavoured Markdown. `history` holds the earlier verdicts of the app, oldest first, and excludes the verdict being rendered. Sections, in order:
+Pure function that returns GitHub-flavoured Markdown. `history` holds the earlier verdicts of the app, oldest first, and excludes the verdict being rendered. `description` is the app description from `hex.toml`, passed as a keyword by `finalize_run` (`config.app.description`), because a `Verdict` does not carry it. Sections, in order:
 
-1. Title with the app name, then the description.
+1. Title with the app name, then the description (omitted when empty).
 2. A status block: verdict status, mode, run id, date, `hexperiment` version.
 3. A generated-file notice: "Generated by hexperiment. Do not edit by hand." (14.2)
-4. Data: train and test row counts and positive rates; the time range of each split when a time column is configured.
-5. Metric against its threshold.
+4. Data: train and test row counts and positive rates; the time range of each split when a time column is configured. A verdict without data (an input error) says that the data is not available.
+5. Metric against its threshold ("not computed" when the run stopped on an input error).
 6. Checks table: check, ghost, outcome.
-7. Findings: severity, ghost (or check), location, message, evidence, fix hint. For waived findings, the waiver reason.
-8. Waivers: check, column, reason.
+7. Findings table: severity, ghost (or check), location, message, evidence (as JSON), fix hint, and a waiver reason column that is filled only for waived findings.
+8. Waivers: check, column ("all columns" when the waiver names none), reason, findings waived.
 9. Test-set uses.
-10. Run history table: run id, status, metric value. Shows "none" when empty.
+10. Run history: a table with run id, status and metric value (four decimals, `-` for a run without a metric), one row for each verdict in `history`. Because `history` excludes the verdict being rendered, the table lists earlier runs only; it shows "none" when `history` is empty.
 
-Every table cell passes through one `_cell(text)` helper that escapes `|`, replaces newlines with a space and trims, so column names, descriptions and evidence containing Markdown characters cannot break a table (14.3). Satisfies 14.1 to 14.3, 11.4.
+Every table cell passes through one `_cell(text)` helper that escapes backslashes and `|`, replaces newlines with a space, trims, and shows `-` for an empty cell, so column names, descriptions and evidence containing Markdown characters cannot break a table (14.3). Headings and paragraphs built from user text (app name, description, run id) go through a second helper that folds whitespace and escapes leading Markdown markup. Satisfies 14.1 to 14.3, 11.4.
 
 ### `cli.py`
 
@@ -632,15 +654,15 @@ def exit_code_for(status: Status) -> int: ...
 def main(argv: Sequence[str] | None = None) -> int: ...
 ```
 
-`main` and a standalone `audit` (which prints `format_summary` after finalizing a `fast` run) are the only functions in the package that print. Its flow, in order:
+`main` and a standalone `audit` (which prints `format_summary` after finalizing a `fast` run) are the only functions in the package that print, and both print through the shared helper `auditor.print_text(text, file=None)` (see `auditor.py`). `cli.py` imports it from there. Its flow, in order:
 
 1. Parse arguments. `--fast` and `--full` are a mutually exclusive group; the default is full (16.1).
 2. Check that `app_dir` is an existing directory, then call `runs.clear_app_verdict(app_dir)`, which deletes `<app_dir>/verdict.json` if it exists. This happens before anything else can fail, so every path that ends with exit code 2 leaves no app-level verdict (Resolved question 3). If `app_dir` is not a directory, print the error to stderr and return 2.
 3. `config.load_config(app_dir)`. A `HexInputError` is printed to stderr as `hexperiment: <problem> <fix>` and returns 2. A missing `train.py` is reported the same way.
 4. `runs.new_run_id()`, then `canary.run_executions(app_dir, config, run_id, full=...)`.
-5. `runs.finalize_run(...)`, then print `verdict.format_summary`.
+5. `runs.finalize_run(...)`, then print `verdict.format_summary` to stdout.
 6. Return `exit_code_for(verdict.status)`.
-7. `ExecutionFailed`, `OSError` and any `HexInputError` raised after step 3 (for example a malformed file found by `load_history`) are printed (with the stderr tail for `ExecutionFailed`) and return 2 (16.3, 16.5). No verdict is written, and none is left from an earlier run.
+7. `ExecutionFailed` (including `ExecutionTimedOut`), `OSError` (including the `FileExistsError` of `finalize_run`) and any `HexInputError` raised after step 2 (for example a malformed file found by `load_history`) are printed to stderr as `hexperiment: <message>`, where the message of an `ExecutionFailed` already ends with the stderr tail, and return 2 (16.3, 16.5). No verdict is written, and none is left from an earlier run.
 
 Satisfies 16.1 to 16.5.
 
@@ -730,18 +752,22 @@ Holds `audit`, the in-script half of a run. It is the only module in the child p
 def audit(train: Frame, test: Frame, y_score: ArrayLike1D, features: Sequence[str],
           script: str | os.PathLike[str],
           y_score_train: ArrayLike1D | None = None) -> Verdict | None: ...
+
+def print_text(text: str, file: TextIO | None = None) -> None: ...
 ```
 
 Behaviour (the return value is a `Verdict` only for a standalone normal run, otherwise `None`):
 
 1. `app_dir = Path(script).resolve().parent`; `config = load_config(app_dir)`; `mode = current_mode()`; `run_id = run_id_from_env()` (2.2).
-2. Validate. In normal mode call `validate_audit_inputs`. On `HexInputError`, write `result.json` with the input error through `canary.write_result`; if standalone, also call `runs.finalize_run` with a fast report that carries the input error so a `REJECTED` verdict exists (4.7); then re-raise. In canary and control mode call only `validate_snapshot_inputs`: conditions that matter only for scoring (a single-class test target, the values and length of `y_score`, the time column, the test frame's columns) are not checked and cannot raise, so a scrambled test set cannot crash these executions. The snapshot is written whenever the training frame, the features and `y_score_train` are valid (Resolved question 14).
+2. Validate. In normal mode call `validate_audit_inputs`; the snapshot is then built and written and the data checks run (steps 3 and 5). A `HexInputError` from any of these (the validation, `build_snapshot`, or a check) is recorded the same way: write `result.json` with the input error through `canary.write_result`; if standalone, also call `runs.finalize_run` with a fast report that carries the input error so a `REJECTED` verdict exists (4.7), without printing a summary; then re-raise. In canary and control mode call only `validate_snapshot_inputs`: conditions that matter only for scoring (a single-class test target, the values and length of `y_score`, the time column, the test frame's columns) are not checked and cannot raise, so a scrambled test set cannot crash these executions. The snapshot is written whenever the training frame, the features and `y_score_train` are valid (Resolved question 14).
 3. `canary.write_snapshot(app_dir, build_snapshot(...))` in every mode (2.3, 2.4).
 4. In `canary` or `control` mode, return `None`. No checks, no verdict, no model card (2.4).
-5. In normal mode, read the script text (an edge read; a failure becomes `None` for `check_split_order`), call `run_data_checks`, and write `result.json`.
-6. If `run_id` is set, return `None`; the parent finalizes. Otherwise wrap the result as `ExecutionReport(result, skipped_outcome(), RunMode.FAST)`, call `runs.finalize_run`, print `format_summary`, and return the `Verdict`.
+5. In normal mode, read the script text (an edge read as UTF-8, accepting a byte order mark; a failure becomes `None` for `check_split_order`), call `run_data_checks`, and write `result.json`.
+6. If `run_id` is set, return `None`; the parent finalizes. Otherwise wrap the result as `ExecutionReport(result, skipped_outcome(), RunMode.FAST)`, call `runs.finalize_run`, print `format_summary` through `print_text`, and return the `Verdict`.
 
-`audit` never modifies `train`, `test`, `y_score` or `y_score_train`: it converts scores with `np.asarray(..., dtype=float)` (a copy when needed) and reads the frames through `.loc` and `[]` only (2.5).
+**`print_text(text, file=None)`** prints `text` and a newline to `file`, which defaults to the current `sys.stdout`. If the stream's encoding cannot represent the text (for example a legacy Windows console and a column name outside its code page), it encodes the text with `errors="replace"` and writes the bytes to the stream's buffer, so printing never raises `UnicodeEncodeError` and a finished run cannot turn into a crash. It is the only caller of `print` in the package. `cli.main` (stdout and stderr) and the standalone `audit` print through it (16.4).
+
+`audit` never modifies `train`, `test`, `y_score` or `y_score_train`: it converts scores to float64 copies and reads the frames through `.loc` and `[]` only (2.5).
 
 #### `runs.py`
 
@@ -757,15 +783,18 @@ def finalize_run(app_dir: Path, config: HexConfig, report: ExecutionReport,
                  *, run_id: str) -> Verdict: ...
 ```
 
+`format_run_id` raises `HexInputError` unless `token` is exactly 6 lowercase hex characters. It converts a timezone-aware `now` to UTC and takes a naive `now` as UTC.
+
 `clear_app_verdict` calls `Path.unlink(missing_ok=True)` on `<app_dir>/verdict.json`. It never touches `runs/`.
 
 `finalize_run` is the one function that writes outputs:
 
+0. `run_id` must match `^\d{8}-\d{6}-[0-9a-f]{6}$`; otherwise it raises `HexInputError` before anything is read or written.
 1. `history = load_history(app_dir)`. `test_set_uses = count_test_set_uses(history, signature)`, plus 1 unless `report.result.input_error` is set (an input error means this run never scored the test set).
 2. `verdict = verdict.assemble(...)` with `created_at` from the clock (`YYYY-MM-DDTHH:MM:SSZ`, UTC) and `version` from `importlib.metadata.version("hexperiment")` (not from the package `__init__`, which imports this module).
-3. `text = card.render(verdict, history)`.
-4. `runs/<run_id>/` is created with `mkdir(parents=True, exist_ok=False)`. If it exists, `finalize_run` raises instead of overwriting (15.1). Then write `verdict.json` and `model_card.md` as UTF-8.
-5. Copy `verdict.json` to `<app_dir>/verdict.json` through a temporary file and `os.replace`, so a hook that reads it never sees a partial file.
+3. `text = card.render(verdict, history, description=config.app.description)`.
+4. `runs/<run_id>/` is created with `mkdir(parents=True, exist_ok=False)`. If it exists, `mkdir` raises `FileExistsError` (an `OSError`, not a `HexInputError`) and `finalize_run` lets it propagate instead of overwriting (15.1); the CLI maps it to exit 2. Then write `verdict.json` and `model_card.md` as UTF-8.
+5. Copy `verdict.json` to `<app_dir>/verdict.json` through a temporary file (`.verdict.json.<run_id>.tmp`) and `os.replace`, so a hook that reads it never sees a partial file. The temporary file is removed if the copy fails.
 
 `load_history` reads `runs/*/verdict.json`, parses each with `verdict.from_dict`, and sorts by `(created_at, run_id)`. A missing `runs/` folder returns `[]`. An unreadable or malformed file raises `HexInputError` naming the file. `count_test_set_uses` counts verdicts whose `split` equals `signature`, except verdicts whose result is an input error (a finding with check `input`), because the test set was never scored in those runs. Every other fast or full run with the same split block counts, including `UNVERIFIED` and `REJECTED` ones (Resolved question 9).
 
@@ -830,13 +859,13 @@ This table fixes the `check` names, ghosts, finding locations and outcome rules 
 
 | `check` | Ghost | Finding `location` | Outcome rule | Waivable |
 |---|---|---|---|---|
-| `input` | none | `hex.toml` or `audit()` | not listed in `checks`; the finding is the only content of a rejected verdict | no |
+| `input` | none | `audit()` | not listed in `checks`; the finding is the only content of a rejected verdict | no |
 | `row_overlap` | The Doppelganger | `train vs test` | `failed` if a non-waived error exists, else `passed` | yes |
 | `target_proxy` | The Possession | the column name | same | yes |
 | `temporal` | The Prophet | the time column | same, or `not applicable` without `time_column` | yes |
 | `split_order` | none | `<script>:<line>` | `passed` when a split call was found (warnings do not change it), `inconclusive` when the hint could not be applied | no |
 | `canary` | The Peeking Spirit (error finding only) | the script name | `skipped`, `passed`, `failed`, `inconclusive` or `not applied` per the `decide_canary` table | no |
-| `determinism` | The Shapeshifter | the script name | `passed`, `failed` (control differed), or `skipped` | no |
+| `determinism` | The Shapeshifter | the script name | `passed`, `failed` (control differed), `inconclusive` (training predictions in some executions only) or `skipped` | no |
 | `metric` | none | `metric` | not listed in `checks`; reported in the `metric` block | no |
 | `test_set_uses` | none | `runs/` | not listed in `checks` | no |
 | `waiver` | none | `<check>` or `<check>:<column>` of the unmatched waiver | not listed in `checks` | no |
@@ -852,9 +881,9 @@ Fields are those of Requirement 13.2 plus `message`, a one-sentence statement of
 | `row_overlap` | `rows`, `test_rows`, `fraction` |
 | `target_proxy` | `score`, `threshold` |
 | `temporal` | `test_rows_earlier`, `latest_train`, `earliest_test` |
-| `split_order` | `call`, `first_split_line` |
-| `canary` (error) | `train_rows`, `rows_changed`, `feature_rows_changed`, `largest_change` |
-| `determinism` | `rows_changed`, `largest_change` (normal vs control) |
+| `split_order` | `call`, `first_split_line` (a data-reader warning has only `call`; the "could not be applied" warning has none) |
+| `canary` (error) | `train_rows`, `rows_changed`, `feature_rows_changed`, `largest_change`; also `normal_features` and `canary_features` when the feature lists differ |
+| `determinism` | `rows_changed`, `largest_change` (normal vs control); `normal_features` and `control_features` instead when the control used other features |
 | `metric` | `value`, `threshold` |
 | `test_set_uses` | `uses`, `max_test_uses` |
 | `waiver` | `check`, `column` (null when the waiver has no column) |
@@ -888,7 +917,7 @@ Folder `<app_dir>/.hex/<mode>/` (not committed). Format version 1.
 | `train_row_hash` | uint64 | `hash_pandas_object(train[features], index=False)` per training row, in `train_ids` order |
 | `y_score_train` | float64 | training predictions in `train_ids` order. Absent when not provided. |
 
-`loaded.json`: `{"format_version": 1, "mode": "canary", "n_rows": 6950, "n_scrambled": 1387, "run_id": "..."}`. `scrambled_ids.npy` (int64, canary only) holds the scrambled row ids. `result.json` is the `DataAuditResult` as sorted-key JSON with the same finding shape as `verdict.json`. A reader rejects any file whose `format_version` is not 1.
+`loaded.json`: `{"format_version": 1, "mode": "canary", "n_scrambled": 1387, "run_id": "..."}`; `n_scrambled` is `null` outside canary mode. `scrambled_ids.npy` (int64, canary only) holds the scrambled row ids and is written before `loaded.json`, which states how many ids to expect. Likewise `meta.json` is written after `snapshot.npz`. `result.json` is the `DataAuditResult` as sorted-key JSON with the same finding shape as `verdict.json`, plus `format_version` and `run_id`. A reader rejects any file whose `format_version` is not 1.
 
 ### `verdict.json` example
 
@@ -1013,8 +1042,8 @@ A full run, `REJECTED` because the canary found that test rows influenced traini
 
 - Invalid input raises `HexInputError(problem, fix)`. The message names the file, key, column or frame involved and says how to fix it. Example: `data.path "data/churn.csv" does not exist (looked in C:\...\apps\churn\data). Run fetch_data.py or correct [data] path in hex.toml.`
 - Nothing falls back silently. A bad `HEX_MODE`, an unknown `hex.toml` key, a malformed `verdict.json` in the history, an unparseable timestamp and an out-of-range score are all errors.
-- Pure functions raise only `HexInputError`. Operating-system failures (`OSError`) are not caught below the CLI.
-- `ExecutionFailed` is private to `canary.py`. It is raised only by `run_executions` and caught only by `cli.main`.
+- Pure functions raise only `HexInputError`. Readers that name a file (`config.load_config`, `data.load`) turn an `OSError` into a `HexInputError` that names the path. Other operating-system failures (writing `.hex/` files or run folders, a `FileExistsError` from `finalize_run`) are not caught below the CLI, which maps `OSError` to exit 2.
+- `ExecutionFailed` is private to `canary.py`, and so is its subclass `ExecutionTimedOut`. They are raised by `run_train_script` and by the `.hex/` readers (through `run_executions`), caught inside `run_executions` only to recognise a recorded input error (never for `ExecutionTimedOut`), and caught by `cli.main`.
 
 ### Failure table
 
@@ -1022,17 +1051,18 @@ A full run, `REJECTED` because the canary found that test rows influenced traini
 |---|---|---|
 | `hex.toml` missing, unreadable, missing a required key, or invalid value | `config.load_config` | `HexInputError`. In `hexperiment run`: message on stderr, exit 2, no verdict. `<app_dir>/verdict.json` was deleted at the start, so none exists. |
 | CSV missing or empty, or the time column unparseable | `data.load` | `HexInputError`. The child exits non-zero before `audit`, so the parent reports exit 2 (no verdict, none left from an earlier run). |
-| Invalid `audit` arguments (Requirement 4) | `data.validate_audit_inputs` | Normal mode: `result.json` records the error, the run is `REJECTED`, exit 1. Standalone: a `REJECTED` verdict is written, then the error is re-raised. Canary and control mode: only `validate_snapshot_inputs` runs (training frame, features, `y_score_train`); scoring-only conditions are not checked. An error in that part is raised and the parent reports exit 2. |
+| Invalid `audit` arguments (Requirement 4), or a `HexInputError` from building the snapshot or from a check in normal mode | `data.validate_audit_inputs`, `canary.build_snapshot`, `checks/` | Normal mode: `result.json` records the error, the run is `REJECTED`, exit 1. Standalone: a `REJECTED` verdict is written, then the error is re-raised. Canary and control mode: only `validate_snapshot_inputs` runs (training frame, features, `y_score_train`); scoring-only conditions are not checked. An error in that part is raised and the parent reports exit 2. |
 | Invalid waiver | `config.parse_config` | `HexInputError` at config load. |
 | `app_dir` not a directory | `cli.main` | Message on stderr, exit 2. |
 | `train.py` missing | `cli.main` | Message on stderr, exit 2, no verdict. |
-| `train.py` exits non-zero, times out, or leaves no snapshot | `canary.run_executions` | `ExecutionFailed`; stderr tail printed; exit 2; no new verdict and no app-level `verdict.json`. |
+| `train.py` exits non-zero, times out, or leaves no snapshot | `canary.run_executions` | `ExecutionFailed` (`ExecutionTimedOut` for a timeout, which is never accepted as a recorded input error); stderr tail printed; exit 2; no new verdict and no app-level `verdict.json`. |
 | Snapshot or result file has another `run_id` | `canary.read_snapshot`, `read_result` | `ExecutionFailed` ("another run is using this app"); exit 2; no app-level `verdict.json`. |
 | `format_version` not 1 | readers in `canary.py` | `ExecutionFailed`; the message asks to reinstall matching versions; exit 2. |
-| `y_score_train` absent | `canary.decide_canary` | Warning only; hashes are compared without scores. |
+| `y_score_train` absent | `canary.decide_canary` | Warning only; hashes are compared without scores. If neither normal nor canary has it, a canary without a difference is `inconclusive` (step 4b). If only some executions have it, steps 4c and 5a make the canary and determinism outcomes `inconclusive`. |
 | Waiver matches no finding | `verdict.apply_waivers` | Warning finding with check `waiver`; the status is unchanged. |
 | Script source unreadable or unparseable | `auditor.audit`, `check_split_order` | Warning only (8.3). |
-| `runs/<run_id>/` already exists | `runs.finalize_run` | Error; the existing folder is untouched (15.1). The app-level `verdict.json` stays deleted. |
+| `runs/<run_id>/` already exists | `runs.finalize_run` | `FileExistsError` (an `OSError`); the CLI reports exit 2; the existing folder is untouched (15.1). The app-level `verdict.json` stays deleted. |
+| Run id not of the form `YYYYMMDD-HHMMSS-<6 hex chars>` | `runs.finalize_run`, `runs.format_run_id` (token) | `HexInputError`; nothing is written. |
 | Malformed file in `runs/` | `runs.load_history` | `HexInputError` naming the file. In `finalize_run` this surfaces as exit 2 with no app-level `verdict.json`. |
 | Metric undefined (single-class test target) | `validate_audit_inputs` (normal mode only) | `HexInputError` (4.3). In canary and control mode the condition is not checked. |
 
@@ -1103,7 +1133,7 @@ Settings are registered once in `conftest.py`: `max_examples=60`, `deadline=None
 | `scramble_test_rows` on a frame whose target has exactly two distinct test values always leaves both classes in the test target, and swaps the class counts | `test_data.py` |
 | `tilt_column` on a numeric column with three or more distinct values only writes values at or above the pool minimum (the smaller of the median-position value and the second-largest distinct value), and on a column with two distinct values is its own inverse | `test_data.py` |
 | `write_snapshot` then `read_snapshot` returns equal arrays | `test_canary.py` |
-| `decide_canary`: for any combination of equal or different normal, canary and control snapshots, the control runner is called at most once and only when the canary differs and the id sets are equal | `test_canary.py` |
+| `decide_canary`: for any combination of equal or different normal, canary and control snapshots, the control runner is called at most once and only when the marker is valid, the canary differs (rows, predictions or feature list) and the id sets are equal | `test_canary.py` |
 | `to_json` then `from_dict` returns an equal `Verdict`; keys are sorted; there is no NaN | `test_verdict.py` |
 | Waived findings never change the status; `assemble` called twice with the same inputs but a different `run_id` and `created_at` gives equal `status`, `metric` and `findings` (13.5) | `test_verdict.py` |
 | `format_run_id` always matches `^\d{8}-\d{6}-[0-9a-f]{6}$` | `test_runs.py` |
@@ -1166,7 +1196,7 @@ Every acceptance criterion maps to the component that implements it and the test
 | 2.3 | `auditor.audit`, `checks.run_data_checks`, `canary.write_snapshot` | `test_auditor.py`, `test_canary.py` |
 | 2.4 | `auditor.audit` (mode branch), `data.validate_snapshot_inputs` | `test_auditor.py` (example and property), `test_data.py` |
 | 2.5 | `auditor.audit`, all `checks/*` | `test_auditor.py`, each check file |
-| 2.6 | `canary.decide_canary` (warning in steps 4 to 6) | `test_canary.py` |
+| 2.6 | `canary.decide_canary` (training-prediction warnings after step 3: steps 4b, 4c, 5a and the warnings of steps 5, 6 and 6a) | `test_canary.py` |
 | 3.1 | `config.parse_config` | `test_config.py` |
 | 3.2 | `config.parse_config`, `checks.metric.compute_metric` | `test_config.py`, `test_metric.py` |
 | 3.3 | `config.load_config`, `config.parse_config` | `test_config.py` |
@@ -1197,9 +1227,9 @@ Every acceptance criterion maps to the component that implements it and the test
 | 10.1 | `canary.run_executions` | `test_canary.py`, `test_canary_scripts.py` |
 | 10.2 | `canary.decide_canary` (step 3) | `test_canary.py` |
 | 10.3 | `canary.decide_canary`, `canary.compare_snapshots`, `canary.run_executions` | `test_canary.py` (property) |
-| 10.4 | `canary.decide_canary` (step 6) | `test_canary.py`, `test_canary_scripts.py` (scenario 6) |
+| 10.4 | `canary.decide_canary` (steps 6 and 6a) | `test_canary.py`, `test_canary_scripts.py` (scenario 6) |
 | 10.5 | `canary.decide_canary` (step 5), `canary.hint_locations` | `test_canary.py`, `test_canary_scripts.py` (scenarios 1 to 3 and 11) |
-| 10.6 | `data.load` (marker), `canary.decide_canary` (step 1) | `test_canary.py`, `test_canary_scripts.py` (scenario 7) |
+| 10.6 | `data.load` (marker), `canary.decide_canary` (steps 1a and 1b) | `test_canary.py`, `test_canary_scripts.py` (scenario 7) |
 | 10.7 | `verdict.apply_waivers` (candidates limited to three checks), `config.parse_config` | `test_verdict.py`, `test_config.py` |
 | 11.1 | `config.parse_config` | `test_config.py` |
 | 11.2 | `verdict.apply_waivers` (including the stale-waiver warning) | `test_verdict.py` |
@@ -1246,7 +1276,7 @@ Each line gives the question, the owner's resolution, and where the design appli
 7. **Waiver matching details.** No `column` matches all findings of that check; `column` on another check raises `HexInputError`; a waiver that matches no finding is not recorded but produces a `warning` finding (check `waiver`, location the waiver's check and column), so a stale waiver stays visible. See `verdict.apply_waivers`.
 8. **Modules and exports beyond the original `structure.md`.** Accepted. `errors.py`, `models.py`, `auditor.py` and `runs.py` exist, `structure.md` is updated, and `__all__` is exactly its export list (the design no longer exports `__version__`).
 9. **What counts as a test-set use.** Every verdict in history with the same `split` block counts, except runs whose result is an input error (the test set was never scored); fast, full, `REJECTED` and `UNVERIFIED` runs all count. See `runs.count_test_set_uses`.
-10. **Proxy check details missing from Requirement 6.** Accepted: numeric rows with missing values are dropped for that feature, booleans count as numeric, and a `target.positive` that matches no test row fails as a single-class test target.
+10. **Proxy check details missing from Requirement 6.** Accepted: missing values of a numeric feature are ranked once lowest and once highest and the higher score is kept (a column filled in only for one class scores `1.0`), booleans count as numeric, and a `target.positive` that matches no test row fails as a single-class test target.
 11. **Stricter `hex.toml` validation than Requirement 3.** Accepted: unknown keys are rejected and every numeric key is range-checked.
 12. **Split-order hint scope.** Accepted: a method call counts when its receiver is not rooted at an imported module alias, bare builtins `min` and `max` are ignored, and the hint reports by line number only.
 13. **Time budget for the canary scenarios.** Accepted. If the scenarios exceed the 90-second budget, merge scenarios; do not add a separate stage. See "Time budget".

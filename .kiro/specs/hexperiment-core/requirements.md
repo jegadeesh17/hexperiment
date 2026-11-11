@@ -162,7 +162,7 @@ Scope of this spec: data loading and splitting, configuration, the checks, the c
 
 #### Acceptance Criteria
 
-1. THE verdict SHALL include `test_set_uses`: the number of runs in the app's history (including this one) that used the same `data.path`, `split.test_fraction`, `split.seed` and `split.time_column`.
+1. THE verdict SHALL include `test_set_uses`: the number of runs in the app's history (including this one) that used the same `data.path`, `split.test_fraction`, `split.seed` and `split.time_column`. A run that ended on an input error never computed a metric, so it is not counted.
 2. IF `test_set_uses` exceeds `checks.max_test_uses` THEN the system SHALL report a `warning` finding that the metric may be optimistic because the test set has been evaluated that many times.
 
 ### Requirement 13: Verdict
