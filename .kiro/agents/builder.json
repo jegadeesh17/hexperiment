@@ -54,7 +54,11 @@
           ".venv\\Scripts\\python.exe *",
           "git status*",
           "git diff*",
-          "git log*"
+          "git log*",
+          ".venv/Scripts/hexperiment *",
+          ".venv\\Scripts\\hexperiment *",
+          ".venv/Scripts/hexperiment.exe *",
+          ".venv\\Scripts\\hexperiment.exe *"
         ],
         "effect": "allow"
       },
