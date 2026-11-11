@@ -24,7 +24,7 @@ PUBLIC_API = {
 }
 
 # Modules that must stay free of file, process, clock and config access.
-PURE_FILES = {"verdict.py", "card.py", "models.py", "errors.py"}
+PURE_FILES = {"verdict.py", "card.py", "models.py", "errors.py", "hook_event.py"}
 FORBIDDEN_IN_PURE = {"os", "pathlib", "shutil", "subprocess", "tomllib", "datetime"}
 
 MUTABLE_CALLS = {
@@ -168,6 +168,23 @@ def test_only_canary_imports_subprocess():
     assert importers == ["canary.py"]
 
 
+def imported_modules(path: Path) -> set[str]:
+    """Every module a file imports, as dotted names, including ``from x import y``."""
+    modules: set[str] = set()
+    for node in ast.walk(parse(path)):
+        if isinstance(node, ast.Import):
+            modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            modules.add(node.module)
+            modules.update(f"{node.module}.{alias.name}" for alias in node.names)
+    return modules
+
+
+@pytest.mark.parametrize("name", ["hook.py", "hook_event.py", "workspace.py"])
+def test_the_hook_modules_do_not_import_the_cli(name):
+    assert "hexperiment.cli" not in imported_modules(PACKAGE_DIR / name)
+
+
 def test_only_console_calls_print():
     printers = [
         module_id(path)
@@ -216,6 +233,7 @@ def test_the_pure_modules_include_every_check():
         "card.py",
         "models.py",
         "errors.py",
+        "hook_event.py",
     } <= checked
 
 

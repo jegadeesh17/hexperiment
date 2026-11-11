@@ -283,6 +283,21 @@ class DataAuditResult:
 
 
 @dataclass(frozen=True, slots=True)
+class RunOutcome:
+    """What one ``hexperiment run`` produced, as text instead of printed output.
+
+    ``exit_code`` is 0, 1, 2 or 3 as in the command. ``status`` is ``None`` when
+    ``exit_code`` is 2 (no verdict was written). ``stdout`` is the summary of the
+    verdict, ``stderr`` the failure message of a run that failed.
+    """
+
+    exit_code: int
+    status: Status | None
+    stdout: str
+    stderr: str
+
+
+@dataclass(frozen=True, slots=True)
 class Verdict:
     status: Status
     mode: RunMode

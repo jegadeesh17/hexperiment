@@ -13,14 +13,14 @@
 
 ## Tasks
 
-- [ ] 1. `run_app`: a run that returns its text instead of printing it
+- [x] 1. `run_app`: a run that returns its text instead of printing it
   - In `hexperiment/src/hexperiment/models.py` add the frozen dataclass `RunOutcome(exit_code, status, stdout, stderr)`.
   - In `hexperiment/src/hexperiment/cli.py` add `run_app(app_dir, *, full, timeout_cap=None) -> RunOutcome`. It contains the logic that `main` has today after argument parsing (folder check, resolve, `clear_app_verdict`, `_run`, the same exception mapping to exit code 2) and builds the `RunOutcome` instead of calling `print_text`. `timeout_cap` replaces `config.run.timeout_seconds` by `min(configured, cap)` with `dataclasses.replace` on the frozen config, after `load_config` and before `run_executions`.
   - `main` for the `run` command calls `run_app` and prints `stdout` and `stderr` through `print_text`. The behaviour, the output and the exit codes of `hexperiment run` do not change. Keep `run_executions` and `new_run_id` as module attributes that `_run` uses, because the existing tests replace them.
   - Extend `hexperiment/tests/test_cli.py` without editing any existing test: `run_app` returns the right `exit_code`, `status`, `stdout` and `stderr` for an approved, a rejected, an unverified and a failed run, and prints nothing (use `capsys`); the stale `verdict.json` is gone after a failed `run_app`; `timeout_cap` with the fake runner's recorded timeouts (configured 120 and cap 100 gives 100, configured 30 and cap 100 gives 30, `None` leaves 120).
   - _Requirements: 1.3, 1.5, 1.6, 4.6, 7.4_
 
-- [ ] 2. Hook event parsing and workspace lookup
+- [x] 2. Hook event parsing and workspace lookup
   - Create `hexperiment/src/hexperiment/hook_event.py` (pure): `PATH_KEYS`, the limits, and `candidate_paths(event_text)` with the two tiers, the control-character and length rules, `file://` handling and the `.py` filter, as in `design.md`. It never raises.
   - Create `hexperiment/src/hexperiment/workspace.py`: `ENV_WORKSPACE`, `AppRef`, the `RunApp` protocol, `resolve_workspace`, `is_app`, `relative_posix`, `find_app_for_file`, `resolve_app` and `discover_apps`. Refusals are `HexInputError` messages that name the app, the failed condition and the fix. `discover_apps` prunes hidden folders, `node_modules`, `__pycache__` and folders with `pyvenv.cfg`, does not follow links and does not descend into an app. Containment checks compare resolved paths case-insensitively on Windows: real hook events carry `c:\...` while the working directory is `C:\...` (design.md, Open question 2); test both cases.
   - Create `hexperiment/tests/test_hook_event.py` with every event shape listed under "Hook event shapes" in `design.md` (flat, camel case, nested, list, Windows and POSIX absolute, `file://` URI, relative, tier-2 only, file contents next to the real path, non-Python, upper case, two paths, array, null, number, invalid JSON, empty, too deep, too long, non-string values), plus the two Hypothesis properties (never raises with valid output; a planted path is found). The first example is the real Kiro event shape from design.md, Open question 2.
@@ -28,7 +28,7 @@
   - In `hexperiment/tests/test_architecture.py` add `hook_event.py` to `PURE_FILES` (extend the list of required pure modules in `test_the_pure_modules_include_every_check` accordingly).
   - _Requirements: 1.2, 1.4, 4.2, 4.5, 7.1_
 
-- [ ] 3. The `hexperiment hook` command
+- [x] 3. The `hexperiment hook` command
   - Create `hexperiment/src/hexperiment/hook.py`: `HOOK_TIMEOUT_SECONDS = 120`, `HOOK_RUN_CAP_SECONDS = 100`, `handle_hook(event_text, *, workspace, run)` and `format_hook_output(outcome, app_relative)`. It receives `run` as an argument and does not import `cli`.
   - In `hexperiment/src/hexperiment/cli.py` add the subcommand `hook` to `build_parser` and its handling in `main`: read at most 1 MiB from `sys.stdin.buffer` (decode `utf-8-sig` with replacement; an interactive terminal counts as empty input), call `handle_hook(text, workspace=resolve_workspace(), run=run_app)`, print a non-empty result with `print_text`, return `0`. Catch any `Exception` from the handler, print `hexperiment hook failed: <type>: <message>` and still return `0`.
   - Create `hexperiment/tests/test_hook.py` with the cases listed for it in `design.md`: found, not found, first usable candidate wins, missing file skipped, outside-workspace file skipped, call arguments (`full=False`, cap 100), output for `UNVERIFIED`, `REJECTED`, `APPROVED` (formatting only) and failed outcomes, and the full-check line with the workspace-relative path.

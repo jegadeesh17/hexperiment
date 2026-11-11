@@ -8,6 +8,7 @@ import importlib
 import io
 import json
 import os
+import shutil
 import sys
 import tomllib
 from functools import partial
@@ -27,6 +28,7 @@ from hexperiment.cli import (
     build_parser,
     exit_code_for,
     main,
+    run_app,
 )
 from hexperiment.config import ExecMode
 from hexperiment.models import (
@@ -36,6 +38,7 @@ from hexperiment.models import (
     Finding,
     MetricResult,
     Outcome,
+    RunOutcome,
     Severity,
     Status,
 )
@@ -569,3 +572,494 @@ def test_an_error_message_survives_a_console_that_cannot_encode_it(
     text = stderr.buffer.getvalue().decode("ascii")
     assert text.startswith("hexperiment: ")
     assert "gr??e" in text
+
+
+# --- run_app: the text of a run, nothing printed (Requirements 1.3, 1.5, 4.6) -------
+
+
+def test_run_app_returns_an_approved_outcome_and_prints_nothing(
+    tmp_path, run_with, fake_runner, capsys
+):
+    app = make_app(tmp_path)
+    run_with(**passing_plans(fake_runner))
+    outcome = run_app(app, full=True)
+    assert isinstance(outcome, RunOutcome)
+    assert (outcome.exit_code, outcome.status, outcome.stderr) == (
+        0,
+        Status.APPROVED,
+        "",
+    )
+    assert outcome.stdout.startswith("APPROVED (full)")
+    captured = capsys.readouterr()
+    assert (captured.out, captured.err) == ("", "")
+
+
+def test_run_app_returns_a_rejected_outcome_with_the_findings(
+    tmp_path, run_with, fake_runner, capsys
+):
+    app = make_app(tmp_path)
+    run_with(**leaking_plans(fake_runner, hint()))
+    outcome = run_app(app, full=True)
+    assert (outcome.exit_code, outcome.status, outcome.stderr) == (
+        1,
+        Status.REJECTED,
+        "",
+    )
+    lines = outcome.stdout.splitlines()
+    assert lines[0].startswith("REJECTED (full)")
+    assert len(lines) == 3
+    assert any("The Peeking Spirit" in line for line in lines)
+    captured = capsys.readouterr()
+    assert (captured.out, captured.err) == ("", "")
+
+
+def test_run_app_returns_an_unverified_outcome_for_a_fast_run(
+    tmp_path, run_with, fake_runner, capsys
+):
+    app = make_app(tmp_path)
+    runner = run_with(**passing_plans(fake_runner))
+    outcome = run_app(app, full=False)
+    assert (outcome.exit_code, outcome.status, outcome.stderr) == (
+        3,
+        Status.UNVERIFIED,
+        "",
+    )
+    assert outcome.stdout.startswith("UNVERIFIED (fast)")
+    assert runner.calls == [ExecMode.NORMAL]
+    captured = capsys.readouterr()
+    assert (captured.out, captured.err) == ("", "")
+
+
+def test_run_app_returns_a_failed_outcome_with_the_message(
+    tmp_path, run_with, fake_runner, capsys
+):
+    app = make_app(tmp_path)
+    failure = "train.py exited with code 1\nLast lines of stderr:\nValueError: boom"
+    run_with(normal=fake_runner.Plan(fail=failure))
+    outcome = run_app(app, full=True)
+    assert outcome == RunOutcome(2, None, "", f"hexperiment: {failure}")
+    captured = capsys.readouterr()
+    assert (captured.out, captured.err) == ("", "")
+
+
+def test_run_app_removes_the_stale_verdict_when_the_run_fails(
+    tmp_path, run_with, fake_runner
+):
+    app = make_app(tmp_path)
+    run_with(normal=fake_runner.Plan(fail="train.py exited with code 1"))
+    assert (app / "verdict.json").is_file()
+    assert run_app(app, full=True).exit_code == 2
+    assert stale_verdict_is_gone(app)
+
+
+def test_run_app_reports_a_missing_folder_as_a_failed_outcome(tmp_path, capsys):
+    outcome = run_app(tmp_path / "nowhere", full=True)
+    assert (outcome.exit_code, outcome.status, outcome.stdout) == (2, None, "")
+    assert outcome.stderr.startswith("hexperiment: ")
+    assert "nowhere" in outcome.stderr
+    assert capsys.readouterr().out == ""
+
+
+def test_run_app_reports_an_unexpected_exception_with_a_traceback(
+    tmp_path, monkeypatch
+):
+    app = make_app(tmp_path)
+
+    def explode(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(cli, "run_executions", explode)
+    outcome = run_app(app, full=True)
+    first, *rest = outcome.stderr.splitlines()
+    assert first == "hexperiment: internal error: RuntimeError: boom"
+    assert any(line.startswith("Traceback") for line in rest)
+    assert (outcome.exit_code, outcome.status, outcome.stdout) == (2, None, "")
+
+
+def test_run_app_does_not_swallow_a_keyboard_interrupt(
+    tmp_path, run_with, fake_runner, monkeypatch
+):
+    app = make_app(tmp_path)
+    run_with(**passing_plans(fake_runner))
+
+    def interrupt(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "finalize_run", interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        run_app(app, full=True)
+
+
+def test_main_prints_exactly_the_text_of_run_app(
+    tmp_path, run_with, fake_runner, monkeypatch, capsys
+):
+    app = make_app(tmp_path)
+    monkeypatch.setattr(cli, "new_run_id", lambda: RUN_ID)
+    run_with(**leaking_plans(fake_runner, hint()))
+    code = main(["run", str(app)])
+    printed = capsys.readouterr()
+    shutil.rmtree(app / "runs")
+    outcome = run_app(app, full=True)
+    assert code == outcome.exit_code == 1
+    assert printed.out == outcome.stdout + "\n"
+    assert printed.err == ""
+
+
+def test_main_prints_the_failure_message_of_run_app_on_stderr(tmp_path, capsys):
+    missing = tmp_path / "nowhere"
+    code = main(["run", str(missing)])
+    printed = capsys.readouterr()
+    outcome = run_app(missing, full=True)
+    assert code == outcome.exit_code == 2
+    assert printed.err == outcome.stderr + "\n"
+    assert printed.out == ""
+
+
+# --- timeout_cap (Requirement 1.6) ---------------------------------------------------
+
+TIMEOUT_TOML = HEX_TOML + "\n[run]\ntimeout_seconds = 30\n"
+
+
+@pytest.mark.parametrize(
+    ("toml", "cap", "expected"),
+    [
+        (HEX_TOML + "\n[run]\ntimeout_seconds = 120\n", 100, 100),
+        (TIMEOUT_TOML, 100, 30),
+        (HEX_TOML + "\n[run]\ntimeout_seconds = 120\n", None, 120),
+        (HEX_TOML, None, 120),
+        (HEX_TOML, 100, 100),
+    ],
+    ids=["cap-below", "configured-below", "no-cap", "default", "default-capped"],
+)
+def test_timeout_cap_limits_the_timeout_of_every_execution(
+    toml, cap, expected, tmp_path, run_with, fake_runner
+):
+    app = make_app(tmp_path, toml=toml)
+    runner = run_with(**passing_plans(fake_runner))
+    assert run_app(app, full=True, timeout_cap=cap).exit_code == 0
+    assert runner.calls == [ExecMode.NORMAL, ExecMode.CANARY]
+    assert runner.timeouts == [expected, expected]
+
+
+def test_timeout_cap_leaves_hex_toml_untouched(tmp_path, run_with, fake_runner):
+    app = make_app(tmp_path, toml=TIMEOUT_TOML)
+    before = (app / "hex.toml").read_bytes()
+    run_with(**passing_plans(fake_runner))
+    run_app(app, full=False, timeout_cap=5)
+    assert (app / "hex.toml").read_bytes() == before
+
+
+# --- hexperiment hook (Requirements 1.2 to 1.7) -------------------------------------
+
+HOOK_NOTICE = (
+    "Fast check only: the canary test did not run, so this result can never be "
+    "APPROVED. Before you call the work done, run: hexperiment run app"
+)
+
+
+def feed_stdin(monkeypatch, data: str | bytes) -> None:
+    """Replace standard input with ``data``, as a pipe from Kiro would."""
+    raw = data.encode("utf-8") if isinstance(data, str) else data
+    stream = io.TextIOWrapper(io.BytesIO(raw), encoding="utf-8")
+    monkeypatch.setattr(sys, "stdin", stream)
+
+
+def hook_event_for(app: Path, name: str = "train.py") -> str:
+    """The shape of event that Kiro writes: flat, with an absolute file_path."""
+    return json.dumps(
+        {
+            "session_id": "sess_01HZ",
+            "hook_event_name": "PostFileSave",
+            "cwd": str(app.parent),
+            "file_path": str(app / name),
+        }
+    )
+
+
+@pytest.fixture
+def project(tmp_path, monkeypatch) -> Path:
+    """The workspace of the hook: the working directory, no override variable."""
+    monkeypatch.delenv("HEXPERIMENT_WORKSPACE", raising=False)
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+def proxy_finding() -> Finding:
+    return Finding(
+        check="target_proxy",
+        ghost="The Possession",
+        severity=Severity.ERROR,
+        location="tenure",
+        message="tenure alone predicts the target",
+        evidence={},
+        fix="drop it if it is recorded after the outcome",
+    )
+
+
+def test_the_parser_accepts_hook_without_arguments():
+    parser = build_parser()
+    assert parser.parse_args(["hook"]).command == "hook"
+    with pytest.raises(SystemExit) as stop:
+        parser.parse_args(["hook", "extra"])
+    assert stop.value.code == 2
+
+
+def test_a_clean_fast_run_prints_the_summary_and_the_notice_and_exits_0(
+    project, run_with, fake_runner, monkeypatch, capsys
+):
+    app = make_app(project)
+    runner = run_with(**passing_plans(fake_runner))
+    feed_stdin(monkeypatch, hook_event_for(app))
+    assert main(["hook"]) == 0
+    captured = capsys.readouterr()
+    lines = captured.out.splitlines()
+    assert lines[0].startswith("UNVERIFIED (fast)")
+    assert lines[-1] == HOOK_NOTICE
+    assert len(lines) == 2
+    assert captured.err == ""
+    assert runner.calls == [ExecMode.NORMAL]
+
+
+def test_the_hook_run_is_capped_below_the_hook_timeout(
+    project, run_with, fake_runner, monkeypatch
+):
+    app = make_app(project, toml=HEX_TOML + "\n[run]\ntimeout_seconds = 120\n")
+    runner = run_with(**passing_plans(fake_runner))
+    feed_stdin(monkeypatch, hook_event_for(app))
+    assert main(["hook"]) == 0
+    assert runner.timeouts == [100]
+
+
+def test_a_short_configured_timeout_is_kept_by_the_hook(
+    project, run_with, fake_runner, monkeypatch
+):
+    app = make_app(project, toml=HEX_TOML + "\n[run]\ntimeout_seconds = 30\n")
+    runner = run_with(**passing_plans(fake_runner))
+    feed_stdin(monkeypatch, hook_event_for(app))
+    assert main(["hook"]) == 0
+    assert runner.timeouts == [30]
+
+
+def test_a_rejected_fast_run_exits_0_and_prints_the_finding(
+    project, run_with, fake_runner, monkeypatch, capsys
+):
+    app = make_app(project)
+    run_with(**passing_plans(fake_runner, proxy_finding()))
+    feed_stdin(monkeypatch, hook_event_for(app))
+    assert main(["hook"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].startswith("REJECTED (fast)")
+    assert any("The Possession" in line and "tenure" in line for line in lines)
+    assert lines[-1] == HOOK_NOTICE
+
+
+def test_a_failed_run_exits_0_and_prints_the_message(
+    project, run_with, fake_runner, monkeypatch, capsys
+):
+    app = make_app(project)
+    failure = "train.py exited with code 1\nLast lines of stderr:\nValueError: boom"
+    run_with(normal=fake_runner.Plan(fail=failure))
+    feed_stdin(monkeypatch, hook_event_for(app))
+    assert main(["hook"]) == 0
+    captured = capsys.readouterr()
+    assert captured.out == f"hexperiment: {failure}\n{HOOK_NOTICE}\n"
+    assert captured.err == ""
+    assert stale_verdict_is_gone(app)
+
+
+def test_a_hook_run_is_recorded_and_counts_as_a_test_set_use(
+    project, run_with, fake_runner, monkeypatch, capsys
+):
+    app = make_app(project)
+    run_with(**passing_plans(fake_runner))
+    feed_stdin(monkeypatch, hook_event_for(app))
+    assert main(["hook"]) == 0
+    (run_dir,) = (app / "runs").iterdir()
+    first = json.loads((app / "verdict.json").read_text(encoding="utf-8"))
+    assert first["run_id"] == run_dir.name
+    stored = (app / "verdict.json").read_bytes()
+    assert (run_dir / "verdict.json").read_bytes() == stored
+    assert (run_dir / "model_card.md").is_file()
+    feed_stdin(monkeypatch, hook_event_for(app))
+    assert main(["hook"]) == 0
+    assert len(list((app / "runs").iterdir())) == 2
+    second = json.loads((app / "verdict.json").read_text(encoding="utf-8"))
+    assert second["test_set_uses"] == first["test_set_uses"] + 1
+    capsys.readouterr()
+
+
+def test_the_hook_can_find_the_app_from_a_helper_file(
+    project, run_with, fake_runner, monkeypatch, capsys
+):
+    app = make_app(project)
+    helper = app / "features" / "encode.py"
+    helper.parent.mkdir()
+    helper.write_text("x = 1\n", encoding="utf-8")
+    runner = run_with(**passing_plans(fake_runner))
+    feed_stdin(monkeypatch, hook_event_for(app, "features/encode.py"))
+    assert main(["hook"]) == 0
+    assert runner.calls == [ExecMode.NORMAL]
+    assert capsys.readouterr().out.splitlines()[0].startswith("UNVERIFIED (fast)")
+
+
+@pytest.mark.parametrize("data", ["", "   \n", "{not json", "null", "[]"])
+def test_input_without_a_file_prints_nothing_and_exits_0(
+    data, project, run_with, fake_runner, monkeypatch, capsys
+):
+    make_app(project)
+    runner = run_with(**passing_plans(fake_runner))
+    feed_stdin(monkeypatch, data)
+    assert main(["hook"]) == 0
+    captured = capsys.readouterr()
+    assert (captured.out, captured.err) == ("", "")
+    assert runner.calls == []
+
+
+def test_a_non_python_file_prints_nothing_and_exits_0(
+    project, run_with, fake_runner, monkeypatch, capsys
+):
+    app = make_app(project)
+    runner = run_with(**passing_plans(fake_runner))
+    feed_stdin(monkeypatch, hook_event_for(app, "hex.toml"))
+    assert main(["hook"]) == 0
+    captured = capsys.readouterr()
+    assert (captured.out, captured.err) == ("", "")
+    assert runner.calls == []
+    assert (app / "verdict.json").is_file()
+
+
+def test_a_python_file_outside_the_workspace_prints_nothing(
+    tmp_path, run_with, fake_runner, monkeypatch, capsys
+):
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    app = make_app(foreign)
+    monkeypatch.delenv("HEXPERIMENT_WORKSPACE", raising=False)
+    monkeypatch.chdir(workspace)
+    runner = run_with(**passing_plans(fake_runner))
+    feed_stdin(monkeypatch, hook_event_for(app))
+    assert main(["hook"]) == 0
+    assert capsys.readouterr().out == ""
+    assert runner.calls == []
+
+
+def test_the_workspace_variable_overrides_the_working_directory(
+    tmp_path, run_with, fake_runner, monkeypatch, capsys
+):
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    app = make_app(workspace)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.setenv("HEXPERIMENT_WORKSPACE", str(workspace))
+    runner = run_with(**passing_plans(fake_runner))
+    feed_stdin(monkeypatch, hook_event_for(app))
+    assert main(["hook"]) == 0
+    assert runner.calls == [ExecMode.NORMAL]
+    assert capsys.readouterr().out.startswith("UNVERIFIED (fast)")
+
+
+def test_a_terminal_as_standard_input_counts_as_empty_and_is_never_read(
+    project, run_with, fake_runner, monkeypatch, capsys
+):
+    class Terminal:
+        buffer = None  # reading it would raise
+
+        def isatty(self) -> bool:
+            return True
+
+    make_app(project)
+    runner = run_with(**passing_plans(fake_runner))
+    monkeypatch.setattr(sys, "stdin", Terminal())
+    assert main(["hook"]) == 0
+    captured = capsys.readouterr()
+    assert (captured.out, captured.err) == ("", "")
+    assert runner.calls == []
+
+
+def test_a_missing_standard_input_counts_as_empty(project, monkeypatch, capsys):
+    monkeypatch.setattr(sys, "stdin", None)
+    assert main(["hook"]) == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_a_byte_order_mark_and_invalid_utf8_do_not_stop_the_hook(
+    project, run_with, fake_runner, monkeypatch, capsys
+):
+    app = make_app(project)
+    runner = run_with(**passing_plans(fake_runner))
+    event = json.loads(hook_event_for(app))
+    event["note"] = "PLACEHOLDER"
+    raw = json.dumps(event).encode("utf-8").replace(b"PLACEHOLDER", b"\xff\xfe")
+    feed_stdin(monkeypatch, b"\xef\xbb\xbf" + raw)
+    assert main(["hook"]) == 0
+    assert runner.calls == [ExecMode.NORMAL]
+    assert capsys.readouterr().out.startswith("UNVERIFIED (fast)")
+
+
+def test_only_the_first_mebibyte_of_input_is_read(
+    project, run_with, fake_runner, monkeypatch, capsys
+):
+    app = make_app(project)
+    runner = run_with(**passing_plans(fake_runner))
+    event = json.loads(hook_event_for(app))
+    event["padding"] = "x" * (2 * cli.MAX_EVENT_BYTES)
+    stream = io.TextIOWrapper(io.BytesIO(json.dumps(event).encode()), encoding="utf-8")
+    monkeypatch.setattr(sys, "stdin", stream)
+    assert main(["hook"]) == 0
+    assert capsys.readouterr().out == ""
+    assert runner.calls == []
+    assert stream.buffer.tell() == cli.MAX_EVENT_BYTES
+
+
+def test_an_exception_in_the_handler_prints_one_line_and_exits_0(
+    project, monkeypatch, capsys
+):
+    def explode(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(cli, "handle_hook", explode)
+    feed_stdin(monkeypatch, "{}")
+    assert main(["hook"]) == 0
+    captured = capsys.readouterr()
+    assert captured.out == "hexperiment hook failed: RuntimeError: boom\n"
+    assert captured.err == ""
+
+
+def test_an_invalid_workspace_variable_prints_one_line_and_exits_0(
+    project, monkeypatch, capsys
+):
+    monkeypatch.setenv("HEXPERIMENT_WORKSPACE", str(project / "nowhere"))
+    feed_stdin(monkeypatch, "{}")
+    assert main(["hook"]) == 0
+    out = capsys.readouterr().out
+    prefix = "hexperiment hook failed: HexInputError: HEXPERIMENT_WORKSPACE"
+    assert out.startswith(prefix)
+    assert len(out.splitlines()) == 1
+
+
+def test_a_failure_to_print_does_not_change_the_hook_exit_code(
+    project, run_with, fake_runner, monkeypatch
+):
+    app = make_app(project)
+    run_with(**passing_plans(fake_runner, proxy_finding()))
+    feed_stdin(monkeypatch, hook_event_for(app))
+
+    def broken(text, file=None):
+        raise OSError("closed pipe")
+
+    monkeypatch.setattr(cli, "print_text", broken)
+    assert main(["hook"]) == 0
+
+
+def test_a_keyboard_interrupt_in_the_hook_is_not_swallowed(project, monkeypatch):
+    def interrupt(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "handle_hook", interrupt)
+    feed_stdin(monkeypatch, "{}")
+    with pytest.raises(KeyboardInterrupt):
+        main(["hook"])
