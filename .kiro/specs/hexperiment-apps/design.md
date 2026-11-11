@@ -222,12 +222,13 @@ Every script has the same structure, so the haunted/honest diff is small.
 
 ```python
 def drop_seen_test_rows(train: pd.DataFrame, test: pd.DataFrame, key: list[str]) -> pd.DataFrame:
-    """Return test without the rows whose key columns already occur in train (or earlier in test)."""
-    seen = pd.concat([train[key], test[key]]).duplicated().to_numpy()
-    return test.loc[~seen[len(train):]]
+    """Return test without the rows whose key columns also occur in train."""
+    seen = set(pd.util.hash_pandas_object(train[key], index=False))
+    keep = ~pd.util.hash_pandas_object(test[key], index=False).isin(seen).to_numpy()
+    return test.loc[keep]
 ```
 
-`duplicated()` marks later occurrences, and train comes first, so a test row is dropped exactly when an identical train row (or an earlier test row) exists. NaN equals NaN. The index labels are kept. The key is `FEATURES + [TARGET]`, the same columns The Doppelganger compares, so the check cannot find an overlap that this function left.
+A test row is dropped exactly when an identical training row exists. Duplicates within the test rows stay, like duplicates within the training rows (steering rule 2): they are not an overlap. Rows are compared by a 64-bit hash of their key values (`pd.util.hash_pandas_object` with `index=False`, in which NaN equals NaN); a collision could only drop a test row, never keep one that overlaps. The index labels are kept. The key is `FEATURES + [TARGET]`, the same columns The Doppelganger compares, so the check cannot find an overlap that this function left.
 
 ```python
 def build_model() -> Pipeline:            # shared by honest and haunted
@@ -283,11 +284,8 @@ df = hexperiment.load()
 df["agent"] = ...                                                      # as in the honest script
 # LEAK: The Peeking Spirit. The rate uses every row, so test labels reach training.
 df["country_cancel_rate"] = df.groupby("country", dropna=False)[TARGET].transform("mean")
-# LEAK: recorded after the outcome (post-outcome columns), but only reservation_status is a
-# near-perfect proxy for the target; the other two score about 0.6 and no check can see them.
-df["status_day"] = (pd.to_datetime(df["reservation_status_date"]) - pd.Timestamp("2015-01-01")).dt.days
-CATEGORICAL += ["reservation_status", "assigned_room_type"]    # The Possession is reservation_status
-NUMERIC += ["country_cancel_rate", "status_day"]
+CATEGORICAL += ["reservation_status"]   # LEAK: The Possession. Filled in when the booking ends.
+NUMERIC += ["country_cancel_rate"]
 train, test = hexperiment.split(df)                                    # split is correct
 test = drop_seen_test_rows(train, test, FEATURES + [TARGET])
 ```
@@ -296,7 +294,7 @@ test = drop_seen_test_rows(train, test, FEATURES + [TARGET])
 
 Why each ghost fires:
 
-- **The Possession.** `reservation_status` alone scores 1.000 (owner's measurement), above `proxy_auc_max = 0.95`. `reservation_status_date` (about 0.593) and `assigned_room_type` (about 0.599) stay below the threshold, so they are not reported. The honest script leaves all three out because they are recorded after the outcome (Requirement 2.4).
+- **The Possession.** `reservation_status` alone scores 1.000 (owner's measurement), above `proxy_auc_max = 0.95`. `reservation_status_date` (about 0.593) and `assigned_room_type` (about 0.599) are also recorded after the outcome but score below the threshold, so no check would report them. The haunted script therefore plants only the two leaks of Requirement 2.2: a leak that no ghost names would survive the `exorcise` loop, which stops at the first `APPROVED`. The honest script leaves all three columns out (Requirement 2.4).
 - **The Peeking Spirit.** In the canary execution the labels and countries of the test rows are replaced. The per-country rate of every country that has test rows changes, and so do the training feature values and predictions of most training rows. The control execution repeats the normal one exactly, so the finding is The Peeking Spirit, not The Shapeshifter. `split_order` also warns at the `transform` line, which appears in the finding's suspect lines.
 - **Too good to be true.** AUC near 1.0 is above `min(0.85 + 0.15, 0.99) = 0.99`.
 
@@ -351,16 +349,18 @@ A dev tool, not part of the product. It runs a script variant of an app through 
 .venv/Scripts/python apps/verify.py <hotel-cancellations|flight-delays> [--variant NAME ...] [--fast]
 ```
 
-Variants: `haunted`, `honest` for both apps, plus `split-fixed` for flight-delays. Default: all variants of the app.
+Variants: `haunted`, `honest` for both apps, plus `possession-fixed` for hotel-cancellations and `split-fixed` for flight-delays. Default: all variants of the app.
 
 For each variant it:
 
 1. Copies the app folder to a `tempfile.TemporaryDirectory(ignore_cleanup_errors=True)`, ignoring `runs`, `.hex`, `verdict.json`, `haunted`, `__pycache__`, and the source files `hotels.csv` and `flights.csv` (only `data/prepared.csv` is copied).
-2. Writes the variant source as `train.py`: the honest `train.py`, `haunted/train.py` unchanged, or `split_fixed_source(haunted_source)`.
+2. Writes the variant source as `train.py`: the honest `train.py`, `haunted/train.py` unchanged, `possession_fixed_source(haunted_source)` or `split_fixed_source(haunted_source)`.
 3. Runs the console script (`shutil.which("hexperiment", path=<folder of sys.executable>)`) with `run <scratch app>` and measures the wall time with `time.perf_counter`.
 4. Reads the scratch `verdict.json` and prints one table row: variant, exit code, status, mode, metric value, wall seconds, the ghosts and warning checks found, and the stdout summary of the run.
 
 `split_fixed_source(source: str) -> str` is a pure function. It requires exactly one line ending in `# LEAK: random split` and replaces that line with `train, test = hexperiment.split(df)`; any other count raises `ValueError`. A test covers it, so a later edit of the haunted script cannot break the variant silently.
+
+`possession_fixed_source(source: str) -> str` is pure in the same way. It requires exactly one line that contains `"reservation_status"` and `# LEAK: The Possession`, removes `"reservation_status"` from that line's list (leaving `CATEGORICAL += []` if it was the only name), and raises `ValueError` for zero or several such lines.
 
 The builder copies the printed numbers into the READMEs. The temporary folders disappear, so no `runs/` evidence is created by verification.
 
@@ -515,6 +515,7 @@ The recording happens after spec `hexperiment-kiro` provides the `exorcise` work
 - **2:** the run history is produced after this spec and `hexperiment-kiro` are both built. For each app the owner runs the haunted script, the `exorcise` workflow and the final script with `hexperiment run`, then commits `runs/`, `verdict.json` and `model_card.md`.
 - **6:** closed. The pinned file writes `time_hour` with a `Z` offset (`2013-01-01T10:00:00Z`), so it is already UTC; `prepare` keeps the same format.
 - **Flights honest gate:** lowered from 0.62 to 0.61 after measurement. The honest HGB script scores 0.6192 under the time split, `APPROVED` against the 0.60 threshold, and both tuning fallbacks scored lower (0.6089 and 0.6102). Requirement 3.4 asks only for `APPROVED`; the threshold in `hex.toml` stays 0.60.
+- **Review of the apps (2026-11-11):** `drop_seen_test_rows` now compares test rows with the training rows only (it used to drop repeats within the test rows too, which the READMEs and steering rule 2 did not say). The haunted hotels script no longer adds `assigned_room_type` and `status_day`: neither has a ghost, so after the two flagged leaks were fixed the loop could have stopped at `APPROVED` with both still in the script. `verify.py` also runs the "Hotels 2" step of the demo arc (`reservation_status` removed only) so that every step of both arcs is measured.
 - **Headers:** the real headers match `REQUIRED_COLUMNS` for both files. The flights row-number column is `rownames`. Task 1 still prints them as a check.
 
 1. **Steering rule 2 says "drop exact duplicate rows before splitting".** With the core canary, that order makes the training row set depend on test values whenever duplicates cross the split, which ends in `UNVERIFIED` (see "Why duplicates are removed after the split"). The apps remove overlap after the split. An agent that follows rule 2 literally in `exorcise` would hit this on hotels. *Recommended:* keep the apps as designed, and ask the owner of `.kiro/steering/` to reword rule 2 to "make sure no row appears in both train and test; do it after `hexperiment.split`". This spec does not edit steering. Alternatively the core could compare training rows by content instead of by id, which is a core change.
