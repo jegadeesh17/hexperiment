@@ -1,4 +1,5 @@
 import math
+import re
 from pathlib import Path
 
 import numpy as np
@@ -10,15 +11,19 @@ from hypothesis import strategies as st
 import hexperiment
 from hexperiment import HexInputError, data
 from hexperiment.canary import LoadMarker, hex_dir, read_load_marker
-from hexperiment.config import ExecMode, SplitConfig
+from hexperiment.config import ExecMode, HexConfig, SplitConfig, parse_config
 from hexperiment.data import (
+    SnapshotInputs,
     TimeCutoff,
+    ValidatedInputs,
     compute_cutoff,
     hash_fraction,
     parse_times,
     scramble_test_rows,
     split_frame,
     tilt_column,
+    validate_audit_inputs,
+    validate_snapshot_inputs,
 )
 
 MASK64 = (1 << 64) - 1
@@ -1389,3 +1394,540 @@ def test_split_raises_when_the_hash_split_leaves_no_test_rows(tmp_path: Path) ->
     assert not data.test_mask(df, config_for(None, fraction=0.01)).any()
     with pytest.raises(HexInputError, match="test set is empty"):
         data.split(df)
+
+
+# --- validate_audit_inputs (Requirements 4.1 to 4.6) ---------------------------------
+
+SCORES_TRAIN = np.linspace(0.1, 0.9, 8)
+SCORES_TEST = np.array([0.2, 0.8, 0.3, 0.7])
+
+
+def audit_config(
+    *, positive: int | str | bool = 1, time_column: str | None = None
+) -> HexConfig:
+    raw: dict = {
+        "data": {"path": "data.csv"},
+        "target": {"column": "y", "positive": positive},
+        "metric": {"name": "roc_auc", "threshold": 0.7},
+    }
+    if time_column is not None:
+        raw["split"] = {"time_column": time_column}
+    return parse_config(raw, source=Path("hex.toml"), app_dir=Path("."))
+
+
+def audit_frames() -> tuple[pd.DataFrame, pd.DataFrame]:
+    train = pd.DataFrame(
+        {
+            "x": np.arange(8, dtype=float),
+            "c": list("abababab"),
+            "y": [0, 1] * 4,
+            "t": [day(i) for i in range(8)],
+        }
+    )
+    test = pd.DataFrame(
+        {
+            "x": [8.0, 9.0, 10.0, 11.0],
+            "c": list("abab"),
+            "y": [0, 1, 0, 1],
+            "t": [day(i) for i in range(8, 12)],
+        },
+        index=np.arange(8, 12),
+    )
+    return train, test
+
+
+def audit_args(**changes: object) -> dict:
+    train, test = audit_frames()
+    args = {
+        "train": train,
+        "test": test,
+        "y_score": SCORES_TEST.copy(),
+        "y_score_train": SCORES_TRAIN.copy(),
+        "features": ["x", "c"],
+        "config": audit_config(),
+    }
+    args.update(changes)
+    return args
+
+
+def run_validate(**changes: object) -> ValidatedInputs:
+    return validate_audit_inputs(**audit_args(**changes))
+
+
+def with_test_column(name: str, values: list) -> pd.DataFrame:
+    test = audit_frames()[1]
+    test[name] = values
+    return test
+
+
+def with_train_column(name: str, values: list) -> pd.DataFrame:
+    train = audit_frames()[0]
+    train[name] = values
+    return train
+
+
+def scores_with(index: int, value: float) -> np.ndarray:
+    scores = SCORES_TEST.copy()
+    scores[index] = value
+    return scores
+
+
+def train_scores_with(index: int, value: float) -> np.ndarray:
+    scores = SCORES_TRAIN.copy()
+    scores[index] = value
+    return scores
+
+
+REJECTED_AUDIT_INPUTS = {
+    # Requirement 4.1
+    "empty train": (lambda: {"train": audit_frames()[0].iloc[:0]}, ["train is empty"]),
+    "empty test": (lambda: {"test": audit_frames()[1].iloc[:0]}, ["test is empty"]),
+    # Requirement 4.2
+    "target missing from train": (
+        lambda: {"train": audit_frames()[0].drop(columns="y")},
+        ["'y'", "missing from train"],
+    ),
+    "target missing from test": (
+        lambda: {"test": audit_frames()[1].drop(columns="y")},
+        ["'y'", "missing from test"],
+    ),
+    # Requirement 4.3
+    "single-class test target": (
+        lambda: {"test": with_test_column("y", [0, 0, 0, 0])},
+        ["single class", "'y'", "positive value 1", "0 of 4", "distinct", "0"],
+    ),
+    "positive value matches no test row": (
+        lambda: {"test": with_test_column("y", ["no", "yes", "no", "yes"])},
+        ["single class", "positive value 1", "'no'", "'yes'"],
+    ),
+    # Requirement 4.4
+    "y_score too short": (
+        lambda: {"y_score": SCORES_TEST[:3]},
+        ["y_score has 3 value(s) but test has 4 row(s)"],
+    ),
+    "y_score too long": (
+        lambda: {"y_score": np.append(SCORES_TEST, 0.5)},
+        ["y_score has 5 value(s) but test has 4 row(s)"],
+    ),
+    "y_score_train too short": (
+        lambda: {"y_score_train": SCORES_TRAIN[:7]},
+        ["y_score_train has 7 value(s) but train has 8 row(s)"],
+    ),
+    "y_score NaN": (
+        lambda: {"y_score": scores_with(2, np.nan)},
+        ["y_score has 1 NaN value(s)", "position 2"],
+    ),
+    "y_score_train NaN": (
+        lambda: {"y_score_train": train_scores_with(5, np.nan)},
+        ["y_score_train has 1 NaN value(s)", "position 5"],
+    ),
+    "y_score above 1": (
+        lambda: {"y_score": scores_with(1, 1.5)},
+        ["y_score has 1 value(s) outside [0, 1]", "position 1"],
+    ),
+    "y_score below 0": (
+        lambda: {"y_score": scores_with(0, -0.01)},
+        ["y_score has 1 value(s) outside [0, 1]", "position 0"],
+    ),
+    "y_score infinite": (
+        lambda: {"y_score": scores_with(3, np.inf)},
+        ["y_score has 1 value(s) outside [0, 1]"],
+    ),
+    "y_score_train out of range": (
+        lambda: {"y_score_train": train_scores_with(0, 2.0)},
+        ["y_score_train has 1 value(s) outside [0, 1]", "position 0"],
+    ),
+    "NaN and out of range together": (
+        lambda: {"y_score": np.array([np.nan, 2.0, 0.5, 0.5])},
+        ["1 NaN value(s) and 1 value(s) outside [0, 1]", "position 0"],
+    ),
+    "y_score missing NA in a nullable Series": (
+        lambda: {"y_score": pd.Series([0.2, pd.NA, 0.3, 0.7], dtype="Float64")},
+        ["1 NaN value(s)", "position 1"],
+    ),
+    "y_score is two-dimensional": (
+        lambda: {"y_score": np.column_stack([1 - SCORES_TEST, SCORES_TEST])},
+        ["y_score must be one-dimensional", "predict_proba(X)[:, 1]"],
+    ),
+    "y_score is not numeric": (
+        lambda: {"y_score": ["a", "b", "c", "d"]},
+        ["y_score cannot be converted to numbers"],
+    ),
+    "y_score is None": (
+        lambda: {"y_score": None},
+        ["y_score must be one-dimensional"],
+    ),
+    # Requirement 4.5
+    "feature not in either frame": (
+        lambda: {"features": ["x", "zzz"]},
+        ["'zzz'", "missing from train and test"],
+    ),
+    "feature missing from test only": (
+        lambda: {"test": audit_frames()[1].drop(columns="c")},
+        ["'c'", "missing from test"],
+    ),
+    "feature missing from train only": (
+        lambda: {"train": audit_frames()[0].drop(columns="x")},
+        ["'x'", "missing from train"],
+    ),
+    "features is a bare string": (
+        lambda: {"features": "x"},
+        ["features is the string 'x'", "list"],
+    ),
+    # Requirement 4.6
+    "time column missing from train": (
+        lambda: {
+            "config": audit_config(time_column="t"),
+            "train": audit_frames()[0].drop(columns="t"),
+        },
+        ["time column 't'", "missing from the train frame"],
+    ),
+    "time column missing from test": (
+        lambda: {
+            "config": audit_config(time_column="t"),
+            "test": audit_frames()[1].drop(columns="t"),
+        },
+        ["time column 't'", "missing from the test frame"],
+    ),
+    "time column unparseable in test": (
+        lambda: {
+            "config": audit_config(time_column="t"),
+            "test": with_test_column("t", ["soon", "later", "never", "maybe"]),
+        },
+        ["time column 't'", "the test frame", "cannot be parsed"],
+    ),
+    "time column unparseable in train": (
+        lambda: {
+            "config": audit_config(time_column="t"),
+            "train": with_train_column("t", ["not a date"] * 8),
+        },
+        ["time column 't'", "the train frame", "cannot be parsed"],
+    ),
+    "time column has missing values": (
+        lambda: {
+            "config": audit_config(time_column="t"),
+            "train": with_train_column(
+                "t", [day(0), None] + [day(i) for i in range(6)]
+            ),
+        },
+        ["time column 't'", "the train frame", "missing or unparseable"],
+    ),
+}
+
+
+@pytest.mark.filterwarnings("ignore:Could not infer format:UserWarning")
+@pytest.mark.parametrize(
+    ("make_changes", "needles"),
+    REJECTED_AUDIT_INPUTS.values(),
+    ids=REJECTED_AUDIT_INPUTS.keys(),
+)
+def test_validate_audit_inputs_rejects_and_names_the_offender(
+    make_changes, needles: list[str]
+) -> None:
+    with pytest.raises(HexInputError) as error:
+        run_validate(**make_changes())
+    for needle in needles:
+        assert needle in str(error.value), (needle, str(error.value))
+    assert error.value.problem
+    assert error.value.fix
+    assert str(error.value).endswith(error.value.fix)
+
+
+def test_validate_audit_inputs_reports_the_first_problem_in_the_documented_order() -> (
+    None
+):
+    train, test = audit_frames()
+    # Each pair has two problems; the earlier rule must be the one reported.
+    pairs = [
+        (  # 4.1 before 4.2
+            {"train": train.iloc[:0], "test": test.drop(columns="y")},
+            "train is empty",
+        ),
+        (  # 4.2 before 4.4
+            {"test": test.drop(columns="y"), "y_score": SCORES_TEST[:2]},
+            "missing from test",
+        ),
+        (  # 4.4 before 4.5
+            {"y_score": scores_with(0, np.nan), "features": ["nope"]},
+            "NaN",
+        ),
+        (  # 4.5 before 4.6
+            {"features": ["nope"], "config": audit_config(time_column="gone")},
+            "'nope'",
+        ),
+        (  # 4.6 before 4.3
+            {
+                "config": audit_config(time_column="gone"),
+                "test": with_test_column("y", [0, 0, 0, 0]),
+            },
+            "time column 'gone'",
+        ),
+    ]
+    for changes, expected in pairs:
+        with pytest.raises(HexInputError) as error:
+            run_validate(**changes)
+        assert expected in str(error.value), (expected, str(error.value))
+
+
+def test_validate_audit_inputs_returns_features_labels_and_scores() -> None:
+    result = run_validate()
+    assert isinstance(result, ValidatedInputs)
+    assert result.features == ("x", "c")
+    assert result.y_true_train.tolist() == [False, True] * 4
+    assert result.y_true_test.tolist() == [False, True, False, True]
+    assert result.y_true_train.dtype == np.bool_
+    assert result.y_score.dtype == np.float64
+    assert np.array_equal(result.y_score, SCORES_TEST)
+    assert result.y_score_train is not None
+    assert np.array_equal(result.y_score_train, SCORES_TRAIN)
+
+
+def test_validate_audit_inputs_accepts_a_missing_y_score_train() -> None:
+    assert run_validate(y_score_train=None).y_score_train is None
+
+
+@pytest.mark.parametrize(
+    ("column", "positive"),
+    [
+        (["no", "yes", "no", "yes"], "yes"),
+        ([False, True, False, True], True),
+        ([0.0, 1.0, 0.0, 1.0], 1),
+        ([1, 2, 1, 3], 2),
+        (pd.array([False, True, False, True], dtype="boolean"), True),
+        (pd.Categorical(["a", "b", "a", "b"]), "b"),
+    ],
+    ids=["string", "bool", "float", "multiclass", "nullable-bool", "categorical"],
+)
+def test_validate_audit_inputs_labels_rows_equal_to_the_positive_value(
+    column: object, positive: object
+) -> None:
+    test = with_test_column("y", column)  # type: ignore[arg-type]
+    result = run_validate(test=test, config=audit_config(positive=positive))  # type: ignore[arg-type]
+    expected = test["y"].eq(positive).to_numpy(dtype=bool)
+    assert result.y_true_test.tolist() == expected.tolist()
+    assert result.y_true_test.any()
+    assert not result.y_true_test.all()
+
+
+@pytest.mark.parametrize(
+    "make_scores",
+    [
+        list,
+        tuple,
+        lambda a: pd.Series(a, index=[40, 30, 20, 10][: len(a)]),
+        lambda a: pd.Series(a, dtype="Float64"),
+        lambda a: a.astype(np.float32).astype(np.float64),
+    ],
+    ids=["list", "tuple", "series-by-position", "nullable-series", "float32"],
+)
+def test_validate_audit_inputs_matches_scores_to_rows_by_position(make_scores) -> None:
+    scores = np.array([0.25, 0.5, 0.75, 1.0])
+    result = run_validate(y_score=make_scores(scores))
+    assert np.array_equal(result.y_score, scores)
+    assert result.y_score.dtype == np.float64
+
+
+def test_validate_audit_inputs_accepts_scores_at_the_ends_of_the_range() -> None:
+    result = run_validate(y_score=np.array([0.0, 1.0, 0.0, 1.0]))
+    assert result.y_score.tolist() == [0.0, 1.0, 0.0, 1.0]
+
+
+def test_validate_audit_inputs_does_not_need_a_time_column_when_none_is_set() -> None:
+    train, test = audit_frames()
+    result = run_validate(train=train.drop(columns="t"), test=test.drop(columns="t"))
+    assert result.features == ("x", "c")
+
+
+def test_validate_audit_inputs_accepts_a_parseable_time_column() -> None:
+    result = run_validate(config=audit_config(time_column="t"))
+    assert result.features == ("x", "c")
+
+
+def test_validate_audit_inputs_accepts_a_time_column_that_is_not_a_feature() -> None:
+    result = run_validate(features=["x"], config=audit_config(time_column="t"))
+    assert result.features == ("x",)
+
+
+def test_validate_audit_inputs_returns_copies_and_modifies_nothing() -> None:
+    train, test = audit_frames()
+    train_before, test_before = train.copy(deep=True), test.copy(deep=True)
+    scores, scores_train = SCORES_TEST.copy(), SCORES_TRAIN.copy()
+    features = ["x", "c"]
+
+    result = validate_audit_inputs(
+        train, test, scores, scores_train, features, audit_config()
+    )
+
+    pd.testing.assert_frame_equal(train, train_before)
+    pd.testing.assert_frame_equal(test, test_before)
+    assert np.array_equal(scores, SCORES_TEST)
+    assert np.array_equal(scores_train, SCORES_TRAIN)
+    assert features == ["x", "c"]
+    assert not np.shares_memory(result.y_score, scores)
+    assert result.y_score_train is not None
+    assert not np.shares_memory(result.y_score_train, scores_train)
+    scores[0] = 0.99  # a later change by the caller does not reach the result
+    assert result.y_score[0] == SCORES_TEST[0]
+
+
+@given(
+    scores=st.lists(
+        st.one_of(st.floats(0, 1), st.floats(allow_nan=True, allow_infinity=True)),
+        min_size=4,
+        max_size=4,
+    ),
+    train_scores=st.booleans(),
+)
+def test_a_score_is_accepted_exactly_when_it_is_a_probability(
+    scores: list[float], train_scores: bool
+) -> None:
+    valid = all(0.0 <= s <= 1.0 for s in scores)
+    name = "y_score_train" if train_scores else "y_score"
+    values = (scores + scores)[:8] if train_scores else scores
+    if valid:
+        result = run_validate(**{name: values})
+        assert np.array_equal(getattr(result, name), values)
+    else:
+        with pytest.raises(HexInputError, match=name):
+            run_validate(**{name: values})
+
+
+# --- validate_snapshot_inputs (Requirements 2.4, 4.1, 4.4, 4.5) ----------------------
+
+REJECTED_SNAPSHOT_INPUTS = {
+    "empty train": (lambda: {"train": audit_frames()[0].iloc[:0]}, ["train is empty"]),
+    "feature missing from train": (
+        lambda: {"features": ["x", "zzz"]},
+        ["'zzz'", "missing from train"],
+    ),
+    "features is a bare string": (
+        lambda: {"features": "x"},
+        ["features is the string 'x'"],
+    ),
+    "y_score_train too short": (
+        lambda: {"y_score_train": SCORES_TRAIN[:7]},
+        ["y_score_train has 7 value(s) but train has 8 row(s)"],
+    ),
+    "y_score_train NaN": (
+        lambda: {"y_score_train": train_scores_with(3, np.nan)},
+        ["y_score_train has 1 NaN value(s)", "position 3"],
+    ),
+    "y_score_train out of range": (
+        lambda: {"y_score_train": train_scores_with(7, -0.5)},
+        ["y_score_train has 1 value(s) outside [0, 1]", "position 7"],
+    ),
+    "y_score_train two-dimensional": (
+        lambda: {"y_score_train": np.column_stack([SCORES_TRAIN, SCORES_TRAIN])},
+        ["y_score_train must be one-dimensional"],
+    ),
+}
+
+
+def snapshot_args(**changes: object) -> dict:
+    args = {
+        "train": audit_frames()[0],
+        "y_score_train": SCORES_TRAIN.copy(),
+        "features": ["x", "c"],
+    }
+    args.update(changes)
+    return args
+
+
+@pytest.mark.parametrize(
+    ("make_changes", "needles"),
+    REJECTED_SNAPSHOT_INPUTS.values(),
+    ids=REJECTED_SNAPSHOT_INPUTS.keys(),
+)
+def test_validate_snapshot_inputs_rejects_training_side_problems(
+    make_changes, needles: list[str]
+) -> None:
+    with pytest.raises(HexInputError) as error:
+        validate_snapshot_inputs(**snapshot_args(**make_changes()))
+    for needle in needles:
+        assert needle in str(error.value), (needle, str(error.value))
+    assert error.value.fix
+
+
+def test_validate_snapshot_inputs_returns_features_and_a_score_copy() -> None:
+    scores = SCORES_TRAIN.copy()
+    result = validate_snapshot_inputs(
+        audit_frames()[0], scores, ["x", "c"]
+    )
+    assert isinstance(result, SnapshotInputs)
+    assert result.features == ("x", "c")
+    assert result.y_score_train is not None
+    assert result.y_score_train.dtype == np.float64
+    assert np.array_equal(result.y_score_train, SCORES_TRAIN)
+    assert not np.shares_memory(result.y_score_train, scores)
+
+
+def test_validate_snapshot_inputs_accepts_a_missing_y_score_train() -> None:
+    result = validate_snapshot_inputs(audit_frames()[0], None, ["x"])
+    assert result == SnapshotInputs(features=("x",), y_score_train=None)
+
+
+def test_validate_snapshot_inputs_does_not_modify_its_arguments() -> None:
+    train = audit_frames()[0]
+    before = train.copy(deep=True)
+    scores = SCORES_TRAIN.copy()
+    validate_snapshot_inputs(train, scores, ["x", "c"])
+    pd.testing.assert_frame_equal(train, before)
+    assert np.array_equal(scores, SCORES_TRAIN)
+
+
+@pytest.mark.parametrize(
+    ("make_changes", "needle"),
+    [
+        (lambda: {"test": with_test_column("y", [1, 1, 1, 1])}, "single class"),
+        (lambda: {"y_score": SCORES_TEST[:2]}, "y_score has 2 value(s)"),
+        (lambda: {"y_score": scores_with(0, np.nan)}, "y_score has 1 NaN"),
+        (
+            lambda: {
+                "config": audit_config(time_column="t"),
+                "train": audit_frames()[0].drop(columns="t"),
+                "test": audit_frames()[1].drop(columns="t"),
+            },
+            "time column 't'",
+        ),
+        (lambda: {"test": audit_frames()[1].drop(columns=["y", "c"])}, "missing from"),
+        (lambda: {"test": audit_frames()[1].iloc[:0]}, "test is empty"),
+    ],
+    ids=[
+        "single-class test target",
+        "wrong y_score length",
+        "NaN y_score",
+        "missing time column",
+        "test frame without columns",
+        "empty test",
+    ],
+)
+def test_snapshot_validation_accepts_what_only_scoring_needs(
+    make_changes, needle: str
+) -> None:
+    changes = make_changes()
+    with pytest.raises(HexInputError, match=re.escape(needle)):
+        run_validate(**changes)
+    # The snapshot needs only the training frame, the features, y_score_train.
+    train = changes.get("train", audit_frames()[0])
+    result = validate_snapshot_inputs(train, SCORES_TRAIN, ["x"])
+    assert result.features == ("x",)
+
+
+@given(
+    scores=st.lists(
+        st.one_of(st.floats(0, 1), st.floats(allow_nan=True, allow_infinity=True)),
+        min_size=8,
+        max_size=8,
+    )
+)
+def test_snapshot_inputs_accept_y_score_train_exactly_when_all_are_probabilities(
+    scores: list[float],
+) -> None:
+    valid = all(0.0 <= s <= 1.0 for s in scores)
+    if valid:
+        result = validate_snapshot_inputs(audit_frames()[0], scores, ["x"])
+        assert result.y_score_train is not None
+        assert result.y_score_train.tolist() == scores
+    else:
+        with pytest.raises(HexInputError, match="y_score_train"):
+            validate_snapshot_inputs(audit_frames()[0], scores, ["x"])

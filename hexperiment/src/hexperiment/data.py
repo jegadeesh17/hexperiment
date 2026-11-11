@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 import os
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -23,12 +23,16 @@ from numpy.typing import NDArray
 from hexperiment.canary import LoadMarker, write_load_marker
 from hexperiment.config import (
     ExecMode,
+    HexConfig,
     SplitConfig,
+    TargetConfig,
     current_mode,
     load_config,
     run_id_from_env,
 )
 from hexperiment.errors import HexInputError
+
+type ArrayLike1D = Sequence[float] | NDArray[np.floating] | pd.Series
 
 _GOLDEN_GAMMA = 0x9E3779B97F4A7C15
 _MIX_1 = 0xBF58476D1CE4E5B9
@@ -55,6 +59,28 @@ class TimeCutoff:
 
     time: pd.Timestamp  # UTC
     row_id: int
+
+
+@dataclass(frozen=True, slots=True)
+class ValidatedInputs:
+    """Inputs of ``audit`` after validation (normal mode).
+
+    Scores are float64 copies; the labels are ``target == target.positive``.
+    """
+
+    features: tuple[str, ...]
+    y_true_train: NDArray[np.bool_]
+    y_true_test: NDArray[np.bool_]
+    y_score: NDArray[np.float64]
+    y_score_train: NDArray[np.float64] | None
+
+
+@dataclass(frozen=True, slots=True)
+class SnapshotInputs:
+    """All that canary and control mode need to write a snapshot."""
+
+    features: tuple[str, ...]
+    y_score_train: NDArray[np.float64] | None
 
 
 def hash_fraction(row_ids: NDArray[np.int64], seed: int) -> NDArray[np.float64]:
@@ -264,6 +290,82 @@ def split(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     return train, test
 
 
+def validate_audit_inputs(
+    train: pd.DataFrame,
+    test: pd.DataFrame,
+    y_score: ArrayLike1D,
+    y_score_train: ArrayLike1D | None,
+    features: Sequence[str],
+    config: HexConfig,
+) -> ValidatedInputs:
+    """Validate the arguments of ``audit`` in normal mode (Requirement 4).
+
+    Raises ``HexInputError`` for the first problem found, checked in this order:
+    an empty frame (4.1); a missing target column (4.2); a score array of the
+    wrong length, with NaN or outside ``[0, 1]`` (4.4); a feature missing from
+    either frame (4.5); a missing or unparseable time column (4.6); a test
+    target with a single class (4.3). Nothing is modified.
+    """
+    _require_rows(train, "train")
+    _require_rows(test, "test")
+    target = config.target
+    for label, frame in (("train", train), ("test", test)):
+        _require_target(frame, label, target.column)
+    scores = _as_scores(y_score, "y_score")
+    scores_train = (
+        None if y_score_train is None else _as_scores(y_score_train, "y_score_train")
+    )
+    _require_length(scores, "y_score", len(test), "test")
+    if scores_train is not None:
+        _require_length(scores_train, "y_score_train", len(train), "train")
+    _require_probabilities(scores, "y_score")
+    if scores_train is not None:
+        _require_probabilities(scores_train, "y_score_train")
+    names = _feature_names(features)
+    _require_features(names, (("train", train), ("test", test)))
+    time_column = config.split.time_column
+    if time_column is not None:
+        for label, frame in (("train", train), ("test", test)):
+            frame_name = f"the {label} frame"
+            _require_time_column(frame, time_column, frame_name)
+            parse_times(frame[time_column], time_column, frame_name)
+    y_true_test = _is_positive(test, target)
+    _require_two_classes(test, target, y_true_test)
+    return ValidatedInputs(
+        features=names,
+        y_true_train=_is_positive(train, target),
+        y_true_test=y_true_test,
+        y_score=scores,
+        y_score_train=scores_train,
+    )
+
+
+def validate_snapshot_inputs(
+    train: pd.DataFrame,
+    y_score_train: ArrayLike1D | None,
+    features: Sequence[str],
+) -> SnapshotInputs:
+    """Validate what a canary or control execution needs to write its snapshot.
+
+    Only the training-side rules of Requirement 4 apply here: ``train`` is not
+    empty (4.1), ``y_score_train`` (when given) has one score per training row,
+    none NaN and none outside ``[0, 1]`` (4.4), and every feature is a column of
+    ``train`` (4.5). The test target, ``y_score``, the time column and the test
+    frame are not looked at, so a scrambled test set cannot raise (Requirement
+    2.4). A NaN score is rejected because the canary treats NaN as a change.
+    """
+    _require_rows(train, "train")
+    scores_train = (
+        None if y_score_train is None else _as_scores(y_score_train, "y_score_train")
+    )
+    if scores_train is not None:
+        _require_length(scores_train, "y_score_train", len(train), "train")
+        _require_probabilities(scores_train, "y_score_train")
+    names = _feature_names(features)
+    _require_features(names, (("train", train),))
+    return SnapshotInputs(features=names, y_score_train=scores_train)
+
+
 # --- helpers -------------------------------------------------------------------------
 
 
@@ -355,6 +457,128 @@ def _require_both_sides(
                 f"Do not filter away every {name} row before hexperiment.split, "
                 "and check that the data has enough rows.",
             )
+
+
+def _require_rows(frame: pd.DataFrame, label: str) -> None:
+    if len(frame) == 0:
+        raise HexInputError(
+            f"{label} is empty (it has no rows).",
+            f"Pass the {label} frame from hexperiment.split, and do not filter "
+            f"away every {label} row before audit.",
+        )
+
+
+def _require_target(frame: pd.DataFrame, label: str, column: str) -> None:
+    if column not in frame.columns:
+        raise HexInputError(
+            f"target column {column!r} is missing from {label}.",
+            f"Keep {column!r} in the {label} frame you pass to audit (it is set by "
+            "[target] column in hex.toml); list only model inputs in features.",
+        )
+
+
+def _as_scores(values: ArrayLike1D, name: str) -> NDArray[np.float64]:
+    """Return ``values`` as a one-dimensional float64 copy."""
+    try:
+        if isinstance(values, pd.Series):
+            array = values.to_numpy(dtype=np.float64, na_value=np.nan)
+        else:
+            array = np.array(values, dtype=np.float64)
+    except (TypeError, ValueError):
+        raise HexInputError(
+            f"{name} cannot be converted to numbers.",
+            f"Pass {name} as a list, array or Series of predicted probabilities, "
+            "one per row.",
+        ) from None
+    if array.ndim != 1:
+        raise HexInputError(
+            f"{name} must be one-dimensional (one probability per row), but it has "
+            f"shape {array.shape}.",
+            f"Pass the probability of the positive class only, for example "
+            f"model.predict_proba(X)[:, 1] as {name}.",
+        )
+    return array
+
+
+def _require_length(
+    scores: NDArray[np.float64], name: str, rows: int, label: str
+) -> None:
+    if len(scores) != rows:
+        raise HexInputError(
+            f"{name} has {len(scores)} value(s) but {label} has {rows} row(s).",
+            f"Pass one score per {label} row, in the same order as the {label} frame.",
+        )
+
+
+def _require_probabilities(scores: NDArray[np.float64], name: str) -> None:
+    """Reject NaN and values outside ``[0, 1]`` (Requirement 4.4)."""
+    valid = (scores >= 0.0) & (scores <= 1.0)
+    if valid.all():
+        return
+    nan_count = int(np.isnan(scores).sum())
+    outside = int((~valid).sum()) - nan_count
+    parts = []
+    if nan_count:
+        parts.append(f"{nan_count} NaN value(s)")
+    if outside:
+        parts.append(f"{outside} value(s) outside [0, 1]")
+    first = int(np.flatnonzero(~valid)[0])
+    raise HexInputError(
+        f"{name} has {' and '.join(parts)} (first at position {first}).",
+        "Pass predicted probabilities of the positive class, for example "
+        "model.predict_proba(X)[:, 1], and fix rows that give NaN before predicting.",
+    )
+
+
+def _feature_names(features: Sequence[str]) -> tuple[str, ...]:
+    if isinstance(features, str):
+        raise HexInputError(
+            f"features is the string {features!r}, but it must be a list of column "
+            "names.",
+            f"Pass features=[{features!r}] (a list), not the bare name.",
+        )
+    return tuple(features)
+
+
+def _require_features(
+    names: tuple[str, ...], frames: Sequence[tuple[str, pd.DataFrame]]
+) -> None:
+    missing = []
+    for name in names:
+        absent = [label for label, frame in frames if name not in frame.columns]
+        if absent:
+            missing.append(f"{name!r} (missing from {' and '.join(absent)})")
+    if missing:
+        where = " and ".join(label for label, _ in frames)
+        raise HexInputError(
+            f"features not found as columns of {where}: {', '.join(missing)}.",
+            f"Use only column names that exist in {where}; check the spelling "
+            "and that the column was not dropped before audit.",
+        )
+
+
+def _is_positive(frame: pd.DataFrame, target: TargetConfig) -> NDArray[np.bool_]:
+    """Label rows ``target == positive``; a missing target value is not positive."""
+    matches = frame[target.column].eq(target.positive)
+    return matches.fillna(False).to_numpy(dtype=bool)
+
+
+def _require_two_classes(
+    test: pd.DataFrame, target: TargetConfig, y_true: NDArray[np.bool_]
+) -> None:
+    if y_true.any() and not y_true.all():
+        return
+    values = list(test[target.column].drop_duplicates().head(10))
+    shown = ", ".join(repr(v) for v in values)
+    positives = int(y_true.sum())
+    raise HexInputError(
+        f"the test target {target.column!r} has a single class, so the metric is "
+        f"undefined: {positives} of {len(test)} test row(s) equal the positive "
+        f"value {target.positive!r} (distinct test target values: {shown}).",
+        f"Set [target] positive in hex.toml to a value that occurs in "
+        f"{target.column!r}, and make sure the test rows hold both classes "
+        "(more rows, or a larger split.test_fraction).",
+    )
 
 
 def _tilt_sources(
