@@ -1,4 +1,6 @@
 import json
+import math
+from dataclasses import replace
 
 import numpy as np
 import pandas as pd
@@ -161,6 +163,40 @@ def test_build_snapshot_rejects_non_integer_index():
         build_snapshot(ExecMode.NORMAL, None, train, make_frame(), ["age"], None)
 
 
+def test_build_snapshot_rejects_repeated_training_row_ids():
+    # Oversampling before audit repeats row ids, so rows cannot be aligned.
+    train = make_frame(ids=(0, 1, 1, 2, 2))
+    with pytest.raises(HexInputError, match="2 row ids appear more than once") as info:
+        build_snapshot(
+            ExecMode.NORMAL, None, train, make_frame(ids=(8, 9)), FEATURES, None
+        )
+    assert "row id 1" in str(info.value)
+    assert "oversample" in str(info.value)
+
+
+def test_build_snapshot_accepts_repeated_ids_only_across_train_and_test():
+    train = make_frame(ids=(0, 1, 2))
+    snapshot = build_snapshot(
+        ExecMode.NORMAL, None, train, make_frame(ids=(2, 3)), FEATURES, None
+    )
+    assert snapshot.train_ids.tolist() == [0, 1, 2]
+
+
+@given(
+    ids=st.lists(st.integers(0, 30), min_size=1, max_size=12, unique=True),
+    data=st.data(),
+)
+def test_oversampled_training_rows_are_always_rejected(ids, data):
+    repeats = data.draw(st.lists(st.sampled_from(ids), min_size=1, max_size=5))
+    all_ids = ids + repeats
+    train = pd.DataFrame(
+        {"age": [float(i) for i in all_ids], "plan": ["a"] * len(all_ids)},
+        index=all_ids,
+    )
+    with pytest.raises(HexInputError, match="more than once in train"):
+        build_snapshot(ExecMode.NORMAL, None, train, train.iloc[:0], FEATURES, None)
+
+
 def test_row_reordering_does_not_change_compare_snapshots():
     train = make_frame()
     scores = np.array([0.1, 0.2, 0.3, 0.4, 0.5])
@@ -256,6 +292,32 @@ def test_compare_without_scores_uses_hashes_only(missing):
     assert diff.score_rows_changed == 0
     assert not diff.differs
     assert compare_snapshots(a, changed_row(b)).feature_rows_changed == 1
+
+
+@pytest.mark.parametrize("nan_in", ["a", "b", "both"])
+def test_nan_training_score_counts_as_a_change(nan_in):
+    # A NaN prediction can never be shown to be unchanged, even against a NaN.
+    first_a = np.nan if nan_in in ("a", "both") else 0.1
+    first_b = np.nan if nan_in in ("b", "both") else 0.1
+    a = make_snapshot(scores=(first_a, 0.2, 0.3, 0.4))
+    diff = compare_snapshots(a, with_scores(a, (first_b, 0.2, 0.3, 0.4)))
+    assert diff.differs
+    assert (diff.rows_changed, diff.score_rows_changed) == (1, 1)
+    assert diff.feature_rows_changed == 0
+    assert math.isnan(diff.max_abs_change)
+
+
+def test_compare_with_a_non_default_tolerance():
+    a = make_snapshot(scores=(0.1, 0.2, 0.3, 0.4))
+    b = with_scores(a, (0.1 + 1e-4, 0.2, 0.3, 0.4 + 1e-2))
+    wide = compare_snapshots(a, b, tolerance=1e-3)
+    assert (wide.rows_changed, wide.score_rows_changed) == (1, 1)
+    assert wide.max_abs_change == pytest.approx(1e-2)
+    assert compare_snapshots(a, b).score_rows_changed == 2
+    assert not compare_snapshots(a, b, tolerance=0.5).differs
+    # The tolerance applies to scores only; hashes must still match exactly.
+    hashed = compare_snapshots(a, changed_row(a), tolerance=1.0)
+    assert (hashed.rows_changed, hashed.feature_rows_changed) == (1, 1)
 
 
 # --- decide_canary: one example per step ------------------------------------------
@@ -377,6 +439,27 @@ def test_step_6_control_with_other_train_ids_differs():
     assert outcome.findings[0].evidence == {"rows_changed": 0, "largest_change": None}
 
 
+def test_peeking_spirit_evidence_has_no_nan_when_a_score_is_nan():
+    normal = make_snapshot()
+    canary = with_scores(normal, (np.nan, 0.2, 0.3, 0.4))
+    outcome = decide_canary(normal, canary, clean_marker(), ControlRunner(normal), ())
+    assert outcome.outcome is Outcome.FAILED
+    (finding,) = outcome.findings
+    assert finding.ghost == "The Peeking Spirit"
+    assert finding.evidence["largest_change"] is None
+    json.dumps(finding.evidence, allow_nan=False)
+
+
+def test_shapeshifter_evidence_has_no_nan_when_a_score_is_nan():
+    normal = make_snapshot()
+    control = ControlRunner(with_scores(normal, (np.nan, 0.2, 0.3, 0.4)))
+    outcome = decide_canary(normal, changed_row(normal), clean_marker(), control, ())
+    (finding,) = outcome.findings
+    assert finding.ghost == "The Shapeshifter"
+    assert finding.evidence == {"rows_changed": 1, "largest_change": None}
+    json.dumps(finding.evidence, allow_nan=False)
+
+
 def test_step_2_is_checked_before_step_3():
     normal = make_snapshot()
     canary = make_snapshot(train_ids=(0, 1, 4), scores=None)
@@ -391,6 +474,277 @@ def test_differing_ids_never_pass_even_when_rows_match_by_position():
     outcome = decide_canary(normal, canary, clean_marker(), control, ())
     assert outcome.outcome is Outcome.SKIPPED
     assert control.calls == 0
+
+
+# --- decide_canary: malformed markers and other features --------------------------
+
+
+@pytest.mark.parametrize(
+    ("marker", "evidence", "problem"),
+    [
+        (
+            replace(clean_marker(), scrambled_ids=None),
+            {"marker_mode": "canary", "scrambled_rows": None},
+            "records no scrambled test rows",
+        ),
+        (
+            clean_marker(scrambled=()),
+            {"marker_mode": "canary", "scrambled_rows": 0},
+            "records no scrambled test rows",
+        ),
+        (
+            replace(clean_marker(), mode=ExecMode.NORMAL),
+            {"marker_mode": "normal", "scrambled_rows": 2},
+            "written in normal mode",
+        ),
+        (
+            replace(clean_marker(), mode=ExecMode.CONTROL, scrambled_ids=None),
+            {"marker_mode": "control", "scrambled_rows": None},
+            "written in control mode",
+        ),
+    ],
+)
+def test_a_malformed_marker_is_not_applied_and_never_passes(marker, evidence, problem):
+    # The canary equals normal, so a marker that is not checked would pass.
+    normal = make_snapshot()
+    control = ControlRunner(normal)
+    outcome = decide_canary(normal, make_snapshot(), marker, control, ())
+    assert (outcome.outcome, outcome.determinism) == (
+        Outcome.NOT_APPLIED,
+        Outcome.SKIPPED,
+    )
+    (finding,) = outcome.findings
+    assert finding.check == "canary"
+    assert finding.severity is Severity.WARNING
+    assert finding.message.startswith("the canary test was not applied")
+    assert problem in finding.message
+    assert finding.evidence == evidence
+    assert "hexperiment run" in finding.fix
+    assert control.calls == 0
+    assert_unwaivable(outcome)
+
+
+@pytest.mark.parametrize(
+    ("features", "difference"),
+    [
+        (("age", "income"), "only in normal: plan; only in canary: income"),
+        (("age",), "only in normal: plan"),
+        (("age", "plan", "income"), "only in canary: income"),
+        (("plan", "age"), "the same names in another order or number"),
+    ],
+)
+def test_canary_with_other_features_and_matching_control_is_the_peeking_spirit(
+    features, difference
+):
+    # Feature selection on all rows: the features move when only test rows do.
+    normal = make_snapshot()
+    canary = replace(changed_row(normal), features=features)
+    control = ControlRunner(normal)
+    outcome = decide_canary(normal, canary, clean_marker(), control, ("train.py:7",))
+    assert (outcome.outcome, outcome.determinism) == (Outcome.FAILED, Outcome.PASSED)
+    (finding,) = outcome.findings
+    assert finding.check == "canary"
+    assert finding.ghost == "The Peeking Spirit"
+    assert finding.severity is Severity.ERROR
+    assert finding.message == (
+        f"features selected changed when only test rows were altered: {difference}"
+    )
+    assert finding.evidence == {
+        "train_rows": 4,
+        "rows_changed": 1,
+        "feature_rows_changed": 1,
+        "largest_change": 0.0,
+        "normal_features": FEATURES,
+        "canary_features": list(features),
+    }
+    assert "Select features on the training rows only." in finding.fix
+    assert finding.fix.endswith("Suspect lines: train.py:7.")
+    assert control.calls == 1
+    assert_unwaivable(outcome)
+
+
+def test_features_differing_with_identical_rows_still_go_to_the_control():
+    # Equal hashes and scores do not make a changed feature list a pass.
+    normal = make_snapshot()
+    canary = replace(normal, features=("age",))
+    control = ControlRunner(normal)
+    outcome = decide_canary(normal, canary, clean_marker(), control, ())
+    assert (outcome.outcome, outcome.determinism) == (Outcome.FAILED, Outcome.PASSED)
+    (finding,) = outcome.findings
+    assert finding.ghost == "The Peeking Spirit"
+    assert finding.evidence["rows_changed"] == 0
+    assert finding.evidence["canary_features"] == ["age"]
+    assert control.calls == 1
+
+
+def test_features_differing_without_control_scores_still_fail():
+    # The feature change is a leak signal even when the control has no scores to
+    # compare, unlike a change in predictions alone.
+    normal = make_snapshot()
+    canary = replace(normal, features=("age",))
+    control = ControlRunner(with_scores(normal, None))
+    outcome = decide_canary(normal, canary, clean_marker(), control, ())
+    assert (outcome.outcome, outcome.determinism) == (Outcome.FAILED, Outcome.PASSED)
+    assert outcome.findings[0].ghost == "The Peeking Spirit"
+
+
+def test_canary_other_features_and_control_rows_differ_is_the_shapeshifter():
+    normal = make_snapshot()
+    canary = replace(changed_row(normal), features=("age",))
+    control = ControlRunner(changed_row(normal))
+    outcome = decide_canary(normal, canary, clean_marker(), control, ())
+    assert (outcome.outcome, outcome.determinism) == (
+        Outcome.INCONCLUSIVE,
+        Outcome.FAILED,
+    )
+    (finding,) = outcome.findings
+    assert finding.ghost == "The Shapeshifter"
+    assert finding.evidence == {"rows_changed": 1, "largest_change": 0.0}
+    assert control.calls == 1
+
+
+def test_canary_and_control_with_other_features_is_the_shapeshifter():
+    normal = make_snapshot()
+    canary = replace(changed_row(normal), features=("age",))
+    control = ControlRunner(replace(normal, features=("plan",)))
+    outcome = decide_canary(normal, canary, clean_marker(), control, ())
+    assert (outcome.outcome, outcome.determinism) == (
+        Outcome.INCONCLUSIVE,
+        Outcome.FAILED,
+    )
+    (finding,) = outcome.findings
+    assert finding.ghost == "The Shapeshifter"
+    assert finding.evidence == {
+        "normal_features": FEATURES,
+        "control_features": ["plan"],
+    }
+    assert control.calls == 1
+
+
+def test_control_with_other_features_is_the_shapeshifter():
+    normal = make_snapshot()
+    control = ControlRunner(replace(normal, features=("age", "income")))
+    outcome = decide_canary(normal, changed_row(normal), clean_marker(), control, ())
+    assert (outcome.outcome, outcome.determinism) == (
+        Outcome.INCONCLUSIVE,
+        Outcome.FAILED,
+    )
+    (finding,) = outcome.findings
+    assert finding.check == "determinism"
+    assert finding.ghost == "The Shapeshifter"
+    assert finding.message == (
+        "training is not deterministic: an identical execution used other "
+        "features (only in normal: plan; only in control: income)"
+    )
+    assert finding.evidence == {
+        "normal_features": FEATURES,
+        "control_features": ["age", "income"],
+    }
+    assert control.calls == 1
+    assert_unwaivable(outcome)
+
+
+# --- decide_canary: training predictions in some executions only -------------------
+
+
+def mixed_warnings(outcome: CanaryOutcome) -> list[Finding]:
+    return [f for f in outcome.findings if "some executions but not" in f.message]
+
+
+@pytest.mark.parametrize("missing_in", ["normal", "canary"])
+def test_scores_in_only_normal_or_canary_never_pass(missing_in):
+    # Equal hashes, and the predictions moved where they were supplied: before
+    # this rule the comparison fell back to the hashes and passed.
+    normal = make_snapshot(scores=None if missing_in == "normal" else (0.1,) * 4)
+    canary = make_snapshot(scores=None if missing_in == "canary" else (0.9,) * 4)
+    control = ControlRunner(normal)
+    outcome = decide_canary(normal, canary, clean_marker(), control, ())
+    assert (outcome.outcome, outcome.determinism) == (
+        Outcome.INCONCLUSIVE,
+        Outcome.INCONCLUSIVE,
+    )
+    (warning,) = outcome.findings
+    supplied = "canary" if missing_in == "normal" else "normal"
+    assert warning.check == "canary"
+    assert warning.ghost is None
+    assert warning.severity is Severity.WARNING
+    assert warning.message == (
+        "training predictions were supplied in some executions but not others "
+        f"(supplied in {supplied}; missing in {missing_in}), so they could not "
+        "be compared"
+    )
+    assert warning.evidence == {
+        "executions_with_y_score_train": [supplied],
+        "executions_without_y_score_train": [missing_in],
+    }
+    assert "every execution" in warning.fix
+    assert weaker_warnings(outcome) == []
+    assert control.calls == 0
+    assert_unwaivable(outcome)
+
+
+def test_scores_in_only_normal_still_fail_on_a_feature_change():
+    normal = make_snapshot()
+    canary = with_scores(changed_row(normal), None)
+    control = ControlRunner(normal)
+    outcome = decide_canary(normal, canary, clean_marker(), control, ())
+    assert (outcome.outcome, outcome.determinism) == (Outcome.FAILED, Outcome.PASSED)
+    assert [f.ghost for f in outcome.findings] == ["The Peeking Spirit", None]
+    (warning,) = mixed_warnings(outcome)
+    assert warning.evidence == {
+        "executions_with_y_score_train": ["normal", "control"],
+        "executions_without_y_score_train": ["canary"],
+    }
+    assert control.calls == 1
+
+
+def test_control_without_scores_cannot_confirm_a_prediction_change():
+    # Only the predictions changed, and the control has none to compare.
+    normal = make_snapshot()
+    canary = with_scores(normal, (0.1, 0.9, 0.3, 0.4))
+    control = ControlRunner(with_scores(normal, None))
+    outcome = decide_canary(normal, canary, clean_marker(), control, ())
+    assert (outcome.outcome, outcome.determinism) == (
+        Outcome.INCONCLUSIVE,
+        Outcome.INCONCLUSIVE,
+    )
+    (warning,) = outcome.findings
+    assert warning.evidence == {
+        "executions_with_y_score_train": ["normal", "canary"],
+        "executions_without_y_score_train": ["control"],
+    }
+    assert control.calls == 1
+    assert_unwaivable(outcome)
+
+
+@pytest.mark.parametrize(
+    ("control_has_scores", "control_changes", "expected"),
+    [
+        (False, False, (Outcome.FAILED, Outcome.PASSED)),
+        (False, True, (Outcome.INCONCLUSIVE, Outcome.FAILED)),
+        (True, False, (Outcome.FAILED, Outcome.PASSED)),
+        (True, True, (Outcome.INCONCLUSIVE, Outcome.FAILED)),
+    ],
+)
+def test_control_with_other_score_presence_warns_after_a_feature_change(
+    control_has_scores, control_changes, expected
+):
+    # Normal and canary agree on scores; the control does not.
+    scores = None if control_has_scores else (0.1, 0.2, 0.3, 0.4)
+    normal = make_snapshot(scores=scores)
+    control_scores = (0.1, 0.2, 0.3, 0.4) if control_has_scores else None
+    control_snapshot = with_scores(normal, control_scores)
+    if control_changes:
+        control_snapshot = changed_row(control_snapshot)
+    control = ControlRunner(control_snapshot)
+    outcome = decide_canary(normal, changed_row(normal), clean_marker(), control, ())
+    assert (outcome.outcome, outcome.determinism) == expected
+    (warning,) = mixed_warnings(outcome)
+    assert warning.evidence["executions_without_y_score_train"] == (
+        ["normal", "canary"] if control_has_scores else ["control"]
+    )
+    assert weaker_warnings(outcome) == []
+    assert control.calls == 1
 
 
 # --- decide_canary: missing y_score_train and hint lines --------------------------
@@ -506,6 +860,36 @@ def test_hint_locations_skips_the_inconclusive_warning_and_empty_results():
     assert hint_locations(make_result([])) == ()
 
 
+def test_hint_locations_ignores_line_like_decoys():
+    # Line locations outside a split_order check, or under another check name
+    # inside it, are not split-order hints.
+    other_check = CheckResult(
+        "target_proxy",
+        "The Possession",
+        Outcome.FAILED,
+        (
+            split_order_finding("train.py:3"),
+            replace(split_order_finding("train.py:4"), check="target_proxy"),
+        ),
+    )
+    split_order = CheckResult(
+        "split_order",
+        None,
+        Outcome.PASSED,
+        (
+            replace(split_order_finding("train.py:5"), check="row_overlap"),
+            replace(split_order_finding("train.py:6"), check="canary"),
+            split_order_finding("train.py:"),
+            split_order_finding("train.py:7a"),
+            split_order_finding("train.py:8 (fit)"),
+            split_order_finding("helpers.py:9"),
+            split_order_finding("train.py:14"),
+        ),
+    )
+    result = make_result([other_check, split_order])
+    assert hint_locations(result) == ("helpers.py:9", "train.py:14")
+
+
 def test_skipped_outcome():
     assert skipped_outcome() == CanaryOutcome(Outcome.SKIPPED, Outcome.SKIPPED, ())
 
@@ -612,6 +996,38 @@ def test_control_runs_at_most_once_and_only_when_needed(
         control_differs = compare_snapshots(normal, control.snapshot).differs
         expected = Outcome.INCONCLUSIVE if control_differs else Outcome.FAILED
         assert outcome.outcome is expected
+
+
+@given(
+    presence=st.tuples(st.booleans(), st.booleans(), st.booleans()),
+    canary_kind=st.sampled_from(["same", "hash", "score"]),
+    control_kind=st.sampled_from(["same", "hash", "score"]),
+)
+def test_training_scores_in_some_executions_only_never_pass(
+    presence, canary_kind, control_kind
+):
+    base = make_snapshot()
+
+    def build(kind: str, has_scores: bool) -> Snapshot:
+        snapshot = _variant(base, kind)
+        return snapshot if has_scores else with_scores(snapshot, None)
+
+    normal = build("same", presence[0])
+    canary = build(canary_kind, presence[1])
+    control = ControlRunner(build(control_kind, presence[2]))
+
+    outcome = decide_canary(normal, canary, clean_marker(), control, ())
+
+    compared = presence if control.calls else presence[:2]
+    if len(set(compared)) > 1:
+        assert outcome.outcome is not Outcome.PASSED
+        assert len(mixed_warnings(outcome)) == 1
+        assert weaker_warnings(outcome) == []
+    elif not any(compared):
+        assert len(weaker_warnings(outcome)) == 1
+        assert mixed_warnings(outcome) == []
+    else:
+        assert weaker_warnings(outcome) == mixed_warnings(outcome) == []
 
 
 # --- the .hex/ protocol (Requirements 2.3, 2.4, 10.6) ------------------------------

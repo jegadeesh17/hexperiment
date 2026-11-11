@@ -14,6 +14,7 @@ refuse files from another run or another format.
 from __future__ import annotations
 
 import json
+import math
 import re
 import shutil
 import zipfile
@@ -136,6 +137,7 @@ def build_snapshot(
     """
     train_ids = _row_ids(train, "train")
     test_ids = _row_ids(test, "test")
+    _require_unique_ids(train_ids)
     order = np.argsort(train_ids, kind="stable")
     hashes = pd.util.hash_pandas_object(train[list(features)], index=False)
     scores = None
@@ -211,9 +213,22 @@ def decide_canary(
         return CanaryOutcome(
             Outcome.NOT_APPLIED, Outcome.SKIPPED, (_not_loaded_warning(),)
         )
+    # Requirement 10.6: a marker that is not a canary marker, or that records no
+    # scrambled rows, does not show that any test row was scrambled.
+    scrambled_ids = marker.scrambled_ids
+    if (
+        marker.mode != ExecMode.CANARY
+        or scrambled_ids is None
+        or len(scrambled_ids) == 0
+    ):
+        return CanaryOutcome(
+            Outcome.NOT_APPLIED, Outcome.SKIPPED, (_bad_marker_warning(marker),)
+        )
     # Step 2: scrambled rows ended up in train (the script did not split with
     # hexperiment.split), so a difference would not show that test rows leaked.
-    scrambled_train_rows = _scrambled_in_train(marker, canary)
+    scrambled_train_rows = int(
+        np.count_nonzero(np.isin(canary.train_ids, scrambled_ids))
+    )
     if scrambled_train_rows:
         warning = _scrambled_in_train_warning(scrambled_train_rows)
         return CanaryOutcome(Outcome.NOT_APPLIED, Outcome.SKIPPED, (warning,))
@@ -223,25 +238,63 @@ def decide_canary(
         return CanaryOutcome(
             Outcome.SKIPPED, Outcome.SKIPPED, (_ids_differ_warning(normal, canary),)
         )
-    # Requirement 2.6: without training predictions only the hashes are compared.
-    weaker = () if normal.y_score_train is not None else (_weaker_warning(),)
-    # Step 4: scrambling the test rows changed nothing in training.
+    return _decide_rows(normal, canary, run_control, hint_locations)
+
+
+def _decide_rows(
+    normal: Snapshot,
+    canary: Snapshot,
+    run_control: Callable[[], Snapshot],
+    hint_locations: Sequence[str],
+) -> CanaryOutcome:
+    """Steps 4 to 6: compare the training rows of equal id sets."""
+    # Step 4: scrambling the test rows changed nothing in training. A changed
+    # feature list is a difference: features chosen on all rows (a leak) move when
+    # only test rows are altered, so it goes to the control like any other.
     canary_diff = compare_snapshots(normal, canary)
-    if not canary_diff.differs:
-        return CanaryOutcome(Outcome.PASSED, Outcome.PASSED, weaker)
+    features_changed = normal.features != canary.features
+    if not canary_diff.differs and not features_changed:
+        warnings = _score_warnings({"normal": normal, "canary": canary})
+        if _mixed_scores(normal, canary):
+            # Requirements 2.6, 10.3: the predictions of one execution were not
+            # compared, so equal hashes do not show that nothing changed.
+            return CanaryOutcome(Outcome.INCONCLUSIVE, Outcome.INCONCLUSIVE, warnings)
+        return CanaryOutcome(Outcome.PASSED, Outcome.PASSED, warnings)
     # Steps 5 and 6: a difference; a control execution tells a leak apart from
     # non-deterministic training (Requirement 10.3).
-    control_diff = compare_snapshots(normal, run_control())
+    control = run_control()
+    scores = _score_warnings({"normal": normal, "canary": canary, "control": control})
+    train_rows = len(normal.train_ids)
+    if normal.features != control.features:
+        # Requirement 10.4: an identical execution used other features.
+        shapeshifter = _features_shapeshifter(normal.features, control.features)
+        return CanaryOutcome(
+            Outcome.INCONCLUSIVE, Outcome.FAILED, (shapeshifter, *scores)
+        )
+    control_diff = compare_snapshots(normal, control)
     if not control_diff.differs:
+        only_predictions = (
+            canary_diff.feature_rows_changed == 0 and not features_changed
+        )
+        if only_predictions and _mixed_scores(normal, control):
+            # Requirements 2.6, 10.3: only predictions changed, and the control
+            # has no predictions to compare, so a leak cannot be told apart
+            # from non-deterministic training.
+            return CanaryOutcome(Outcome.INCONCLUSIVE, Outcome.INCONCLUSIVE, scores)
         # Step 5: the control matches, so the test rows influenced training
         # (Requirement 10.5).
-        spirit = _peeking_spirit(len(normal.train_ids), canary_diff, hint_locations)
-        return CanaryOutcome(Outcome.FAILED, Outcome.PASSED, (spirit, *weaker))
+        spirit = _peeking_spirit(
+            train_rows,
+            canary_diff,
+            hint_locations,
+            (normal.features, canary.features) if features_changed else None,
+        )
+        return CanaryOutcome(Outcome.FAILED, Outcome.PASSED, (spirit, *scores))
     # Step 6: the control differs too, so training is not deterministic
     # (Requirement 10.4).
-    shapeshifter = _shapeshifter(len(normal.train_ids), control_diff)
+    shapeshifter = _shapeshifter(train_rows, control_diff)
     return CanaryOutcome(
-        Outcome.INCONCLUSIVE, Outcome.FAILED, (shapeshifter, *weaker)
+        Outcome.INCONCLUSIVE, Outcome.FAILED, (shapeshifter, *scores)
     )
 
 
@@ -277,6 +330,21 @@ def _row_ids(frame: pd.DataFrame, name: str) -> NDArray[np.int64]:
     return frame.index.to_numpy(dtype=np.int64)
 
 
+def _require_unique_ids(train_ids: NDArray[np.int64]) -> None:
+    # Requirement 2.3: one hash per training row, so every row id is unique.
+    unique, counts = np.unique(train_ids, return_counts=True)
+    repeated = unique[counts > 1]
+    if repeated.size:
+        raise HexInputError(
+            f"{repeated.size} row ids appear more than once in train (for example "
+            f"row id {int(repeated[0])}), but every training row must have its own "
+            "row id.",
+            "Pass the training rows returned by hexperiment.split to "
+            "hexperiment.audit; oversample or resample only inside model fitting, "
+            "not in the frame passed to audit.",
+        )
+
+
 def _line_locations(check: CheckResult) -> list[str]:
     return [
         f.location
@@ -285,15 +353,39 @@ def _line_locations(check: CheckResult) -> list[str]:
     ]
 
 
-def _scrambled_in_train(marker: LoadMarker, canary: Snapshot) -> int:
-    # A canary marker always carries the scrambled ids; None means none.
-    if marker.scrambled_ids is None:
-        return 0
-    return int(np.count_nonzero(np.isin(canary.train_ids, marker.scrambled_ids)))
+def _mixed_scores(*snapshots: Snapshot) -> bool:
+    return len({s.y_score_train is None for s in snapshots}) > 1
+
+
+def _score_warnings(roles: Mapping[str, Snapshot]) -> tuple[Finding, ...]:
+    """The warnings about training predictions (Requirement 2.6)."""
+    supplied = [name for name, s in roles.items() if s.y_score_train is not None]
+    if not supplied:
+        return (_weaker_warning(),)
+    if len(supplied) < len(roles):
+        missing = [name for name in roles if name not in supplied]
+        return (_mixed_scores_warning(supplied, missing),)
+    return ()
+
+
+def _feature_difference(a: Sequence[str], b: Sequence[str], b_name: str) -> str:
+    only_a = [f for f in a if f not in b]
+    only_b = [f for f in b if f not in a]
+    parts = []
+    if only_a:
+        parts.append(f"only in normal: {', '.join(only_a)}")
+    if only_b:
+        parts.append(f"only in {b_name}: {', '.join(only_b)}")
+    if not parts:
+        return "the same names in another order or number"
+    return "; ".join(parts)
 
 
 def _round(value: float | None) -> float | None:
-    return None if value is None else round(value, _EVIDENCE_DECIMALS)
+    # Evidence is JSON written without NaN or infinity, so those become None.
+    if value is None or not math.isfinite(value):
+        return None
+    return round(value, _EVIDENCE_DECIMALS)
 
 
 def _warning(message: str, fix: str, evidence: dict[str, JsonValue]) -> Finding:
@@ -315,6 +407,24 @@ def _not_loaded_warning() -> Finding:
         "load the data with hexperiment.load() and split it with "
         "hexperiment.split(df)",
         {},
+    )
+
+
+def _bad_marker_warning(marker: LoadMarker) -> Finding:
+    ids = marker.scrambled_ids
+    if marker.mode != ExecMode.CANARY:
+        problem = f"its load marker was written in {marker.mode.value} mode"
+    else:
+        problem = "its load marker records no scrambled test rows"
+    return _warning(
+        f"the canary test was not applied: {problem}, so it does not show that "
+        "the test rows were scrambled",
+        "run the app with hexperiment run and load the data with "
+        "hexperiment.load(), so that the canary execution scrambles the test rows",
+        {
+            "marker_mode": marker.mode.value,
+            "scrambled_rows": None if ids is None else len(ids),
+        },
     )
 
 
@@ -350,13 +460,49 @@ def _weaker_warning() -> Finding:
     )
 
 
+def _mixed_scores_warning(supplied: list[str], missing: list[str]) -> Finding:
+    return _warning(
+        "training predictions were supplied in some executions but not others "
+        f"(supplied in {', '.join(supplied)}; missing in {', '.join(missing)}), "
+        "so they could not be compared",
+        "pass y_score_train to hexperiment.audit in every execution",
+        {
+            "executions_with_y_score_train": list(supplied),
+            "executions_without_y_score_train": list(missing),
+        },
+    )
+
+
 def _peeking_spirit(
-    train_rows: int, diff: SnapshotDiff, locations: Sequence[str]
+    train_rows: int,
+    diff: SnapshotDiff,
+    locations: Sequence[str],
+    selection: tuple[Sequence[str], Sequence[str]] | None = None,
 ) -> Finding:
     fix = (
         "test rows influenced training; fit preprocessing on training rows only, "
         "after the split."
     )
+    message = (
+        f"scrambling the test rows changed {diff.rows_changed} of "
+        f"{train_rows} training rows"
+    )
+    evidence: dict[str, JsonValue] = {
+        "train_rows": train_rows,
+        "rows_changed": diff.rows_changed,
+        "feature_rows_changed": diff.feature_rows_changed,
+        "largest_change": _round(diff.max_abs_change),
+    }
+    if selection is not None:
+        normal_features, canary_features = selection
+        difference = _feature_difference(normal_features, canary_features, "canary")
+        message = (
+            "features selected changed when only test rows were altered: "
+            f"{difference}"
+        )
+        evidence["normal_features"] = list(normal_features)
+        evidence["canary_features"] = list(canary_features)
+        fix += " Select features on the training rows only."
     if locations:
         fix += f" Suspect lines: {', '.join(locations)}."
     return Finding(
@@ -364,16 +510,8 @@ def _peeking_spirit(
         ghost=PEEKING_SPIRIT,
         severity=Severity.ERROR,
         location=SCRIPT_NAME,
-        message=(
-            f"scrambling the test rows changed {diff.rows_changed} of "
-            f"{train_rows} training rows"
-        ),
-        evidence={
-            "train_rows": train_rows,
-            "rows_changed": diff.rows_changed,
-            "feature_rows_changed": diff.feature_rows_changed,
-            "largest_change": _round(diff.max_abs_change),
-        },
+        message=message,
+        evidence=evidence,
         fix=fix,
     )
 
@@ -396,6 +534,22 @@ def _shapeshifter(train_rows: int, diff: SnapshotDiff) -> Finding:
             "rows_changed": diff.rows_changed,
             "largest_change": _round(diff.max_abs_change),
         },
+        fix="training is not deterministic; set random_state everywhere",
+    )
+
+
+def _features_shapeshifter(normal: Sequence[str], control: Sequence[str]) -> Finding:
+    difference = _feature_difference(normal, control, "control")
+    return Finding(
+        check=DETERMINISM_CHECK,
+        ghost=SHAPESHIFTER,
+        severity=Severity.WARNING,
+        location=SCRIPT_NAME,
+        message=(
+            "training is not deterministic: an identical execution used other "
+            f"features ({difference})"
+        ),
+        evidence={"normal_features": list(normal), "control_features": list(control)},
         fix="training is not deterministic; set random_state everywhere",
     )
 
