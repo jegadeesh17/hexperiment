@@ -511,7 +511,7 @@ The recording happens after spec `hexperiment-kiro` provides the `exorcise` work
 
 **Resolved by the project owner on 2026-11-11.** Every recommendation below is accepted, with these notes:
 
-- **1 and 7:** the steering now agrees with this design. Rule 2 says to remove duplicates after the split (within the training rows, and every test row that also appears in them), and rule 4 says to build date features from the one time column, never by combining year, month and day columns.
+- **1 and 7:** the steering now agrees with this design. Rule 2 says to remove the overlap after the split (every test row that also appears in the training rows; duplicates within the training rows may stay), and rule 4 says to build date features from the one time column, never by combining year, month and day columns.
 - **2:** the run history is produced after this spec and `hexperiment-kiro` are both built. For each app the owner runs the haunted script, the `exorcise` workflow and the final script with `hexperiment run`, then commits `runs/`, `verdict.json` and `model_card.md`.
 - **6:** closed. The pinned file writes `time_hour` with a `Z` offset (`2013-01-01T10:00:00Z`), so it is already UTC; `prepare` keeps the same format.
 - **Headers:** the real headers match `REQUIRED_COLUMNS` for both files. The flights row-number column is `rownames`. Task 1 still prints them as a check.
