@@ -26,7 +26,8 @@ GHOSTS = {
     FLIGHTS: ("The Prophet", "The Peeking Spirit"),
 }
 PLACEHOLDERS = ("TODO", "TBD", "XXX", "<measured")
-MEASUREMENT_DATE = "2026-11-11"
+MEASUREMENT_DATE = "2026-11-12"
+MACHINE = "AMD Ryzen 7 3750H laptop (4 cores, 8 threads)"
 
 
 @pytest.fixture
@@ -58,6 +59,26 @@ def test_replay_instructions(app: App, readme: str) -> None:
         f"Copy-Item apps/{app.name}/haunted/train.py apps/{app.name}/train.py"
         in readme
     )
+
+
+def test_replay_steps_are_in_order(app: App, readme: str) -> None:
+    """Copy, run (REJECTED), exorcise in the Kiro CLI, git checkout back."""
+    replay = readme.split("## Replay the demo", 1)[1].split("## Limits", 1)[0]
+    steps = [
+        f"cp apps/{app.name}/haunted/train.py apps/{app.name}/train.py",
+        f".venv/Scripts/hexperiment run apps/{app.name}",
+        f"/workflow run exorcise --app apps/{app.name}",
+        f"git checkout -- apps/{app.name}/train.py",
+    ]
+    positions = [replay.find(step) for step in steps]
+    assert -1 not in positions, positions
+    assert positions == sorted(positions)
+    assert "git restore" not in readme
+
+
+def test_machine_is_named(readme: str) -> None:
+    assert MACHINE in readme
+    assert "High Performance power plan" in readme
 
 
 def test_ghosts_are_named(app: App, readme: str) -> None:

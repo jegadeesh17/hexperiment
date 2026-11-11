@@ -6,6 +6,7 @@ Nothing is executed: the scripts are parsed with ``ast`` and ``tokenize``.
 from __future__ import annotations
 
 import ast
+import hashlib
 import io
 import tokenize
 from pathlib import Path
@@ -44,6 +45,19 @@ POST_OUTCOME_HOTEL_COLUMNS = (
     "reservation_status_date",
     "assigned_room_type",
 )
+# SHA-256 of each haunted script with line endings normalised to "\n". The haunted
+# scripts are the fixed starting point of the demo; change them only on purpose and
+# update the pin in the same commit (Requirements 2.2, 3.2, 5.3).
+HAUNTED_PINS = {
+    "hotels-haunted": (
+        HAUNTED_HOTELS,
+        "3f1f6e8a626397a0f3b9431fcb58cdf6ca19b6b4ccc8e8fa23c14afd380364c6",
+    ),
+    "flights-haunted": (
+        HAUNTED_FLIGHTS,
+        "e34ac0326a726519e242ef66cfaf17930b1e64f24a1e6d6e37d5cb4ec29d047f",
+    ),
+}
 
 
 def parse(path: Path) -> ast.Module:
@@ -304,6 +318,16 @@ def test_haunted_script_marks_its_leaks(path: Path) -> None:
 @pytest.mark.parametrize("path", HONEST_SCRIPTS)
 def test_honest_script_has_no_leak_marker(path: Path) -> None:
     assert not [c for c in comments(path) if LEAK_COMMENT in c]
+
+
+@pytest.mark.parametrize("name", sorted(HAUNTED_PINS))
+def test_haunted_script_matches_its_pin(name: str) -> None:
+    path, expected = HAUNTED_PINS[name]
+    text = path.read_bytes().replace(b"\r\n", b"\n")
+    assert hashlib.sha256(text).hexdigest() == expected, (
+        f"{path} changed. The haunted script is the fixed starting point of the demo; "
+        "if the change is intended, update HAUNTED_PINS."
+    )
 
 
 @pytest.mark.parametrize("path", HAUNTED_SCRIPTS)
