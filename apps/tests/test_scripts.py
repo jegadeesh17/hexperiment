@@ -12,7 +12,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
-from conftest import APPS_DIR, FLIGHTS, HOTELS
+from conftest import APPS_DIR, FLIGHTS, HOTELS, script_module
 
 HONEST_HOTELS = APPS_DIR / HOTELS / "train.py"
 HAUNTED_HOTELS = APPS_DIR / HOTELS / "haunted" / "train.py"
@@ -118,11 +118,22 @@ def test_audit_is_called_once(path: Path) -> None:
 
 
 @pytest.mark.parametrize("path", ALL_SCRIPTS)
-def test_every_random_component_has_a_seed(path: Path) -> None:
+def test_every_random_component_has_a_seed_and_no_early_stopping(path: Path) -> None:
+    """Early stopping draws a random validation split, which the canary would see."""
     seeded = ("HistGradientBoostingClassifier", "train_test_split")
+    boosting = 0
     for call in call_nodes(parse(path)):
-        if dotted(call.func).split(".")[-1] in seeded:
-            assert "random_state" in {kw.arg for kw in call.keywords}, ast.dump(call)
+        name = dotted(call.func).split(".")[-1]
+        if name not in seeded:
+            continue
+        keywords = {kw.arg: kw.value for kw in call.keywords}
+        assert "random_state" in keywords, ast.dump(call)
+        if name == "HistGradientBoostingClassifier":
+            boosting += 1
+            stopping = keywords.get("early_stopping")
+            assert isinstance(stopping, ast.Constant), ast.dump(call)
+            assert stopping.value is False, ast.dump(call)
+    assert boosting >= 1, "the script must build a HistGradientBoostingClassifier"
 
 
 @pytest.mark.parametrize("path", ALL_SCRIPTS)
@@ -163,6 +174,125 @@ def test_haunted_hotels_has_the_planted_leaks() -> None:
     constants = string_constants(parse(HAUNTED_HOTELS))
     assert "reservation_status" in constants
     assert "country_cancel_rate" in constants
+
+
+def test_haunted_hotels_is_the_honest_script_plus_exactly_two_leaks() -> None:
+    honest = string_constants(parse(HONEST_HOTELS))
+    haunted = string_constants(parse(HAUNTED_HOTELS))
+    assert honest <= haunted
+    # "mean" is the aggregation of the country_cancel_rate leak, not a column name.
+    assert haunted - honest == {"reservation_status", "country_cancel_rate", "mean"}
+    ghosts = {
+        ghost
+        for comment in comments(HAUNTED_HOTELS)
+        if comment.startswith(LEAK_COMMENT)
+        for ghost in ("The Possession", "The Peeking Spirit")
+        if ghost in comment
+    }
+    assert ghosts == {"The Possession", "The Peeking Spirit"}
+    for comment in comments(HAUNTED_HOTELS):
+        if comment.startswith(LEAK_COMMENT):
+            assert "The Possession" in comment or "The Peeking Spirit" in comment
+
+
+# --- the four copies of drop_seen_test_rows --------------------------------------
+
+
+def drop_seen_test_rows_node(path: Path) -> ast.FunctionDef:
+    found = [
+        node
+        for node in parse(path).body
+        if isinstance(node, ast.FunctionDef) and node.name == "drop_seen_test_rows"
+    ]
+    assert len(found) == 1, f"{path} needs exactly one drop_seen_test_rows"
+    return found[0]
+
+
+def test_the_four_copies_of_drop_seen_test_rows_are_identical() -> None:
+    dumps = {
+        script.id: ast.dump(drop_seen_test_rows_node(script.values[0]))
+        for script in ALL_SCRIPTS
+    }
+    assert len(set(dumps.values())) == 1, "the copies differ: " + ", ".join(dumps)
+
+
+# --- the feature lists fit the prepared data -------------------------------------
+
+DERIVED_BY_HAUNTED_SCRIPT = {
+    HAUNTED_HOTELS: {"country_cancel_rate"},
+    HAUNTED_FLIGHTS: {"carrier_day_late_rate"},
+}
+
+
+def prepared_columns(path: Path, hotels_fetch, flights_fetch, raw_hotels, raw_flights):
+    if HOTELS in path.parts:
+        return set(hotels_fetch.prepare(raw_hotels(40)).columns)
+    delays = [float(10 * (i % 4)) for i in range(40)]
+    return set(flights_fetch.prepare(raw_flights(delays)).columns)
+
+
+def script_features(path: Path) -> set[str]:
+    app = HOTELS if HOTELS in path.parts else FLIGHTS
+    return set(script_module(app, haunted="haunted" in path.parts).FEATURES)
+
+
+@pytest.mark.parametrize("path", HONEST_SCRIPTS)
+def test_every_honest_feature_is_a_prepared_column(
+    path: Path, hotels_fetch, flights_fetch, raw_hotels, raw_flights
+) -> None:
+    columns = prepared_columns(
+        path, hotels_fetch, flights_fetch, raw_hotels, raw_flights
+    )
+    missing = script_features(path) - columns
+    assert not missing, f"features that prepare() does not produce: {sorted(missing)}"
+
+
+@pytest.mark.parametrize("path", HAUNTED_SCRIPTS)
+def test_every_haunted_feature_is_prepared_or_derived_by_the_script(
+    path: Path, hotels_fetch, flights_fetch, raw_hotels, raw_flights
+) -> None:
+    columns = prepared_columns(
+        path, hotels_fetch, flights_fetch, raw_hotels, raw_flights
+    )
+    derived = DERIVED_BY_HAUNTED_SCRIPT[path]
+    features = script_features(path)
+    assert derived <= features
+    assert not derived & columns, "a derived column must not already be prepared"
+    missing = features - derived - columns
+    assert not missing, f"features that prepare() does not produce: {sorted(missing)}"
+
+
+def test_honest_flights_has_no_post_departure_column() -> None:
+    constants = string_constants(parse(HONEST_FLIGHTS))
+    for column in ("dep_time", "dep_delay", "arr_time", "arr_delay", "air_time"):
+        assert column not in constants
+
+
+HOTEL_DATE_PARTS = (
+    "arrival_date_year",
+    "arrival_date_month",
+    "arrival_date_day_of_month",
+)
+DATE_CALLS = {
+    "to_datetime",
+    "Timestamp",
+    "datetime",
+    "date",
+    "strptime",
+    "make_datetime",
+}
+
+
+@pytest.mark.parametrize(
+    "path", [HONEST_HOTELS, HAUNTED_HOTELS], ids=["honest", "haunted"]
+)
+def test_hotels_scripts_never_combine_year_month_and_day(path: Path) -> None:
+    """The canary scrambles each column alone, so a combined date can be impossible."""
+    tree = parse(path)
+    assert not DATE_CALLS & {name.split(".")[-1] for name in call_names(tree)}
+    # The three columns may be listed as features; main() must not touch them.
+    in_main = string_constants(main_function(tree))
+    assert not set(HOTEL_DATE_PARTS) & in_main
 
 
 @pytest.mark.parametrize("path", HAUNTED_SCRIPTS)
@@ -232,7 +362,9 @@ def test_split_fixed_source_replaces_only_the_marked_line(split_fixed_source) ->
 
 
 @pytest.mark.parametrize("count", [0, 2])
-def test_split_fixed_source_needs_exactly_one_marker(split_fixed_source, count: int) -> None:
+def test_split_fixed_source_needs_exactly_one_marker(
+    split_fixed_source, count: int
+) -> None:
     source = f"x = 1  {MARKER}\n" * count + "y = 2\n"
     with pytest.raises(ValueError, match="exactly one"):
         split_fixed_source(source)

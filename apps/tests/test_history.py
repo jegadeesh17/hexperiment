@@ -167,7 +167,11 @@ def test_a_good_flights_history_has_no_problems(tmp_path: Path) -> None:
 def test_a_good_hotels_history_has_no_problems(tmp_path: Path) -> None:
     write_history(
         tmp_path,
-        [(REJECTED, ("The Possession", PEEKING)), (REJECTED, (PEEKING,)), (APPROVED, ())],
+        [
+            (REJECTED, ("The Possession", PEEKING)),
+            (REJECTED, (PEEKING,)),
+            (APPROVED, ()),
+        ],
     )
     assert problems(tmp_path, ARCS[HOTELS]) == []
 

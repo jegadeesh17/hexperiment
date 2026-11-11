@@ -2,7 +2,7 @@
 
 Will a 2013 New York flight arrive more than 15 minutes late? The model decides from the schedule alone: carrier, origin, destination, scheduled departure and arrival time, distance, and the date.
 
-This app starts **haunted**: its training script splits the flights at random although they are ordered in time, and adds a statistic computed over all rows. Hexperiment flags it as `REJECTED`. The honest script splits by time and reaches an AUC of 0.6192 with the verdict `APPROVED`.
+This app starts **haunted**: its training script splits the flights at random although they are ordered in time, and adds a statistic computed over all rows. Hexperiment flags it as `REJECTED`. The honest script splits by time and reaches an AUC of 0.6193 with the verdict `APPROVED`.
 
 ## The data
 
@@ -25,7 +25,7 @@ From the repository root, with the root virtual environment:
 
 The target is `late`. The metric is ROC AUC with a threshold of 0.60. `hex.toml` sets `time_column = "time_hour"`, so the latest 20% of the flights form the test set: 261,877 training rows and 65,469 test rows.
 
-**Run time.** One full run of the honest script (`hexperiment run`, which runs `train.py` normally and once more with the test rows scrambled) took 49.0 s on 2026-11-11, on Windows, CPU only, with pandas 3.1.1. Another process was using the CPU during that run, so an idle machine may be faster. The limit in `hex.toml` is `timeout_seconds = 120`. These numbers are from that run on 2026-11-11 and will be replaced by the final measurements.
+**Run time.** One full run of the honest script (`hexperiment run`, which runs `train.py` normally and once more with the test rows scrambled) took 52.5 s on 2026-11-11, on Windows, CPU only, with pandas 3.1.1. Another process was using the CPU during that run, so an idle machine may be faster (an earlier run took 49.0 s). The limit in `hex.toml` is `timeout_seconds = 120`. These numbers are from that run on 2026-11-11 and will be replaced by the final measurements.
 
 ## The haunted script
 
@@ -33,10 +33,12 @@ The target is `late`. The metric is ROC AUC with a threshold of 0.60. `hex.toml`
 
 | Leak | Where | Ghost | How it is caught |
 |---|---|---|---|
-| A random split with scikit-learn's `train_test_split` instead of `hexperiment.split`. Flights from after the earliest test flight are in the training set. | `train.py:71`, the line ending in `# LEAK: random split` | The Prophet | The check compares the times of the training and test rows. The error names `time_hour`. The canary test reports `not applied`, because the scrambled test rows are mostly inside the random training set. |
-| `carrier_day_late_rate`, the late rate of each carrier on each day, computed over all rows before the split. The test labels reach the training features. | `train.py:69` | The Peeking Spirit | It appears once the split is fixed. The canary run scrambles the test rows, and the training predictions change because the rate of every carrier-day that has both training and test flights changes. The finding lists `train.py:69` among the suspect lines. |
+| A random split with scikit-learn's `train_test_split` instead of `hexperiment.split`. Flights from after the earliest test flight are in the training set. | the line ending in `# LEAK: random split` | The Prophet | The check compares the times of the training and test rows. The error names `time_hour`. The canary test reports `not applied`, because the scrambled test rows are mostly inside the random training set. |
+| `carrier_day_late_rate`, the late rate of each carrier on each day, computed over all rows before the split. The test labels reach the training features. | `main()`, on the lines marked `# LEAK: The Peeking Spirit` | The Peeking Spirit | It appears once the split is fixed. For days wholly inside the test period, each flight's own label sits in its own `carrier_day_late_rate`, and the canary cannot see that. The canary catches the leak through the cutoff day, where flights of the same carrier fall on both sides of the split: scrambling the test rows changes the rate of those carrier-days, so the training predictions change. The finding lists the `transform` line among the suspect lines. |
 
-The haunted run also reports two warnings: `split_order` (a statistic computed over all rows before the split, at `train.py:69`) and `metric` (the AUC is above 0.75, too good to be true).
+The haunted run also reports two warnings: `split_order` (a statistic computed over all rows before the split, at the `transform` line) and `metric` (the AUC is above 0.75, too good to be true).
+
+The haunted script splits with `train_test_split` and its default test share of 25%. The honest script's test set is the latest 20% by time (`hex.toml`).
 
 ## The honest script
 
@@ -48,7 +50,7 @@ The haunted run also reports two warnings: `split_order` (a statistic computed o
 - `flight` and `tailnum` are identifiers and are left out. `hour` and `minute` are already inside `sched_dep_time`.
 - `month` and `day` stay on purpose. A scheduled flight repeats every day with the same other columns, so without a date identical rows would sit in both train and test and The Doppelganger would reject the model. The script does not combine `year`, `month` and `day` into one date.
 - Every learned step sits in one scikit-learn `Pipeline` fitted on training rows only. The model is a `HistGradientBoostingClassifier` with `random_state=0` and no early stopping, so two runs give the same scores.
-- After the split, `drop_seen_test_rows` removes every test row that also occurs in the training rows. It removes 7 of the 65,469 test rows and leaves 65,462.
+- After the split, `drop_seen_test_rows` removes every test row that also occurs in the training rows. A test row counts as occurring in the training rows when a training row has the same value in every feature and the same `late`. Repeated rows inside the test set stay. On the real data it removes 0 of the 65,469 test rows. It stays in the script as a guard.
 
 ## Results
 
@@ -56,13 +58,13 @@ From a run on 2026-11-11 (full mode, `hexperiment run` through `apps/verify.py` 
 
 | Script | Verdict | AUC | Threshold | Findings | Wall time |
 |---|---|---|---|---|---|
-| `haunted/train.py` | `REJECTED` (exit 1) | 0.7969 | 0.60 | The Prophet on `time_hour`. Warnings: `split_order`, `canary` (not applied), `metric` | 81.6 s |
-| Haunted with only the split fixed | `REJECTED` (exit 1) | 0.7605 | 0.60 | The Peeking Spirit. No The Prophet. Warnings: `split_order`, `metric` | 69.9 s |
-| `train.py` (honest) | `APPROVED` (exit 0) | 0.6192 | 0.60 | none | 49.0 s |
+| `haunted/train.py` | `REJECTED` (exit 1) | 0.7971 | 0.60 | The Prophet on `time_hour`. Warnings: `split_order`, `canary` (not applied), `metric` | 56.6 s |
+| Haunted with only the split fixed | `REJECTED` (exit 1) | 0.7605 | 0.60 | The Peeking Spirit. No The Prophet. Warnings: `split_order`, `metric` | 100.1 s |
+| `train.py` (honest) | `APPROVED` (exit 0) | 0.6193 | 0.60 | none | 52.5 s |
 
 The second row is not a file in the repository. `apps/verify.py` builds it from the haunted script by replacing the line ending in `# LEAK: random split` with `train, test = hexperiment.split(df)`. It is the state an agent reaches after fixing the first finding.
 
-The haunted AUC is 0.1777 higher than the honest one. The honest model is only 0.0192 above the threshold. That is what the schedule alone can tell you about delays.
+The haunted AUC is 0.1778 higher than the honest one. The honest model is only 0.0193 above the threshold. That is what the schedule alone can tell you about delays.
 
 ## Replay the demo
 
@@ -103,7 +105,7 @@ Every run adds a folder to `runs/`, so replaying adds to the history. `git resto
 - One year (2013) and three New York airports. The model says nothing about other years or airports.
 - The model sees only the schedule. It does not see weather, aircraft or the delay of the previous flight, so its AUC is modest.
 - The test set is the latest 20% of the flights by scheduled hour, so it covers only the latest part of the year, and the AUC may differ for other periods.
-- The AUC is measured on the 65,462 test rows that remain after removing copies of training rows.
+- The AUC is measured on the 65,469 test rows, the latest 20% of the flights; `drop_seen_test_rows` removed none of them.
 
 ## Files
 

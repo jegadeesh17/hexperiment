@@ -79,7 +79,7 @@ apps/
 | Flights 2 | split fixed with `hexperiment.split`, leak 2 kept | `REJECTED` | The Peeking Spirit |
 | Flights 3 | `train.py` (honest) | `APPROVED`, exit 0 | none expected |
 
-Steps 2 are what the `exorcise` workflow reaches when it fixes one finding at a time. For flights, `apps/verify.py` builds step 2 by a text substitution on the haunted script (see "`apps/verify.py`"). Hotels step 2 is not built by this spec.
+Steps 2 are what the `exorcise` workflow reaches when it fixes one finding at a time. `apps/verify.py` builds step 2 of both apps by a text substitution on the haunted script (`split-fixed` for flights, `possession-fixed` for hotels; see "`apps/verify.py`").
 
 ### Fetch flow
 
@@ -317,7 +317,7 @@ def main() -> None:
     hexperiment.audit(...)                               # as in the hotel script
 ```
 
-`month` and `day` stay in the features on purpose. The rows of one scheduled flight look the same every day, so without a date the same schedule would appear in both train and test with the same outcome, and The Doppelganger would reject the honest model. With the date, rows differ across days, and `drop_seen_test_rows` removes the few identical twins on the cutoff day.
+`month` and `day` stay in the features on purpose. The rows of one scheduled flight look the same every day, so without a date the same schedule would appear in both train and test with the same outcome, and The Doppelganger would reject the honest model. With the date, rows differ across days, and Measured: `drop_seen_test_rows` removes no flights test row, because no test row repeats a training row once the date is a feature.
 
 **Haunted `haunted/train.py`**: the honest script with these changes.
 
@@ -360,7 +360,7 @@ For each variant it:
 
 `split_fixed_source(source: str) -> str` is a pure function. It requires exactly one line ending in `# LEAK: random split` and replaces that line with `train, test = hexperiment.split(df)`; any other count raises `ValueError`. A test covers it, so a later edit of the haunted script cannot break the variant silently.
 
-`possession_fixed_source(source: str) -> str` is pure in the same way. It requires exactly one line that contains `"reservation_status"` and `# LEAK: The Possession`, removes `"reservation_status"` from that line's list (leaving `CATEGORICAL += []` if it was the only name), and raises `ValueError` for zero or several such lines.
+`possession_fixed_source(source: str) -> str` is pure in the same way. It requires exactly one line that contains `"reservation_status"` and `# LEAK: The Possession`, removes that line (in the scripts `"reservation_status"` is a list item on its own line with its `# LEAK:` comment), and raises `ValueError` for zero or several such lines.
 
 The builder copies the printed numbers into the READMEs. The temporary folders disappear, so no `runs/` evidence is created by verification.
 

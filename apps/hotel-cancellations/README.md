@@ -2,7 +2,7 @@
 
 Will a hotel booking be cancelled? The model reads what is known about a booking (lead time, deposit type, country, price per night and so on) and scores the chance of cancellation.
 
-This app starts **haunted**: its training script has two realistic leaks and reports an AUC of 1.0000. Hexperiment flags it as `REJECTED`. The honest script fixes the leaks and reaches an AUC of 0.9092 with the verdict `APPROVED`.
+This app starts **haunted**: its training script has two realistic leaks and reports an AUC of 1.0000. Hexperiment flags it as `REJECTED`. The honest script fixes the leaks and reaches an AUC of 0.9096 with the verdict `APPROVED`.
 
 ## The data
 
@@ -24,31 +24,32 @@ From the repository root, with the root virtual environment:
 
 The target is `is_canceled`. The metric is ROC AUC with a threshold of 0.85. The split is a 20% test set chosen by a hash of the row, with a fixed seed (`hex.toml`).
 
-**Run time.** One full run of the honest script (`hexperiment run`, which runs `train.py` normally and once more with the test rows scrambled) took 47.6 s on 2026-11-11, on Windows, CPU only, with pandas 3.1.1. Another process was using the CPU during that run, so an idle machine may be faster. The limit in `hex.toml` is `timeout_seconds = 120`. These numbers are from that run on 2026-11-11 and will be replaced by the final measurements.
+**Run time.** One full run of the honest script (`hexperiment run`, which runs `train.py` normally and once more with the test rows scrambled) took 87.0 s on 2026-11-11, on Windows, CPU only, with pandas 3.1.1. Another process was using the CPU during that run, so an idle machine may be faster (an earlier run took 47.6 s). The limit in `hex.toml` is `timeout_seconds = 120`. These numbers are from that run on 2026-11-11 and will be replaced by the final measurements.
 
 ## The haunted script
 
-`haunted/train.py` is the honest script plus the leaks marked `# LEAK:`. When it is run, `hexperiment run` rejects it.
+`haunted/train.py` is the honest script plus two leaks, each marked with a `# LEAK:` comment. When it is run, `hexperiment run` rejects it.
 
 | Leak | Where | Ghost | How it is caught |
 |---|---|---|---|
-| `reservation_status` used as a feature. It is filled in when the booking ends (cancelled, checked out, no-show), so it contains the answer. | `CATEGORICAL` list | The Possession | This one column alone predicts `is_canceled` almost perfectly. The finding names `reservation_status`. |
-| `country_cancel_rate`, the cancellation rate of each country, computed over all rows before the split. The test labels reach the training features. | `train.py:94` | The Peeking Spirit | The canary run scrambles the test rows. The training predictions then change, which they cannot do if training never saw test rows. The finding lists `train.py:94` among the suspect lines. |
-| `assigned_room_type` and `status_day` (the date of the final status, from `reservation_status_date`). Both are recorded after the outcome. | `CATEGORICAL` and `NUMERIC` lists, `main()` | none | The run reports no finding for them. The honest script leaves them out anyway, because they are not known when the cancellation happens. |
+| `reservation_status` used as a feature. It is filled in when the booking ends (cancelled, checked out, no-show), so it contains the answer. | the `CATEGORICAL` list, on the line marked `# LEAK: The Possession` | The Possession | This one column alone predicts `is_canceled` almost perfectly. The finding names `reservation_status`. |
+| `country_cancel_rate`, the cancellation rate of each country, computed over all rows before the split. The test labels reach the training features. | `main()`, on the lines marked `# LEAK: The Peeking Spirit` | The Peeking Spirit | The canary run scrambles the test rows. The training predictions then change, which they cannot do if training never saw test rows. The finding lists the `transform` line among the suspect lines. |
 
-The same run also reports two warnings: `split_order` (a statistic computed over all rows before the split, at `train.py:94`) and `metric` (the AUC is too good to be true).
+The same run also reports two warnings: `split_order` (a statistic computed over all rows before the split, at the `transform` line) and `metric` (the AUC is too good to be true).
+
+Other columns that are recorded after the outcome, such as `reservation_status_date` and `assigned_room_type`, are not planted: no check can name them (each alone scores about 0.6), so a loop that stops at `APPROVED` could leave them in. The honest script leaves them out anyway.
 
 ## The honest script
 
 `train.py` differs from the haunted script in these ways:
 
 - It does not use `reservation_status`, `reservation_status_date` or `assigned_room_type`. The first two are filled in when the booking ends. `assigned_room_type` is assigned at check-in or after a change. `company` is also left out because 94% of its values are missing.
-- It has no `country_cancel_rate` and no `status_day`.
+- It has no `country_cancel_rate`.
 - Every learned step (the category encoder and the model) sits in one scikit-learn `Pipeline` that is fitted on training rows only.
 - The model is a `HistGradientBoostingClassifier` with `random_state=0` and no early stopping, so two runs give the same scores.
-- After the split, `drop_seen_test_rows` removes every test row that also occurs in the training rows. Duplicates inside the training rows stay. Nothing is deduplicated before the split, because that would change the training set in the canary run.
+- After the split, `drop_seen_test_rows` removes every test row that also occurs in the training rows. A test row counts as occurring in the training rows when a training row has the same value in every feature and the same `is_canceled`. Repeated rows inside the test set stay, and so do repeated rows inside the training set. Nothing is deduplicated before the split, because that would change the training set in the canary run.
 
-**Why the honest AUC is measured on 15,805 rows.** The split gives 95,457 training rows and 23,933 test rows. 8,128 of the test rows (34%) are copies of training rows, because the file contains many repeated bookings. `drop_seen_test_rows` drops them, which leaves 15,805 test rows. A model that has seen a booking in training would otherwise be scored on it again.
+**Why the honest AUC is measured on 16,023 rows.** The split gives 95,457 training rows and 23,933 test rows. 7,910 of the test rows (33%) also occur in the training rows, because the file contains many repeated bookings. `drop_seen_test_rows` drops them, which leaves 16,023 test rows. A model that has seen a booking in training would otherwise be scored on it again.
 
 ## Results
 
@@ -56,10 +57,13 @@ From a run on 2026-11-11 (full mode, `hexperiment run` through `apps/verify.py` 
 
 | Script | Verdict | AUC | Threshold | Findings | Wall time |
 |---|---|---|---|---|---|
-| `haunted/train.py` | `REJECTED` (exit 1) | 1.0000 | 0.85 | The Possession on `reservation_status`; The Peeking Spirit. Warnings: `split_order`, `metric` | 66.2 s |
-| `train.py` (honest) | `APPROVED` (exit 0) | 0.9092 | 0.85 | none | 47.6 s |
+| `haunted/train.py` | `REJECTED` (exit 1) | 1.0000 | 0.85 | The Possession on `reservation_status`; The Peeking Spirit. Warnings: `split_order`, `metric` | 62.2 s |
+| Haunted with only `reservation_status` removed | `REJECTED` (exit 1) | 0.9101 | 0.85 | The Peeking Spirit. No The Possession. Warning: `split_order` | 71.0 s |
+| `train.py` (honest) | `APPROVED` (exit 0) | 0.9096 | 0.85 | none | 87.0 s |
 
-The haunted AUC is 0.0908 higher than the honest one, and it is not a better model: it reads the answer.
+The second row is not a file in the repository. `apps/verify.py` builds it from the haunted script by removing the list item marked `# LEAK: The Possession`. It is the state an agent reaches after fixing the first finding.
+
+The haunted AUC is 0.0904 higher than the honest one, and it is not a better model: it reads the answer. The `country_cancel_rate` leak adds only 0.0005 to the AUC (0.9101 against 0.9096), but the canary still catches it, because it looks at what training depends on, not at the metric.
 
 ## Replay the demo
 
@@ -99,8 +103,8 @@ Every run adds a folder to `runs/`, so replaying adds to the history. `git resto
 
 - Two hotels in Portugal, bookings from 2015 to 2017. The model says nothing about other hotels or countries.
 - The split is random, not by time.
-- `booking_changes`, `adr`, `required_car_parking_spaces` and `total_of_special_requests` can be updated after the booking is made. The honest script keeps them, and no check can tell whether they were final at booking time, so they are a possible source of optimism in the 0.9092.
-- The AUC is measured on the 15,805 test rows that remain after removing copies of training rows.
+- `booking_changes`, `adr`, `required_car_parking_spaces` and `total_of_special_requests` can be updated after the booking is made. The honest script keeps them, and no check can tell whether they were final at booking time, so they are a possible source of optimism in the 0.9096.
+- The AUC is measured on the 16,023 test rows that remain after removing the rows that also occur in the training rows.
 
 ## Files
 

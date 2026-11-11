@@ -83,5 +83,21 @@ def test_no_placeholder_text(readme: str) -> None:
 
 def test_hotels_readme_explains_the_dropped_test_rows() -> None:
     text = (APPS_DIR / HOTELS / "README.md").read_text(encoding="utf-8")
-    for number in ("8,128", "23,933", "15,805"):
+    for number in ("7,910", "23,933", "16,023"):
         assert number in text
+    assert "also occur in the training rows" in text
+    assert "Repeated rows inside the test set stay" in text
+    assert "status_day" not in text
+
+
+def test_no_train_py_line_numbers(readme: str) -> None:
+    """Line numbers change; the README refers to the marked LEAK lines instead."""
+    assert not re.search(r"train\.py:\d+", readme)
+    assert not re.search(r"\bline \d+\b", readme)
+
+
+def test_flights_readme_says_where_the_canary_catches_the_same_day_leak() -> None:
+    text = (APPS_DIR / FLIGHTS / "README.md").read_text(encoding="utf-8")
+    assert "cutoff day" in text
+    assert "the canary cannot see that" in text
+    assert "measures the size" not in text

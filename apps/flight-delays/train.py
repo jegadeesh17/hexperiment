@@ -28,9 +28,16 @@ FEATURES = CATEGORICAL + NUMERIC
 def drop_seen_test_rows(
     train: pd.DataFrame, test: pd.DataFrame, key: list[str]
 ) -> pd.DataFrame:
-    """Return test without the rows whose key columns already occur in train."""
-    seen = pd.concat([train[key], test[key]]).duplicated().to_numpy()
-    return test.loc[~seen[len(train) :]]
+    """Return test without the rows whose key columns also occur in train.
+
+    Only the overlap with the training rows is removed. Duplicates within the test
+    rows stay, like duplicates within the training rows. Rows are
+    compared by a hash of their key values, in which NaN equals NaN. The index labels
+    are kept.
+    """
+    seen = set(pd.util.hash_pandas_object(train[key], index=False))
+    keep = ~pd.util.hash_pandas_object(test[key], index=False).isin(seen).to_numpy()
+    return test.loc[keep]
 
 
 def build_model(categorical: list[str], numeric: list[str]) -> Pipeline:

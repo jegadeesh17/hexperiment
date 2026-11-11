@@ -28,7 +28,7 @@ APPS_DIR = Path(__file__).resolve().parent
 HOTELS = "hotel-cancellations"
 FLIGHTS = "flight-delays"
 VARIANTS: dict[str, tuple[str, ...]] = {
-    HOTELS: ("haunted", "honest"),
+    HOTELS: ("haunted", "possession-fixed", "honest"),
     FLIGHTS: ("haunted", "split-fixed", "honest"),
 }
 COPY_IGNORE = (
@@ -42,6 +42,8 @@ COPY_IGNORE = (
 )
 LEAK_SPLIT_MARKER = "# LEAK: random split"
 FIXED_SPLIT = "train, test = hexperiment.split(df)"
+POSSESSION_COLUMN = '"reservation_status"'
+POSSESSION_MARKER = "# LEAK: The Possession"
 RUN_TIMEOUT_SECONDS = 900  # a safety net around the whole command
 
 
@@ -69,7 +71,9 @@ def split_fixed_source(source: str) -> str:
     without notice.
     """
     lines = source.splitlines(keepends=True)
-    marked = [i for i, line in enumerate(lines) if line.rstrip().endswith(LEAK_SPLIT_MARKER)]
+    marked = [
+        i for i, line in enumerate(lines) if line.rstrip().endswith(LEAK_SPLIT_MARKER)
+    ]
     if len(marked) != 1:
         raise ValueError(
             f"expected exactly one line ending in {LEAK_SPLIT_MARKER!r}, "
@@ -83,6 +87,37 @@ def split_fixed_source(source: str) -> str:
     return "".join(lines)
 
 
+def possession_fixed_source(source: str) -> str:
+    """Return the haunted hotels script without the ``reservation_status`` list item.
+
+    Exactly one line must contain both ``"reservation_status"`` and
+    ``# LEAK: The Possession``, and it must be a list item on its own line
+    (the quoted name, a comma, the comment). That line is removed. Any other
+    count, or a line with other code on it, raises ``ValueError`` so a later edit
+    of the haunted script cannot break the variant without notice.
+    """
+    lines = source.splitlines(keepends=True)
+    marked = [
+        i
+        for i, line in enumerate(lines)
+        if POSSESSION_COLUMN in line and POSSESSION_MARKER in line
+    ]
+    if len(marked) != 1:
+        raise ValueError(
+            f"expected exactly one line with {POSSESSION_COLUMN} and "
+            f"{POSSESSION_MARKER!r}, found {len(marked)}."
+        )
+    index = marked[0]
+    if not lines[index].strip().startswith(f"{POSSESSION_COLUMN},"):
+        raise ValueError(
+            f"the line with {POSSESSION_MARKER!r} must be a list item on its own "
+            f"line ({POSSESSION_COLUMN}, followed by the comment); found "
+            f"{lines[index].strip()!r}."
+        )
+    del lines[index]
+    return "".join(lines)
+
+
 def variant_source(app_dir: Path, variant: str) -> str:
     """Return the text to write as ``train.py`` for a variant."""
     if variant == "honest":
@@ -92,6 +127,8 @@ def variant_source(app_dir: Path, variant: str) -> str:
         return haunted
     if variant == "split-fixed":
         return split_fixed_source(haunted)
+    if variant == "possession-fixed":
+        return possession_fixed_source(haunted)
     raise ValueError(f"unknown variant {variant!r}")
 
 
@@ -122,13 +159,20 @@ def clean_environment() -> dict[str, str]:
 
 
 def read_verdict(scratch: Path) -> dict[str, object] | None:
+    """Return the scratch ``verdict.json``; None if absent or not a JSON object."""
     path = scratch / "verdict.json"
     if not path.is_file():
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        verdict = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError:  # json.JSONDecodeError and UnicodeDecodeError
+        return None
+    return verdict if isinstance(verdict, dict) else None
 
 
-def describe_findings(verdict: dict[str, object]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+def describe_findings(
+    verdict: dict[str, object],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Return (ghosts of error findings, "check: message" of warning findings)."""
     ghosts: list[str] = []
     warnings: list[str] = []
@@ -142,32 +186,54 @@ def describe_findings(verdict: dict[str, object]) -> tuple[tuple[str, ...], tupl
     return tuple(ghosts), tuple(warnings)
 
 
+def remove_scratch(folder: Path) -> None:
+    """Delete the scratch folder; warn on stderr, naming it, if that fails."""
+    try:
+        shutil.rmtree(folder)
+    except OSError as error:
+        print(
+            f"verify: warning: could not remove the scratch folder {folder} ({error}). "
+            "Delete it by hand.",
+            file=sys.stderr,
+        )
+
+
 def run_variant(app_dir: Path, variant: str, *, full: bool) -> VariantResult:
     """Run one variant in a scratch copy and return its result."""
+    tmp = Path(tempfile.mkdtemp(prefix="hexverify-"))
+    try:
+        return run_in_scratch(app_dir, variant, tmp, full=full)
+    finally:
+        remove_scratch(tmp)
+
+
+def run_in_scratch(
+    app_dir: Path, variant: str, tmp: Path, *, full: bool
+) -> VariantResult:
+    """Copy the app into ``tmp``, run ``hexperiment run`` on it, collect the result."""
     command = [console_script(), "run", "", "--full" if full else "--fast"]
-    with tempfile.TemporaryDirectory(prefix="hexverify-", ignore_cleanup_errors=True) as tmp:
-        scratch = make_scratch(app_dir, Path(tmp), variant)
-        command[2] = str(scratch)
-        started = time.perf_counter()
-        try:
-            done = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=clean_environment(),
-                timeout=RUN_TIMEOUT_SECONDS,
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
-            seconds = time.perf_counter() - started
-            return VariantResult(
-                variant, -1, "TIMEOUT", "-", None, seconds, (), (), "",
-                f"no result after {RUN_TIMEOUT_SECONDS} s",
-            )
+    scratch = make_scratch(app_dir, tmp, variant)
+    command[2] = str(scratch)
+    started = time.perf_counter()
+    try:
+        done = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=clean_environment(),
+            timeout=RUN_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
         seconds = time.perf_counter() - started
-        verdict = read_verdict(scratch)
+        return VariantResult(
+            variant, -1, "TIMEOUT", "-", None, seconds, (), (), "",
+            f"no result after {RUN_TIMEOUT_SECONDS} s",
+        )
+    seconds = time.perf_counter() - started
+    verdict = read_verdict(scratch)
     if verdict is None:
         return VariantResult(
             variant, done.returncode, "NO VERDICT", "-", None, seconds, (), (),

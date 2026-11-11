@@ -56,6 +56,19 @@ def verify_module_loaded() -> ModuleType:
     return load_module(APPS_DIR / "verify.py", "apps_verify")
 
 
+@cache
+def script_module(app_name: str, *, haunted: bool) -> ModuleType:
+    """Return the honest or haunted ``train.py`` of an app as a module.
+
+    Importing runs only the constants and definitions: ``main()`` is guarded by
+    ``__name__``, so no data is read and nothing is trained.
+    """
+    folder = APPS_DIR / app_name
+    path = folder / "haunted" / "train.py" if haunted else folder / "train.py"
+    kind = "haunted" if haunted else "honest"
+    return load_module(path, f"script_{app_name.replace('-', '_')}_{kind}")
+
+
 @dataclass(frozen=True, slots=True)
 class App:
     """One example app. ``fetch`` loads ``fetch_data.py`` when first used."""

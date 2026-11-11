@@ -72,6 +72,15 @@
   - Run `.venv/Scripts/python -m pytest apps/tests -q` and confirm the whole suite finishes in under 20 seconds (`--durations=5` shows the slowest tests) and that skipped tests are only those of `test_history.py`.
   - _Requirements: 4.1, 4.2, 5.1, 5.3_
   - **Result (task 5):** both READMEs use the numbers of tasks 3 and 4 and say they are from a run on 2026-11-11 (task 6 replaces them). The hotels README explains the 8,128 of 23,933 test rows dropped and the 15,805 rows of the honest AUC. `test_history.py` also runs its checker on synthetic histories in `tmp_path`, so only the two checks on the real apps skip (no `runs/` yet). `pytest apps/tests -q --durations=5`: 159 passed, 2 skipped (both in `test_history.py`), 11.8 s in the last run (15.9 s in the first); `ruff check apps` clean. No `runs/`, `verdict.json` or `.hex/` under either app.
+  - **Review fixes (2026-11-11, after the review of `design.md` in commit 1b8cdf5).** `drop_seen_test_rows` compares test rows with the training rows only (four identical copies, checked by an AST test); the haunted hotels script is the honest script plus exactly two leaks; `apps/verify.py` has the `possession-fixed` hotels variant; READMEs have no line numbers. Measured with `apps/verify.py` in full mode (wall times are provisional because another builder shares the CPU):
+    - Hotels haunted: exit 1, `REJECTED`, AUC 1.0000, 62.2 s. The Possession on `reservation_status`; The Peeking Spirit; warnings `split_order`, `metric`.
+    - Hotels possession-fixed: exit 1, `REJECTED`, AUC 0.9101, 71.0 s. The Peeking Spirit; no The Possession; warning `split_order`.
+    - Hotels honest: exit 0, `APPROVED`, AUC 0.9096, 87.0 s (inside the 120 s limit, but slower than the 47.6 s measured earlier on a quieter CPU). No findings, no warnings.
+    - Flights haunted: exit 1, `REJECTED`, AUC 0.7971, 56.6 s. The Prophet on `time_hour`; warnings `split_order`, `canary` (not applied), `metric`. The random split now uses the `train_test_split` default test share of 25% (the former `test_size=0.2` made the marked line longer than 88 characters).
+    - Flights split-fixed: exit 1, `REJECTED`, AUC 0.7605, 100.1 s. The Peeking Spirit; no The Prophet; warnings `split_order`, `metric`.
+    - Flights honest: exit 0, `APPROVED`, AUC 0.6193, 52.5 s. No findings, no warnings.
+    - Test rows dropped by `drop_seen_test_rows` (counted with `python -c`, real data, no audit): hotels 7,910 of 23,933 (33%), 16,023 left; flights 0 of 65,469. The 7 flights rows dropped before the review were repeats inside the test rows, which are no overlap and now stay.
+    - `pytest apps/tests -q`: 215 passed, 2 skipped (both in `test_history.py`). Both `ruff check apps` commands clean. No `runs/`, `verdict.json` or `.hex/` under either app.
 
 - [ ] 6. Final verification and record
   - Run `.venv/Scripts/python apps/verify.py hotel-cancellations` and `.venv/Scripts/python apps/verify.py flight-delays` once more, in full mode, for every variant. Check each result against the "demo arc" table in `design.md`: statuses, exit codes, ghosts, warnings.
