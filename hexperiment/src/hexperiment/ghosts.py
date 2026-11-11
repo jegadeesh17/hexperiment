@@ -45,7 +45,9 @@ CATALOG: tuple[Ghost, ...] = (
             "the metric measures memory."
         ),
         how_to_fix=(
-            "Drop exact duplicate rows before splitting, then call `hexperiment.split`."
+            "After `hexperiment.split`, drop every test row that also appears in "
+            "the training rows. Do not deduplicate the whole frame before the "
+            "split; the canary run would then end `UNVERIFIED`."
         ),
     ),
     Ghost(

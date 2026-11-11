@@ -38,6 +38,24 @@ def test_ghost_names_equal_the_constants_of_the_core_modules():
     assert find_ghost("determinism").ghost == canary.SHAPESHIFTER
 
 
+def test_the_doppelgangers_fix_removes_the_overlap_after_the_split():
+    entry = find_ghost("The Doppelganger")
+    assert entry.how_to_fix == (
+        "After `hexperiment.split`, drop every test row that also appears in the "
+        "training rows. Do not deduplicate the whole frame before the split; the "
+        "canary run would then end `UNVERIFIED`."
+    )
+
+
+def test_the_doppelgangers_catalogue_fix_agrees_with_the_finding_fix_hint():
+    # The finding says it in one clause; the catalogue adds the reason.
+    finding_fix = row_overlap.FIX
+    assert finding_fix == (
+        "after the split, drop every test row that also appears in the training rows"
+    )
+    assert finding_fix.split(", ", 1)[1] in find_ghost("row_overlap").how_to_fix
+
+
 def test_every_entry_has_all_three_texts():
     for entry in CATALOG:
         assert entry.meaning.strip()

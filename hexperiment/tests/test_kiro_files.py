@@ -246,24 +246,28 @@ def glob_regex(pattern: str, *, loose: bool) -> re.Pattern[str]:
     This approximates Kiro's matcher, which the documentation does not specify; it
     guards the intent of the rules, not Kiro's engine. Two readings bracket the
     uncertainty. Strict: ``*`` stays inside one path segment, ``**`` crosses
-    segments. Loose: ``*`` matches anything. In both, ``**/`` also matches no folder.
+    segments. Loose: ``*`` matches anything. In both, ``**/`` also matches no folder,
+    and no star matches a line feed or a carriage return (a live check showed that a
+    command with a line break matches no allow rule).
     """
+    anything = r"[^\r\n]*"
+    one_segment = r"[^/\r\n]*"
     parts: list[str] = []
     i = 0
     while i < len(pattern):
         if pattern.startswith("**/", i):
-            parts.append("(?:.*/)?")
+            parts.append(f"(?:{anything}/)?")
             i += 3
         elif pattern.startswith("**", i):
-            parts.append(".*")
+            parts.append(anything)
             i += 2
         elif pattern[i] == "*":
-            parts.append(".*" if loose else "[^/]*")
+            parts.append(anything if loose else one_segment)
             i += 1
         else:
             parts.append(re.escape(pattern[i]))
             i += 1
-    return re.compile("".join(parts), re.DOTALL)
+    return re.compile("".join(parts))
 
 
 def rule_matches(rule: dict[str, Any], subject: str, *, loose: bool) -> bool:
@@ -334,6 +338,11 @@ NOT_ALLOWED_WRITES = [
     "train.py",
     "README.md",
     "docs/DECISIONS.md",
+    "apps/verify.py",  # directly in apps/, not in an app folder
+    "apps/tests/test_x.py",  # a test file
+    "apps/x/tests/test_a.py",
+    "apps/x/conftest.py",
+    "apps/x/../y.py",  # ".." is not resolved before matching
 ]
 
 
@@ -365,7 +374,23 @@ def test_the_write_allow_list_names_only_python_files_in_app_folders():
     assert patterns
     for pattern in patterns:
         assert pattern.endswith(".py"), pattern
-        assert pattern.startswith(("apps/", "**/apps/")), pattern
+        assert pattern.startswith(("apps/*/", "**/apps/*/")), pattern
+
+
+def test_the_write_deny_list_names_dot_dot_and_test_files():
+    denied = {p for rule in rules("fs_write", "deny") for p in rule["match"]}
+    for needed in ("*..*", "**/tests/**", "**/test_*.py", "**/conftest.py"):
+        assert needed in denied, needed
+
+
+def test_no_write_or_shell_pattern_contains_a_control_character():
+    """A pattern with a line feed made every shell call fail in Kiro CLI 3.2.0."""
+    for capability in ("fs_write", "shell"):
+        for effect in ("allow", "deny"):
+            for rule in rules(capability, effect):
+                for pattern in rule["match"]:
+                    bad = [c for c in pattern if ord(c) < 0x20]
+                    assert not bad, f"{capability} {effect} pattern {pattern!r}"
 
 
 def test_the_agent_can_read_everything():
@@ -457,22 +482,25 @@ def test_the_shell_deny_list_names_chaining_characters_and_command_families():
         assert needed in denied, needed
 
 
-def test_the_shell_deny_list_names_line_feed_and_carriage_return():
-    """A line break starts a second command in a shell (Requirement 3.4)."""
-    denied = {p for rule in rules("shell", "deny") for p in rule["match"]}
-    assert "*\n*" in denied  # a real line feed inside the JSON string
-    assert "*\r*" in denied  # a real carriage return inside the JSON string
-    assert "*\\n*" not in denied  # not the two characters backslash and n
-
-
 @pytest.mark.parametrize("line_break", ["\n", "\r", "\r\n"])
-def test_a_line_break_denies_a_command_that_the_allow_list_admits(line_break):
-    plain = "hexperiment run apps/a"
-    chained = f"{plain}{line_break}whoami"
-    assert any(rule_matches(r, chained, loose=True) for r in rules("shell", "allow"))
-    assert any(rule_matches(r, chained, loose=True) for r in rules("shell", "deny"))
+@pytest.mark.parametrize("prefix", ["", ".venv/Scripts/", ".venv\\Scripts\\"])
+def test_a_command_with_a_line_break_matches_no_allow_rule(line_break, prefix):
+    """A line break starts a second command in a shell (Requirement 3.4).
+
+    No allow rule admits it, and a command that matches no allow rule is not run.
+    """
+    plain = f"{prefix}hexperiment run apps/a"
+    for chained in (
+        f"{plain}{line_break}whoami",
+        f"{plain}{line_break}",
+        f"{line_break}{plain}",
+        f"{prefix}hexperiment run apps/a{line_break}b",
+    ):
+        assert not any(
+            rule_matches(rule, chained, loose=True) for rule in rules("shell", "allow")
+        ), repr(chained)
+        assert not possibly_allowed("shell", chained)
     assert possibly_allowed("shell", plain)
-    assert not possibly_allowed("shell", chained)
 
 
 # The helpers above must catch what they claim to catch.
@@ -492,6 +520,13 @@ def test_a_line_break_denies_a_command_that_the_allow_list_admits(line_break):
         ("**/hex.toml", "a/b/hex.toml", False, True),
         ("**/hex.toml", "a/xhex.toml", False, False),
         ("**/.kiro/**", "C:/p/.kiro/agents/a.json", False, True),
+        ("apps/*", "apps/a\nb", True, False),
+        ("apps/*", "apps/a\rb", True, False),
+        ("apps/*", "apps/a\nb", False, False),
+        ("apps/**", "apps/a/b\nc", False, False),
+        ("**/x.py", "a\nb/x.py", True, False),
+        ("a*", "a\r\n", True, False),
+        ("a*", "ab c", True, True),
     ],
 )
 def test_the_glob_readings(pattern, subject, loose, expected):
@@ -673,6 +708,14 @@ def test_the_skill_explains_how_to_start_with_hexperiment_init():
     _, body = read_skill()
     assert "hexperiment init apps/<name>" in body
     assert "hexperiment init --kiro" in body
+
+
+def test_the_skill_does_not_tell_the_agent_to_ignore_a_fix_hint():
+    """The fix hint of The Doppelganger is right now; nothing needs overriding."""
+    _, body = read_skill()
+    assert "may still say" not in body
+    assert "duplicates before splitting" not in body
+    assert "Follow rule 2 instead" not in body
 
 
 def test_the_skill_says_that_thresholds_and_waivers_belong_to_the_human():

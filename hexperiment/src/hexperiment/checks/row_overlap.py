@@ -12,7 +12,7 @@ from hexperiment.models import CheckResult, Finding, Outcome, Severity
 CHECK = "row_overlap"
 GHOST = "The Doppelganger"
 LOCATION = "train vs test"
-FIX = "drop exact duplicates before splitting"
+FIX = "after the split, drop every test row that also appears in the training rows"
 
 _EVIDENCE_DECIMALS = 6
 _INDICATOR = "__hexperiment_overlap__"

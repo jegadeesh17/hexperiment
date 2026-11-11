@@ -87,8 +87,6 @@ Checks without a ghost:
 | `waiver` | A waiver in `hex.toml` matched no finding (a warning). A human removes it. |
 | `input` | `audit` received invalid input, so no check ran and the verdict is `REJECTED`. The message says what to fix. |
 
-The fix hint of a finding or of `explain_ghost` for The Doppelganger may still say to drop duplicates before splitting. Follow rule 2 instead: deduplicating the whole frame before the split leaves the canary run unverified.
-
 ## The loop
 
 To hand an app to an agent until the full audit approves it, start the workflow in the Kiro CLI:

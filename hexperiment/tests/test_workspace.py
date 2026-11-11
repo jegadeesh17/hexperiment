@@ -20,6 +20,7 @@ from hexperiment.workspace import (
     is_app,
     relative_posix,
     resolve_app,
+    resolve_inside,
     resolve_workspace,
 )
 
@@ -585,3 +586,36 @@ def test_discover_apps_ignores_folders_with_only_one_of_the_files(workspace):
     half.mkdir(parents=True)
     (half / "hex.toml").write_text(HEX_TOML.format(name="half"), encoding="utf-8")
     assert discover_apps(workspace) == ()
+
+
+# --- resolve_inside ------------------------------------------------------------------
+
+
+def test_resolve_inside_returns_the_resolved_path_of_a_file_that_does_not_exist(
+    tmp_path,
+):
+    root = tmp_path / "project"
+    root.mkdir()
+    found = resolve_inside(root / "apps" / ".." / "verdict.json", root, "the file")
+    assert found == (root / "verdict.json").resolve()
+
+
+def test_resolve_inside_refuses_a_path_that_leaves_the_workspace(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    with pytest.raises(HexInputError, match="outside the workspace") as caught:
+        resolve_inside(root / ".." / "other.json", root, "the verdict file")
+    assert "the verdict file" in str(caught.value)
+
+
+def test_resolve_inside_refuses_a_link_that_leaves_the_workspace(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    target = tmp_path / "other.json"
+    target.write_text("{}", encoding="utf-8")
+    try:
+        (root / "link.json").symlink_to(target)
+    except (OSError, NotImplementedError) as error:
+        pytest.skip(f"this platform refuses to create file links ({error!r})")
+    with pytest.raises(HexInputError, match="outside the workspace"):
+        resolve_inside(root / "link.json", root, "the file")

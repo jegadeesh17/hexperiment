@@ -440,3 +440,143 @@ def test_the_verdict_json_content_is_passed_through_unchanged(workspace):
     assert json.dumps(shown, sort_keys=True) == json.dumps(
         verdict.to_dict(), sort_keys=True
     )
+
+
+# --- files that are not valid UTF-8 (Requirement 4.5) --------------------------------
+
+NOT_UTF8 = b"\xff\xfe not utf-8 \xe9"
+
+
+def test_get_verdict_names_a_verdict_json_that_is_not_utf8(workspace):
+    app = make_app(workspace / "apps" / "churn")
+    (app / "verdict.json").write_bytes(NOT_UTF8)
+    with pytest.raises(HexInputError, match="UTF-8") as caught:
+        service.get_verdict(workspace, "apps/churn")
+    assert str(app / "verdict.json") in str(caught.value)
+
+
+def test_get_history_names_a_history_file_that_is_not_utf8(workspace):
+    app = make_app(workspace / "apps" / "churn")
+    folder = write_run(app, make_verdict(OLD))
+    (folder / "verdict.json").write_bytes(NOT_UTF8)
+    with pytest.raises(HexInputError) as caught:
+        service.get_history(workspace, "apps/churn")
+    assert str(folder / "verdict.json") in str(caught.value)
+
+
+def test_model_card_names_a_card_that_is_not_utf8(workspace):
+    app = make_app(workspace / "apps" / "churn")
+    folder = write_run(app, make_verdict(OLD))
+    (folder / "model_card.md").write_bytes(NOT_UTF8)
+    with pytest.raises(HexInputError, match="UTF-8") as caught:
+        service.model_card(workspace, "apps/churn")
+    assert str(folder / "model_card.md") in str(caught.value)
+
+
+def test_model_card_names_a_history_file_that_is_not_utf8(workspace):
+    app = make_app(workspace / "apps" / "churn")
+    folder = write_run(app, make_verdict(OLD))
+    (folder / "verdict.json").write_bytes(NOT_UTF8)
+    with pytest.raises(HexInputError) as caught:
+        service.model_card(workspace, "apps/churn")
+    assert str(folder / "verdict.json") in str(caught.value)
+
+
+def test_list_apps_keeps_the_other_apps_when_one_hex_toml_is_not_utf8(workspace):
+    bad = make_app(workspace / "apps" / "bad")
+    (bad / "hex.toml").write_bytes(b'[app]\nname = "caf\xe9"\n')
+    make_app(workspace / "apps" / "fine", name="Fine")
+    entries = service.list_apps(workspace)["apps"]
+    assert [e["path"] for e in entries] == ["apps/bad", "apps/fine"]
+    assert entries[0]["name"] == "bad"
+    assert "UTF-8" in entries[0]["problem"]
+    assert str(bad / "hex.toml") in entries[0]["problem"]
+    assert entries[1] == {
+        "name": "Fine",
+        "path": "apps/fine",
+        "status": "none",
+        "problem": None,
+    }
+
+
+def test_list_apps_reports_a_verdict_json_that_is_not_utf8_as_a_problem(workspace):
+    app = make_app(workspace / "apps" / "churn")
+    (app / "verdict.json").write_bytes(NOT_UTF8)
+    [entry] = service.list_apps(workspace)["apps"]
+    assert entry["status"] == "none"
+    assert "verdict.json" in entry["problem"]
+
+
+# --- links that lead out of the workspace (Requirements 4.2, 4.5) --------------------
+
+
+def make_link(link: Path, target: Path) -> None:
+    """Create a file link, or skip the test when the platform refuses to."""
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError) as error:
+        pytest.skip(f"this platform refuses to create file links ({error!r})")
+
+
+@pytest.fixture
+def outside(tmp_path) -> Path:
+    folder = tmp_path / "outside"
+    folder.mkdir()
+    return folder
+
+
+def test_get_verdict_refuses_a_verdict_json_that_links_outside_the_workspace(
+    workspace, outside
+):
+    app = make_app(workspace / "apps" / "churn")
+    secret = outside / "secret.json"
+    secret.write_text(to_json(make_verdict(status=Status.APPROVED)), encoding="utf-8")
+    make_link(app / "verdict.json", secret)
+    with pytest.raises(HexInputError, match="outside the workspace") as caught:
+        service.get_verdict(workspace, "apps/churn")
+    assert str(secret.resolve()) in str(caught.value)
+
+
+def test_get_verdict_refuses_a_link_to_a_missing_file_outside_the_workspace(
+    workspace, outside
+):
+    app = make_app(workspace / "apps" / "churn")
+    make_link(app / "verdict.json", outside / "missing.json")
+    with pytest.raises(HexInputError, match="outside the workspace"):
+        service.get_verdict(workspace, "apps/churn")
+
+
+def test_get_verdict_follows_a_link_that_stays_inside_the_workspace(workspace):
+    app = make_app(workspace / "apps" / "churn")
+    verdict = make_verdict(status=Status.APPROVED)
+    real = workspace / "shared" / "verdict.json"
+    real.parent.mkdir()
+    real.write_text(to_json(verdict), encoding="utf-8")
+    make_link(app / "verdict.json", real)
+    result = service.get_verdict(workspace, "apps/churn")
+    assert result == {"found": True, "verdict": verdict.to_dict()}
+
+
+def test_model_card_refuses_a_card_that_links_outside_the_workspace(
+    workspace, outside
+):
+    app = make_app(workspace / "apps" / "churn")
+    folder = write_run(app, make_verdict(OLD))
+    secret = outside / "secret.md"
+    secret.write_text("# not for the agent\n", encoding="utf-8")
+    (folder / "model_card.md").unlink()
+    make_link(folder / "model_card.md", secret)
+    with pytest.raises(HexInputError, match="outside the workspace") as caught:
+        service.model_card(workspace, "apps/churn")
+    assert str(secret.resolve()) in str(caught.value)
+
+
+def test_model_card_follows_a_link_that_stays_inside_the_workspace(workspace):
+    app = make_app(workspace / "apps" / "churn")
+    folder = write_run(app, make_verdict(OLD))
+    real = workspace / "shared" / "card.md"
+    real.parent.mkdir()
+    real.write_text("# shared card\n", encoding="utf-8")
+    (folder / "model_card.md").unlink()
+    make_link(folder / "model_card.md", real)
+    assert service.model_card(workspace, "apps/churn") == "# shared card\n"

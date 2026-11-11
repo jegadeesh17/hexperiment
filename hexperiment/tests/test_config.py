@@ -191,6 +191,24 @@ def test_invalid_toml_names_the_path(tmp_path: Path) -> None:
     assert str(tmp_path / "hex.toml") in str(caught.value)
 
 
+def test_a_file_that_is_not_utf8_is_a_hex_input_error_naming_the_path(
+    tmp_path: Path,
+) -> None:
+    # 0xFF can never start a UTF-8 sequence; a Latin-1 "é" in a comment is the
+    # usual real cause.
+    (tmp_path / "hex.toml").write_bytes(b'[app]\nname = "caf\xe9"\n')
+    with pytest.raises(HexInputError, match="UTF-8") as caught:
+        load_config(tmp_path)
+    assert str(tmp_path / "hex.toml") in str(caught.value)
+
+
+def test_a_utf16_file_is_a_hex_input_error_naming_the_path(tmp_path: Path) -> None:
+    (tmp_path / "hex.toml").write_bytes('[app]\nname = "x"\n'.encode("utf-16"))
+    with pytest.raises(HexInputError) as caught:
+        load_config(tmp_path)
+    assert str(tmp_path / "hex.toml") in str(caught.value)
+
+
 def test_load_config_reads_the_file(tmp_path: Path) -> None:
     (tmp_path / "hex.toml").write_text(
         '[app]\nname = "x"\n[data]\npath = "d.csv"\n[target]\ncolumn = "y"\n'

@@ -128,8 +128,32 @@ def test_the_first_tier_wins_over_the_second():
     assert paths(event) == ("apps/x/train.py",)
 
 
-def test_the_second_tier_is_used_when_the_first_has_no_python_path():
-    event = {"file_path": "apps/x/hex.toml", "saved": "apps/x/train.py"}
+def test_the_second_tier_is_used_when_the_event_has_no_value_under_a_path_key():
+    assert paths({"saved": "apps/x/train.py", "cwd": "C:\\p"}) == ("apps/x/train.py",)
+    assert paths({"file_path": {}, "saved": "apps/x/train.py"}) == ("apps/x/train.py",)
+    assert paths({"files": [], "saved": "apps/x/train.py"}) == ("apps/x/train.py",)
+
+
+def test_a_path_key_that_names_a_non_python_file_stops_the_second_tier():
+    event = {"file_path": "apps/x/hex.toml", "note": "apps/y/train.py"}
+    assert paths(event) == ()
+
+
+@pytest.mark.parametrize(
+    "value", [None, 5, True, 3.5, "", "apps/x/notes.md", ["apps/x/hex.toml"], [None]]
+)
+def test_any_value_under_a_path_key_stops_the_second_tier(value):
+    event = {"file_path": value, "note": "apps/y/train.py"}
+    assert paths(event) == ()
+
+
+def test_a_value_under_a_nested_path_key_stops_the_second_tier():
+    event = {"tool_input": {"path": "apps/x/hex.toml"}, "note": "apps/y/train.py"}
+    assert paths(event) == ()
+
+
+def test_a_python_path_under_a_path_key_still_wins_over_other_strings():
+    event = {"note": "apps/y/train.py", "file_path": "apps/x/train.py"}
     assert paths(event) == ("apps/x/train.py",)
 
 

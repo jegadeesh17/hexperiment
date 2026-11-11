@@ -108,6 +108,30 @@ def find_app_for_file(file: Path, workspace: Path) -> Path | None:
     return None
 
 
+def resolve_inside(path: Path, workspace: Path, what: str) -> Path:
+    """``path`` with links followed; ``HexInputError`` if it leaves the workspace.
+
+    The path need not exist. ``what`` names the file in the message. A link inside
+    the workspace that points outside it is refused (Requirements 4.2, 4.5).
+    """
+    root = workspace.resolve()
+    try:
+        resolved = path.resolve()
+    except (OSError, ValueError, RuntimeError) as error:
+        raise HexInputError(
+            f"{what} {path} cannot be resolved ({error!r}).",
+            "Check that the path and any link in it are valid.",
+        ) from None
+    if not _is_inside(resolved, root):
+        raise HexInputError(
+            f"{what} {path} resolves to {resolved}, which is outside the workspace "
+            f"{root}.",
+            "Replace the link with a regular file inside the workspace, or run the "
+            "app again to write a new one.",
+        )
+    return resolved
+
+
 def resolve_app(workspace: Path, app: str) -> Path:
     """The resolved folder of ``app``, or ``HexInputError`` saying why not.
 

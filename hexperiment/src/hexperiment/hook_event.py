@@ -40,8 +40,10 @@ def candidate_paths(event_text: str) -> tuple[str, ...]:
     ``MAX_PATH_LENGTH`` or holds a control character, which rules out file
     contents and prompts. Quotes are stripped, a ``file://`` URI becomes a path,
     any other URI is dropped, and only names ending in ``.py`` are kept. Tier 2
-    is used only when tier 1 gave no such name. Text that is not a JSON object
-    or array gives ``()``.
+    is used only when the event has no value at all under a path key: an event
+    that names a file under a path key and the file is not Python gives ``()``,
+    so a stray string elsewhere in the event cannot start a run. Text that is not
+    a JSON object or array gives ``()``.
     """
     try:
         event = json.loads(event_text)
@@ -49,14 +51,23 @@ def candidate_paths(event_text: str) -> tuple[str, ...]:
         return ()
     if not isinstance(event, dict | list):
         return ()
-    primary, secondary = _collect(event)
-    return tuple(dict.fromkeys(primary or secondary))[:MAX_CANDIDATES]
+    primary, secondary, has_path_value = _collect(event)
+    return tuple(dict.fromkeys(primary if has_path_value else secondary))[
+        :MAX_CANDIDATES
+    ]
 
 
-def _collect(event: dict[str, Any] | list[Any]) -> tuple[list[str], list[str]]:
-    """Walk ``event`` in document order without recursion, within the limits."""
+def _collect(
+    event: dict[str, Any] | list[Any],
+) -> tuple[list[str], list[str], bool]:
+    """Walk ``event`` in document order without recursion, within the limits.
+
+    Returns the tier 1 and tier 2 paths and whether any value (of any type, even
+    one that is not a path) sits directly under a path key.
+    """
     primary: list[str] = []
     secondary: list[str] = []
+    has_path_value = False
     stack: list[tuple[Any, int, bool]] = [(event, 0, False)]
     visited = 0
     while stack:
@@ -64,16 +75,27 @@ def _collect(event: dict[str, Any] | list[Any]) -> tuple[list[str], list[str]]:
         visited += 1
         if visited > MAX_EVENT_NODES:
             break
+        if isinstance(value, dict | list):
+            if depth < MAX_EVENT_DEPTH:
+                stack.extend(_children(value, depth, keyed))
+            continue
+        has_path_value = has_path_value or keyed
         if isinstance(value, str):
             path = _python_path(value)
             if path is not None:
                 (primary if keyed else secondary).append(path)
-        elif depth < MAX_EVENT_DEPTH and isinstance(value, dict):
-            children = [(v, depth + 1, _is_path_key(k)) for k, v in value.items()]
-            stack.extend(reversed(children))
-        elif depth < MAX_EVENT_DEPTH and isinstance(value, list):
-            stack.extend((item, depth + 1, keyed) for item in reversed(value))
-    return primary, secondary
+    return primary, secondary, has_path_value
+
+
+def _children(
+    value: dict[str, Any] | list[Any], depth: int, keyed: bool
+) -> list[tuple[Any, int, bool]]:
+    """The children of a container, pushed so that they pop in document order."""
+    if isinstance(value, dict):
+        children = [(v, depth + 1, _is_path_key(k)) for k, v in value.items()]
+    else:
+        children = [(item, depth + 1, keyed) for item in value]
+    return children[::-1]
 
 
 def _is_path_key(key: str) -> bool:

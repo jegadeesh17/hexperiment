@@ -51,7 +51,9 @@ def test_copied_test_rows_are_reported_as_the_doppelganger() -> None:
     assert finding.severity is Severity.ERROR
     assert finding.location == "train vs test"
     assert finding.evidence == {"rows": 3, "test_rows": 20, "fraction": 0.15}
-    assert finding.fix == "drop exact duplicates before splitting"
+    assert finding.fix == (
+        "after the split, drop every test row that also appears in the training rows"
+    )
     assert "3 of 20" in finding.message
 
 

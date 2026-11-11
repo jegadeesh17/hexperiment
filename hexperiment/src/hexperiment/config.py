@@ -129,6 +129,11 @@ def load_config(app_dir: Path) -> HexConfig:
             f"Create {CONFIG_FILENAME} in the app folder with [data], [target] "
             "and [metric] tables.",
         ) from None
+    except UnicodeDecodeError:
+        raise HexInputError(
+            f"{source} is not valid UTF-8 text.",
+            f"Save {CONFIG_FILENAME} as UTF-8; TOML files must be UTF-8.",
+        ) from None
     except tomllib.TOMLDecodeError as error:
         raise HexInputError(
             f"{source} is not valid TOML ({error}).",

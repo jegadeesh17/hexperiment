@@ -1126,7 +1126,10 @@ def audit_result(*, input_error: bool = False) -> DataAuditResult:
         location="train vs test",
         message="3 of 20 test rows also appear in train",
         evidence={"rows": 3, "test_rows": 20, "fraction": 0.15},
-        fix="drop exact duplicates before splitting",
+        fix=(
+            "after the split, drop every test row that also appears in the "
+            "training rows"
+        ),
     )
     return DataAuditResult(
         run_id=RUN,

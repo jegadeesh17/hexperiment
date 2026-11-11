@@ -136,12 +136,32 @@ def test_the_real_event_spelling_with_a_lower_case_drive_runs_the_app(workspace)
     assert output.endswith(notice("apps/churn"))
 
 
-def test_the_app_name_in_the_notice_has_forward_slashes_and_keeps_spaces(workspace):
+def test_the_app_name_in_the_notice_has_forward_slashes(workspace):
+    app = make_app(workspace / "apps" / "churn")
+    output = handle_hook(
+        event(file_path=str(app / "train.py")), workspace=workspace, run=StubRun()
+    )
+    assert output.endswith("run: hexperiment run apps/churn")
+    assert "\\" not in output.splitlines()[-1]
+
+
+def test_an_app_path_with_a_space_is_quoted_in_the_notice(workspace):
     app = make_app(workspace / "apps" / "my model")
     output = handle_hook(
         event(file_path=str(app / "train.py")), workspace=workspace, run=StubRun()
     )
-    assert output.endswith("run: hexperiment run apps/my model")
+    assert output.endswith('run: hexperiment run "apps/my model"')
+
+
+@pytest.mark.parametrize("name", ["a\tb", "a b", "a\u00a0b"])
+def test_any_whitespace_in_the_app_path_gets_quotes(name):
+    output = format_hook_output(UNVERIFIED, f"apps/{name}")
+    assert output.endswith(f'run: hexperiment run "apps/{name}"')
+
+
+def test_an_app_path_without_whitespace_is_not_quoted():
+    output = format_hook_output(UNVERIFIED, "apps/my-model_2")
+    assert output.endswith("run: hexperiment run apps/my-model_2")
 
 
 def test_an_app_at_the_workspace_root_is_named_with_a_dot(workspace):
@@ -232,6 +252,108 @@ def test_a_path_with_dot_dot_that_leaves_the_workspace_is_skipped(tmp_path):
     text = event(file_path="../foreign/train.py")
     assert handle_hook(text, workspace=workspace, run=run) == ""
     assert run.calls == []
+
+
+def fail_on_file_system_access(monkeypatch, only_if=None):
+    """Make the calls that reach the file system fail.
+
+    With ``only_if``, a call fails only for a path that the function accepts, so
+    a test can let a later, local candidate through.
+    """
+
+    def guard(original):
+        def checked(path, *args, **kwargs):
+            if only_if is None or only_if(str(path)):
+                raise AssertionError(f"file system access to {str(path)!r}")
+            return original(path, *args, **kwargs)
+
+        return checked
+
+    def guard_method(original):
+        def checked(self, *args, **kwargs):
+            if only_if is None or only_if(str(self)):
+                raise AssertionError(f"file system access to {str(self)!r}")
+            return original(self, *args, **kwargs)
+
+        return checked
+
+    for name in ("is_file", "exists", "is_dir", "resolve", "stat", "lstat"):
+        monkeypatch.setattr(Path, name, guard_method(getattr(Path, name)))
+    for name in ("stat", "lstat"):
+        monkeypatch.setattr(os, name, guard(getattr(os, name)))
+    for name in ("exists", "isfile", "isdir", "realpath"):
+        monkeypatch.setattr(os.path, name, guard(getattr(os.path, name)))
+
+
+UNC_EVENT = {"file_path": "\\\\netserver\\share\\apps\\x\\train.py"}
+UNC_URI_EVENT = {"uri": "file://netserver/share/apps/x/train.py"}
+
+
+@pytest.mark.skipif(os.name != "nt", reason="UNC paths exist only on Windows")
+def test_a_unc_path_is_skipped_without_touching_the_file_system(workspace, monkeypatch):
+    make_app(workspace / "apps" / "x")
+    run = StubRun()
+    text = event(**UNC_EVENT)
+    fail_on_file_system_access(monkeypatch)
+    assert handle_hook(text, workspace=workspace, run=run) == ""
+    assert run.calls == []
+
+
+def test_a_file_uri_with_a_host_is_skipped_without_touching_the_file_system(
+    workspace, monkeypatch
+):
+    make_app(workspace / "apps" / "x")
+    run = StubRun()
+    text = event(**UNC_URI_EVENT)
+    fail_on_file_system_access(monkeypatch)
+    assert handle_hook(text, workspace=workspace, run=run) == ""
+    assert run.calls == []
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "../foreign/train.py",
+        "apps/../../foreign/train.py",
+        "apps/x/../../../foreign/train.py",
+        "/elsewhere/apps/x/train.py",
+    ],
+)
+def test_a_path_outside_the_workspace_is_skipped_by_its_text_alone(
+    workspace, monkeypatch, path
+):
+    make_app(workspace / "apps" / "x")
+    run = StubRun()
+    text = event(file_path=path)
+    fail_on_file_system_access(monkeypatch)
+    assert handle_hook(text, workspace=workspace, run=run) == ""
+    assert run.calls == []
+
+
+def test_a_network_candidate_before_a_local_one_does_not_stop_the_local_run(
+    workspace, monkeypatch
+):
+    app = make_app(workspace / "apps" / "x")
+    local = str(app / "train.py")
+    candidates = ["file://netserver/share/apps/x/train.py"]
+    if os.name == "nt":
+        candidates.insert(0, "\\\\netserver\\share\\apps\\x\\train.py")
+    text = event(files=[*candidates, local])
+    fail_on_file_system_access(monkeypatch, only_if=lambda p: "netserver" in p)
+    run = StubRun()
+    output = handle_hook(text, workspace=workspace, run=run)
+    assert [call[0] for call in run.calls] == [app.resolve()]
+    assert output.endswith(notice("apps/x"))
+
+
+def test_a_path_with_dot_dot_segments_inside_the_workspace_is_normalised(
+    workspace,
+):
+    app = make_app(workspace / "apps" / "x")
+    run = StubRun()
+    dotted = str(workspace / "apps" / "y" / ".." / "x" / "train.py")
+    handle_hook(event(file_path=dotted), workspace=workspace, run=run)
+    assert [call[0] for call in run.calls] == [app.resolve()]
 
 
 def test_the_first_usable_candidate_wins(tmp_path):

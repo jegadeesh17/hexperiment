@@ -21,6 +21,7 @@ from hexperiment.workspace import (
     discover_apps,
     relative_posix,
     resolve_app,
+    resolve_inside,
 )
 
 MODE_FULL = "full"
@@ -54,9 +55,13 @@ def list_apps(workspace: Path) -> dict[str, Any]:
 
 
 def get_verdict(workspace: Path, app: str) -> dict[str, Any]:
-    """The app's current ``verdict.json``, or a message that it has none."""
+    """The app's current ``verdict.json``, or a message that it has none.
+
+    The file is resolved first and refused when a link leads outside the
+    workspace. A file that is not valid UTF-8 or JSON raises ``HexInputError``.
+    """
     app_dir = resolve_app(workspace, app)
-    path = app_dir / VERDICT_FILENAME
+    path = resolve_inside(app_dir / VERDICT_FILENAME, workspace, "the verdict file")
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -68,6 +73,8 @@ def get_verdict(workspace: Path, app: str) -> dict[str, Any]:
                 "create one."
             ),
         }
+    except UnicodeDecodeError:
+        raise _not_utf8(path) from None
     except OSError as error:
         raise _unreadable(path, repr(error)) from None
     try:
@@ -149,9 +156,16 @@ def model_card(workspace: Path, app: str) -> str:
             "Never edit verdict.json by hand; restore the run folder from version "
             "control.",
         )
-    card = app_dir / RUNS_DIRNAME / run_id / CARD_FILENAME
+    card = resolve_inside(
+        app_dir / RUNS_DIRNAME / run_id / CARD_FILENAME, workspace, "the model card"
+    )
     try:
         return card.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        raise HexInputError(
+            f"the model card {card} is not valid UTF-8 text.",
+            "Never edit a model card by hand; run run_audit again to write a new one.",
+        ) from None
     except OSError as error:
         raise HexInputError(
             f"the model card {card} cannot be read ({error!r}).",
@@ -191,5 +205,12 @@ def _current_status(app_dir: Path) -> tuple[str, str | None]:
 def _unreadable(path: Path, reason: str) -> HexInputError:
     return HexInputError(
         f"the file {path} cannot be read ({reason}).",
+        "Never edit verdict.json by hand; run the app again to write a new one.",
+    )
+
+
+def _not_utf8(path: Path) -> HexInputError:
+    return HexInputError(
+        f"the file {path} is not valid UTF-8 text.",
         "Never edit verdict.json by hand; run the app again to write a new one.",
     )

@@ -8,6 +8,7 @@ protocol, so nothing here prints.
 """
 
 from collections.abc import Callable
+from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as installed_version
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,7 @@ from hexperiment.workspace import RunApp, discover_apps, resolve_workspace
 
 SERVER_NAME = "hexperiment"
 PACKAGE_NAME = "hexperiment"
+UNKNOWN_VERSION = "0+unknown"
 MARKDOWN = "text/markdown"
 INSTRUCTIONS = (
     "Hexperiment audits ML training scripts for data leakage. Apps are the folders "
@@ -156,4 +158,8 @@ def _card_reader(root: Path, app: str) -> Callable[[], str]:
 
 
 def _package_version() -> str:
-    return installed_version(PACKAGE_NAME)
+    """The installed version, or ``0+unknown`` when the package metadata is missing."""
+    try:
+        return installed_version(PACKAGE_NAME)
+    except PackageNotFoundError:
+        return UNKNOWN_VERSION

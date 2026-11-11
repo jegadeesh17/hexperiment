@@ -8,6 +8,7 @@ import json
 import sys
 import threading
 import time
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import anyio
@@ -15,6 +16,7 @@ import pytest
 from mcp import Client, MCPError
 
 import hexperiment.mcp_server as mcp_package
+from hexperiment.mcp_server import server as server_module
 from hexperiment.mcp_server import service
 from hexperiment.mcp_server.server import build_server
 from hexperiment.models import RunOutcome, Severity, Status
@@ -346,6 +348,90 @@ async def test_an_app_at_the_workspace_root_has_a_readable_card(workspace):
         tool = await client.call_tool("get_history", {"app": "."})
     assert card.contents[0].text == "# root card\n"
     assert payload(tool)["app"] == "."
+
+
+# --- files that are not valid UTF-8 and links out of the workspace (Requirement 4.5) --
+
+NOT_UTF8 = b"\xff\xfe not utf-8 \xe9"
+
+
+async def test_the_server_starts_when_one_hex_toml_is_not_utf8(workspace, churn):
+    bad = make_app(workspace / "apps" / "bad")
+    (bad / "hex.toml").write_bytes(b'[app]\nname = "caf\xe9"\n')
+    async with Client(build_server(workspace, run=StubRun())) as client:
+        listed = await client.call_tool("list_apps", {})
+        resources = (await client.list_resources()).resources
+    assert not listed.is_error
+    entries = {entry["path"]: entry for entry in payload(listed)["apps"]}
+    assert set(entries) == {"apps/bad", "apps/churn"}
+    assert "UTF-8" in entries["apps/bad"]["problem"]
+    assert entries["apps/churn"]["problem"] is None
+    assert service.resource_uri("apps/churn") in {str(r.uri) for r in resources}
+
+
+async def test_a_verdict_json_that_is_not_utf8_is_an_error_result_naming_the_file(
+    workspace, churn
+):
+    (churn / "verdict.json").write_bytes(NOT_UTF8)
+    async with Client(build_server(workspace, run=StubRun())) as client:
+        result = await client.call_tool("get_verdict", {"app": "apps/churn"})
+    assert "UTF-8" in error_text(result)
+    assert str(churn / "verdict.json") in error_text(result)
+
+
+async def test_a_history_file_that_is_not_utf8_is_an_error_naming_the_file(
+    workspace, churn
+):
+    folder = write_run(churn, make_verdict(OLD))
+    (folder / "verdict.json").write_bytes(NOT_UTF8)
+    async with Client(build_server(workspace, run=StubRun())) as client:
+        result = await client.call_tool("get_history", {"app": "apps/churn"})
+    assert str(folder / "verdict.json") in error_text(result)
+
+
+async def test_a_model_card_that_is_not_utf8_is_a_resource_error_naming_the_file(
+    workspace, churn
+):
+    folder = write_run(churn, make_verdict(OLD))
+    (folder / "model_card.md").write_bytes(NOT_UTF8)
+    async with Client(build_server(workspace, run=StubRun())) as client:
+        with pytest.raises(MCPError, match="UTF-8"):
+            await client.read_resource(service.resource_uri("apps/churn"))
+
+
+async def test_a_verdict_json_that_links_outside_the_workspace_is_an_error_result(
+    tmp_path, workspace, churn
+):
+    secret = tmp_path / "secret.json"
+    secret.write_text('{"status": "APPROVED"}', encoding="utf-8")
+    try:
+        (churn / "verdict.json").symlink_to(secret)
+    except (OSError, NotImplementedError) as error:
+        pytest.skip(f"this platform refuses to create file links ({error!r})")
+    async with Client(build_server(workspace, run=StubRun())) as client:
+        result = await client.call_tool("get_verdict", {"app": "apps/churn"})
+    assert "outside the workspace" in error_text(result)
+
+
+def test_the_package_version_is_the_installed_one():
+    assert server_module._package_version() == version("hexperiment")
+
+
+def test_the_package_version_falls_back_when_the_metadata_is_missing(monkeypatch):
+    def missing(name: str) -> str:
+        raise PackageNotFoundError(name)
+
+    monkeypatch.setattr(server_module, "installed_version", missing)
+    assert server_module._package_version() == "0+unknown"
+
+
+async def test_a_server_without_package_metadata_still_starts(workspace, monkeypatch):
+    def missing(name: str) -> str:
+        raise PackageNotFoundError(name)
+
+    monkeypatch.setattr(server_module, "installed_version", missing)
+    async with Client(build_server(workspace, run=StubRun())) as client:
+        assert {t.name for t in (await client.list_tools()).tools} == TOOLS
 
 
 # --- standard output carries the protocol --------------------------------------------

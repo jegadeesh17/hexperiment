@@ -251,6 +251,65 @@ def test_the_training_template_is_valid_python_that_ends_with_an_audit():
     assert "random_state=0" in ast.unparse(tree)
 
 
+def _function_source(source: str, name: str) -> str:
+    tree = ast.parse(source)
+    (node,) = [
+        n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == name
+    ]
+    segment = ast.get_source_segment(source, node)
+    assert segment is not None
+    return segment
+
+
+def test_the_training_template_drops_the_seen_test_rows_right_after_the_split():
+    tree = ast.parse(template_bytes("app/train.py.tmpl").decode("utf-8"))
+    calls = [
+        ast.unparse(node.func)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+    ]
+    assert calls.count("drop_seen_test_rows") == 1
+    assert calls.index("hexperiment.split") < calls.index("drop_seen_test_rows")
+    assert calls.index("drop_seen_test_rows") < calls.index("model.fit")
+    assert calls.index("drop_seen_test_rows") < calls.index("hexperiment.audit")
+    # The result replaces `test`, over the features and the target, and nothing
+    # is deduplicated before the split.
+    assigns = [
+        ast.unparse(node)
+        for node in tree.body
+        if isinstance(node, ast.Assign) and "drop_seen_test_rows" in ast.unparse(node)
+    ]
+    assert assigns == ["test = drop_seen_test_rows(train, test, FEATURES + [TARGET])"]
+    assert "drop_duplicates" not in ast.unparse(tree)
+
+
+def test_the_template_function_is_the_one_of_the_hotel_app():
+    hotel = REPOSITORY_DIR / "apps" / "hotel-cancellations" / "train.py"
+    assert hotel.is_file(), f"{hotel} is missing"
+    template = template_bytes("app/train.py.tmpl").decode("utf-8")
+    name = "drop_seen_test_rows"
+    assert _function_source(template, name) == _function_source(
+        hotel.read_text(encoding="utf-8"), name
+    )
+
+
+def test_the_template_function_removes_only_the_test_rows_seen_in_training():
+    template = template_bytes("app/train.py.tmpl").decode("utf-8")
+    namespace: dict[str, object] = {"pd": pd}
+    exec(_function_source(template, "drop_seen_test_rows"), namespace)
+    drop = namespace["drop_seen_test_rows"]
+    train = pd.DataFrame({"a": [1, 1, 2, np.nan], "target": [0, 0, 1, 1]})
+    test = pd.DataFrame(
+        {"a": [1, 3, 3, np.nan, 2], "target": [0, 0, 0, 1, 0]},
+        index=[10, 11, 12, 13, 14],
+    )
+    kept = drop(train, test, ["a", "target"])
+    # Rows 10 and 13 also occur in train (NaN equals NaN); row 14 has another
+    # target; the repeated row 3 stays; the index labels are kept.
+    assert list(kept.index) == [11, 12, 14]
+    assert len(train) == 4
+
+
 def test_the_package_data_pattern_covers_every_template_file():
     pyproject = tomllib.loads((PROJECT_DIR / "pyproject.toml").read_text("utf-8"))
     patterns = pyproject["tool"]["setuptools"]["package-data"]["hexperiment"]
