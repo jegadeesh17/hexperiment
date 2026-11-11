@@ -1,0 +1,5 @@
+# Requirement 17.3: scenario 3
+def add_category_rates(df):
+    out = df.copy()
+    out["category_rate"] = out.groupby("category")["target"].transform("mean")
+    return out

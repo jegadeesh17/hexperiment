@@ -125,7 +125,7 @@
   - Add scenarios 8 (`input_error`: wrong `y_score` length gives `REJECTED`, exit 1, one `input` finding, only the normal execution ran), 9 (`timeout`: `time.sleep` longer than `timeout_seconds = 1`; exit 2, no new `runs/` folder) and 10 (`no_audit`: exit 2). Scenarios 9 and 10 first place an `APPROVED` `verdict.json` in the app folder and assert that it no longer exists afterwards.
   - _Requirements: 4.7, 13.3, 16.1, 16.2, 16.3, 16.4, 16.5_
 
-- [ ] 17. Canary detection scenarios (1 to 7 and 11)
+- [x] 17. Canary detection scenarios (1 to 7 and 11)
   - Add the script templates under `hexperiment/tests/fixtures/scripts/<scenario>/` and the scenarios to `hexperiment/tests/test_canary_scripts.py`. This is the first point at which they can run, because they need the scramble, the canary decision, the audit and the command together.
   - Leak scenarios, each expected `REJECTED` with The Peeking Spirit: 1 `mean_impute_global` (mean over all rows before the split, plus a `split_order` warning at that line), 2 `scaler_global` (scaler fitted on all rows), 3 `helper_leak` (per-category target means computed in `helpers.py`, and no `split_order` warning), 11 `target_encoding_global` (`groupby(...).transform("mean")` of the target over all rows in `train.py`, plus a `split_order` warning at that line).
   - Clean and degraded scenarios: 4 `train_only_fit` (`APPROVED`, exit 0, canary `passed`), 5 `unrelated_fit` (a scaler fitted on a separate synthetic dataset; `APPROVED`, canary `passed`, `split_order` warning only), 6 `no_seed` (`UNVERIFIED`, exit 3, The Shapeshifter and no The Peeking Spirit), 7 `direct_read` (`pandas.read_csv` instead of `hexperiment.load`; `UNVERIFIED`, canary `not applied`, warning).

@@ -1,0 +1,36 @@
+# Requirement 17.3: scenario 5, a scaler fitted on a separate synthetic dataset
+import hexperiment
+import numpy as np
+import pandas as pd
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import FunctionTransformer, StandardScaler
+
+FEATURES = ["x1", "x2"]
+
+reference = pd.DataFrame(
+    np.random.default_rng(1).normal(size=(200, 2)), columns=FEATURES
+)
+scaler = StandardScaler().fit(reference)
+
+df = hexperiment.load()
+train, test = hexperiment.split(df)
+
+model = Pipeline(
+    [
+        ("scale", FunctionTransformer(scaler.transform)),
+        ("impute", SimpleImputer(strategy="mean")),
+        ("model", LogisticRegression(random_state=0)),
+    ]
+)
+model.fit(train[FEATURES], train["target"])
+
+hexperiment.audit(
+    train,
+    test,
+    y_score=model.predict_proba(test[FEATURES])[:, 1],
+    features=FEATURES,
+    script=__file__,
+    y_score_train=model.predict_proba(train[FEATURES])[:, 1],
+)

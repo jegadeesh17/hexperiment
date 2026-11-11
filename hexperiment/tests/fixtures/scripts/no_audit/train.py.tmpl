@@ -1,0 +1,6 @@
+# Requirement 16.5: scenario 10, a script that never calls hexperiment.audit
+import hexperiment
+
+df = hexperiment.load()
+train, test = hexperiment.split(df)
+print(len(train), len(test))

@@ -1,0 +1,31 @@
+# Requirement 17.3: scenario 3, a leak inside a helper module
+import helpers
+import hexperiment
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+
+FEATURES = ["x1", "x2", "category_rate"]
+
+df = hexperiment.load()
+df = helpers.add_category_rates(df)
+train, test = hexperiment.split(df)
+
+model = Pipeline(
+    [
+        ("impute", SimpleImputer(strategy="mean")),
+        ("scale", StandardScaler()),
+        ("model", LogisticRegression(random_state=0)),
+    ]
+)
+model.fit(train[FEATURES], train["target"])
+
+hexperiment.audit(
+    train,
+    test,
+    y_score=model.predict_proba(test[FEATURES])[:, 1],
+    features=FEATURES,
+    script=__file__,
+    y_score_train=model.predict_proba(train[FEATURES])[:, 1],
+)

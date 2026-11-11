@@ -1,0 +1,32 @@
+# Requirement 17.3: scenario 1, mean imputation over all rows before the split
+import hexperiment
+from sklearn.compose import ColumnTransformer
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+NUMERIC = ["x1", "x2"]
+CATEGORICAL = ["category"]
+FEATURES = NUMERIC + CATEGORICAL
+
+df = hexperiment.load()
+df["x2"] = df["x2"].fillna(df["x2"].mean())
+train, test = hexperiment.split(df)
+
+preprocess = ColumnTransformer(
+    [
+        ("numeric", StandardScaler(), NUMERIC),
+        ("category", OneHotEncoder(handle_unknown="ignore"), CATEGORICAL),
+    ]
+)
+model = Pipeline([("prep", preprocess), ("model", LogisticRegression(random_state=0))])
+model.fit(train[FEATURES], train["target"])
+
+hexperiment.audit(
+    train,
+    test,
+    y_score=model.predict_proba(test[FEATURES])[:, 1],
+    features=FEATURES,
+    script=__file__,
+    y_score_train=model.predict_proba(train[FEATURES])[:, 1],
+)

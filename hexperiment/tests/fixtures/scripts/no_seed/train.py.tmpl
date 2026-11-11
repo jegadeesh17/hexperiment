@@ -1,0 +1,33 @@
+# Requirement 17.3: scenario 6, no random_state anywhere
+import hexperiment
+from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder
+
+NUMERIC = ["x1", "x2"]
+CATEGORICAL = ["category"]
+FEATURES = NUMERIC + CATEGORICAL
+
+df = hexperiment.load()
+train, test = hexperiment.split(df)
+
+preprocess = ColumnTransformer(
+    [
+        ("numeric", SimpleImputer(strategy="mean"), NUMERIC),
+        ("category", OneHotEncoder(handle_unknown="ignore"), CATEGORICAL),
+    ]
+)
+forest = RandomForestClassifier(n_estimators=30, max_depth=4)
+model = Pipeline([("prep", preprocess), ("model", forest)])
+model.fit(train[FEATURES], train["target"])
+
+hexperiment.audit(
+    train,
+    test,
+    y_score=model.predict_proba(test[FEATURES])[:, 1],
+    features=FEATURES,
+    script=__file__,
+    y_score_train=model.predict_proba(train[FEATURES])[:, 1],
+)

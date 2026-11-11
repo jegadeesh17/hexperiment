@@ -1,0 +1,30 @@
+# Requirement 17.3: scenario 11, a target encoding over all rows before the split
+import hexperiment
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+
+FEATURES = ["x1", "x2", "category_rate"]
+
+df = hexperiment.load()
+df["category_rate"] = df.groupby("category")["target"].transform("mean")
+train, test = hexperiment.split(df)
+
+model = Pipeline(
+    [
+        ("impute", SimpleImputer(strategy="mean")),
+        ("scale", StandardScaler()),
+        ("model", LogisticRegression(random_state=0)),
+    ]
+)
+model.fit(train[FEATURES], train["target"])
+
+hexperiment.audit(
+    train,
+    test,
+    y_score=model.predict_proba(test[FEATURES])[:, 1],
+    features=FEATURES,
+    script=__file__,
+    y_score_train=model.predict_proba(train[FEATURES])[:, 1],
+)
