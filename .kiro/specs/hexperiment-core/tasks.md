@@ -22,14 +22,14 @@
   - Install into the root virtual environment with `.venv/Scripts/python -m pip install -e 'hexperiment[dev]'`, then run the test and lint commands.
   - _Requirements: 13.2_
 
-- [ ] 2. Configuration (`hex.toml`) and execution mode
+- [x] 2. Configuration (`hex.toml`) and execution mode
   - Create `hexperiment/src/hexperiment/config.py`: `ExecMode`, the config dataclasses (`AppConfig` to `HexConfig`, `Waiver`), `load_config` (reads the file with `tomllib`), pure `parse_config`, `current_mode` and `run_id_from_env`, with the defaults from the schema table in `design.md`.
   - Validation raises `HexInputError` naming the key and the file: missing `data.path`, `target.column`, `metric.name` or `metric.threshold`; unreadable file; `metric.name` other than `roc_auc`; `metric.threshold` and `split.test_fraction` not a number strictly between 0 and 1 (booleans rejected); out-of-range values for the other numeric keys; unknown tables or keys.
   - Waiver validation: `check` must be `row_overlap`, `target_proxy` or `temporal` (so `canary`, `determinism`, `split_order` and `input` are rejected); `reason` must have at least 10 characters after stripping; `column` is allowed only with `target_proxy`.
   - Write `hexperiment/tests/test_config.py`: one example per key and default, one rejection example per rule above (asserting the message names the key and the path), `current_mode` with unset, valid and invalid `HEX_MODE`, and a Hypothesis test that any `threshold` or `test_fraction` outside the open interval (0, 1) is rejected.
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 10.7, 11.1, 11.3_
 
-- [ ] 3. Data module, part 1: hash split and time split
+- [x] 3. Data module, part 1: hash split and time split
   - Create `hexperiment/src/hexperiment/data.py` with `TimeCutoff`, `hash_fraction` (SplitMix64 finalizer in `uint64` numpy arithmetic, no Python `hash`), `parse_times` (`utc=True`, unparseable or missing values raise `HexInputError` naming column and frame), `compute_cutoff` (order by `(time, row id)`, `n_test = min(n - 1, max(1, floor(n * fraction + 0.5)))`, fewer than 2 rows raises), `test_mask` and `split_frame`.
   - `split_frame` returns copies that keep the row-id index. With a stored cutoff, a row is a test row when its `(time, row id)` is at or after the cutoff, so rows removed before the split cannot move the boundary.
   - Create `hexperiment/tests/test_data.py` with examples: known fraction ranges, equal timestamps at the boundary, mixed timezones, unparseable timestamp, fewer than 2 rows, and a frame with rows dropped before the split.
