@@ -267,7 +267,7 @@ Validation in `parse_config` (all raise `HexInputError` that names the key and t
 - `metric.threshold` and `split.test_fraction` must be numbers (not booleans) with `0 < x < 1`.
 - Other numeric keys are range-checked: `proxy_auc_max` in `(0, 1]`, `overlap_max_fraction` in `[0, 1]`, `too_good_margin >= 0`, `max_test_uses >= 1`, `timeout_seconds > 0`, `seed >= 0`.
 - Unknown tables or keys are rejected, so a typo such as `proxy_auc_mx` cannot silently leave a default in place (Resolved question 11).
-- Waivers: `check` must be one of `row_overlap`, `target_proxy`, `temporal`; `reason` must be a string of at least 10 characters after stripping; `column` is allowed only with `target_proxy`.
+- Waivers: `check` must be one of `row_overlap`, `target_proxy`, `temporal`; `reason` must be a string of at least 10 characters after stripping; `column` is required with `target_proxy` and rejected with the other checks, so a waiver can never cover a leaking column that appears later (11.1, 11.3).
 
 Satisfies: 3.1, 3.2, 3.3, 3.4, 10.7 (non-waivable checks are rejected), 11.1, 11.3.
 
@@ -362,13 +362,13 @@ Effect: the test rows of a numeric column move toward the old upper half, so its
 **`validate_audit_inputs`** (normal mode) raises `HexInputError` in this order, each message saying what is wrong and how to fix it:
 
 1. `train` or `test` is empty, naming which (4.1).
-2. The target column is missing from either frame, naming column and frame (4.2).
+2. The target column is missing from either frame, naming column and frame (4.2), or holds a missing value in either frame.
 3. `y_score` length differs from `len(test)`, or `y_score_train` length differs from `len(train)`; any score is NaN or outside `[0, 1]` (4.4).
-4. A name in `features` is not a column of both frames (4.5).
+4. `features` is empty, or a name in `features` is not a column of both frames (4.5).
 5. `time_column` is configured but missing from a frame or not parseable (4.6).
 6. The test target has one class, after comparing `test[target] == target.positive` (4.3). The message names the positive value and the test target's distinct values, because a wrong `positive` is the usual cause.
 
-**`validate_snapshot_inputs`** (canary and control mode) checks only what the snapshot needs, with the same messages as the matching rules above: `train` is not empty (rule 1, train only), every name in `features` is a column of `train` (rule 4, train only), and `y_score_train`, when given, has `len(train)` entries that are all in `[0, 1]` (rule 3, training part only). It does not look at the test target, at `y_score`, at the time column or at the test frame's columns. A scrambled test set (a test target with three or more distinct values can end up with one class after the tilt, and test scores can be unrelated to the scrambled values) therefore cannot crash the canary or control execution. An error in the checked part still raises `HexInputError`, and the parent reports exit 2.
+**`validate_snapshot_inputs`** (canary and control mode) checks only what the snapshot needs, with the same messages as the matching rules above: `train` is not empty (rule 1, train only), `features` is not empty and every name in it is a column of `train` (rule 4, train only), and `y_score_train`, when given, has `len(train)` entries that are all in `[0, 1]` (rule 3, training part only). It does not look at the test target, at `y_score`, at the time column or at the test frame's columns. A scrambled test set (a test target with three or more distinct values can end up with one class after the tilt, and test scores can be unrelated to the scrambled values) therefore cannot crash the canary or control execution. An error in the checked part still raises `HexInputError`, and the parent reports exit 2.
 
 Satisfies: 1.1 to 1.6, 4.1 to 4.6, 7.1 (time parsing), 10.6 (marker). In canary and control mode, Requirements 4.1 to 4.6 apply only to the snapshot inputs above; this is Resolved question 14.
 
@@ -416,9 +416,9 @@ def check_metric(value: float, name: str, threshold: float,
 
 **`check_target_proxy`** (The Possession)
 
-- For each feature, `standalone_score` returns `None` when the feature has one unique value in the test rows (6.3), otherwise a score in `[0.5, 1]`.
-- Numeric and boolean features: rows with a missing value are dropped for this feature, then `max(AUC, 1 - AUC)` of the raw value against `y_true_test` with `sklearn.metrics.roc_auc_score`. If a single class remains, the feature is skipped.
-- Other dtypes: for each training category, `positives / count` computed as an integer ratio, mapped onto test rows. Unseen categories and missing values get the overall training positive rate. The score is the AUC of that mapping. Computing means from integer counts keeps the values exact, so a reorder cannot flip a tie (Requirement 6.4).
+- For each feature, `standalone_score` returns `None` only when the feature has one unique value in the test rows, counting a missing value as a value (`nunique(dropna=False) == 1`, 6.3). Otherwise it returns a score in `[0.5, 1]`; no other feature is skipped.
+- **Value score** (numeric, boolean, datetime and timedelta dtypes). Datetimes are converted to UTC and then, like timedeltas, to their `int64` nanosecond value; booleans to `0/1`. The values are ranked with missing values placed lowest, and `max(AUC, 1 - AUC)` is taken against `y_true_test` with `sklearn.metrics.roc_auc_score`. The same is repeated with missing values ranked highest, and the higher score is kept. A column that is filled in only for one class therefore scores `1.0`. When the column has no missing value, both rankings are the same.
+- **Category score** (all other dtypes, and also numeric features with at most 50 distinct non-missing test values). For each training value, `positives / count` is computed as an integer ratio and mapped onto the test rows. Unseen values and missing values get the overall training positive rate. The score is the AUC of that mapping. For a numeric feature that gets both scores, the higher one is kept, so integer codes whose meaning is not ordered (codes 1 and 3 positive, 2 and 4 negative) are caught. Computing means from integer counts keeps the values exact, so a reorder cannot flip a tie (Requirement 6.4).
 - Evidence: `{"score": s, "threshold": auc_max}`. Location is the column. Error when `score >= auc_max`. Fix: "check whether this column is recorded after the outcome; if so, drop it".
 
 **`check_temporal`** (The Prophet)
@@ -429,13 +429,14 @@ def check_metric(value: float, name: str, threshold: float,
 **`check_split_order`** (no ghost, warnings only)
 
 - `source is None` or `ast.parse` fails: one `warning` "the hint could not be applied" and outcome `inconclusive` (8.3). The script is parsed, never executed or imported.
-- Find the first call whose callee name is `split`, `hexperiment.split` or `train_test_split` (by smallest line number). If none: the same warning (8.3).
+- Find the first call whose callee name is `split`, `hexperiment.split` or `train_test_split` (by smallest line number), including import aliases (`import hexperiment as hx` then `hx.split`; `from hexperiment import split as hsplit`; `from sklearn.model_selection import train_test_split as tts`). If none: the same warning (8.3).
+- Calls nested in the arguments of the split call, such as `split(df.fillna(df.mean()))`, run before the split and are reported like earlier calls.
 - Collect earlier calls: `fit`, `fit_transform`, `fit_resample` on any receiver; and `mean`, `median`, `std`, `quantile`, `min`, `max`, `transform` as methods whose receiver is a name, subscript, call or attribute chain not rooted at an imported module alias. A bare builtin `min(...)` or `max(...)` is not a method call and is ignored. Each is a `warning` at `train.py:<line>` with the hint "this runs before the split; make sure it does not use test rows" (8.2).
 - The comparison is by line number, not data flow. A helper function defined above the split but called below it is reported. This is acceptable for a hint; the canary test is the authority.
 
 **`check_metric`** (not a ghost)
 
-- `compute_metric` returns the ROC AUC. `check_metric` returns `MetricResult(name, value, threshold, passed=value >= threshold)`. If `value > threshold + too_good_margin` it also returns a `warning` with check `metric`, message "too good to be true", evidence `{"value": v, "threshold": t}`, and fix "treat this as a leak until proven otherwise: look for a column that encodes the target".
+- `compute_metric` returns the ROC AUC. `check_metric` returns `MetricResult(name, value, threshold, passed=value >= threshold)`. If `value > min(threshold + too_good_margin, 0.99)` it also returns a `warning` with check `metric`, message "too good to be true", evidence `{"value": v, "threshold": t}`, and fix "treat this as a leak until proven otherwise: look for a column that encodes the target".
 
 Satisfies: 2.3 (data checks), 2.5, 5.1 to 5.3, 6.1 to 6.4, 7.1 to 7.3, 8.1 to 8.3, 9.1 to 9.3.
 
@@ -787,7 +788,7 @@ def finalize_run(app_dir: Path, config: HexConfig, report: ExecutionReport,
 | `[checks]` | `max_test_uses` | int | `5` | `>= 1` |
 | `[run]` | `timeout_seconds` | number | `120` | `> 0` |
 | `[[waivers]]` | `check` | string | required | `row_overlap`, `target_proxy` or `temporal` |
-| `[[waivers]]` | `column` | string | absent | only with `target_proxy` |
+| `[[waivers]]` | `column` | string | absent | required with `target_proxy`, rejected otherwise |
 | `[[waivers]]` | `reason` | string | required | at least 10 characters |
 
 ```toml
@@ -1069,10 +1070,10 @@ Each check has a leaking case and a clean case, plus its boundaries.
 | Check | Leaking case | Clean case | Boundaries |
 |---|---|---|---|
 | `row_overlap` | 3 of 20 test rows copied from train | disjoint rows | `fraction == max_fraction` is not flagged; identical NaN rows count as equal; frame reordered |
-| `target_proxy` | numeric feature = target plus tiny noise; categorical derived from target | independent noise | `score == auc_max` is flagged; constant test feature skipped; unseen category; NaN values |
+| `target_proxy` | numeric feature = target plus tiny noise; categorical derived from target; numeric feature filled in only for positives; datetime that separates the classes; integer codes 1 and 3 positive, 2 and 4 negative | independent noise; partly missing noise; random datetimes | `score == auc_max` is flagged; constant test feature skipped; unseen category; NaN values |
 | `temporal` | random split of time-ordered rows | `split` by time | equal timestamps are not a leak; no `time_column` gives `not applicable`; mixed timezones |
 | `split_order` | `fit_transform` and `df["x"].mean()` before the split | all fits after the split | syntax error; no split call; `hexperiment.split` and `train_test_split` both recognized; `np.mean` ignored; `min(a, b)` ignored |
-| `metric` | AUC below threshold; AUC above `threshold + margin` | AUC between | `value == threshold` passes |
+| `metric` | AUC below threshold; AUC above `min(threshold + margin, 0.99)`, including AUC 1.0 with threshold 0.9 | AUC between | `value == threshold` passes |
 
 Further examples: `validate_audit_inputs` raises for each case in Requirement 4 with a message naming the offender; `validate_snapshot_inputs` raises only for the training-side cases (empty train, a feature missing from train, a bad `y_score_train`) and accepts a single-class test target, a `y_score` of the wrong length and a missing time column; `apply_waivers` changes severity, leaves canary findings untouched, and turns a waiver that matches nothing (including a `temporal` waiver without `time_column`) into a `waiver` warning with location `<check>` or `<check>:<column>` that does not change the status; `compute_cutoff` and `split_frame` on a time column with equal timestamps at the boundary, and on a frame from which rows were dropped before `split` (the remaining rows keep their side of the cutoff); `split` with `df.attrs` cleared recomputes the cutoff from the received frame; `count_test_set_uses` ignores input-error verdicts and counts fast, full, `REJECTED` and `UNVERIFIED` runs with the same split block, and `finalize_run` adds 1 for the current run unless it is an input error; `decide_status` is checked on its full truth table (metric pass or fail, error present or not, canary outcome, fast or full); `card.render` is checked for each section and for the "do not edit" notice.
 

@@ -95,9 +95,9 @@ Scope of this spec: data loading and splitting, configuration, the checks, the c
 
 #### Acceptance Criteria
 
-1. WHEN the audit runs THEN the system SHALL compute, for each feature, a standalone score on the test rows: for numeric features, `max(AUC, 1 - AUC)` of the raw value against the target; for non-numeric features, the AUC of the training-set target mean of each category applied to the test rows (unseen categories get the training positive rate).
+1. WHEN the audit runs THEN the system SHALL compute, for each feature, a standalone score on the test rows: for numeric, boolean, datetime and timedelta features (datetimes and timedeltas as their integer value), `max(AUC, 1 - AUC)` of the raw value against the target, computed once with missing values ranked lowest and once ranked highest, keeping the higher score; for other features, the AUC of the training-set target mean of each category applied to the test rows (unseen categories and missing values get the training positive rate); and for numeric features with at most 50 distinct non-missing values in the test rows, also the category score, keeping the higher of the two.
 2. IF a feature's standalone score is greater than or equal to `checks.proxy_auc_max` THEN the system SHALL report an `error` finding with ghost "The Possession", the column name as location, the score as evidence, and the fix hint "check whether this column is recorded after the outcome; if so, drop it".
-3. IF a feature has a single unique value in the test rows THEN the system SHALL skip it for this check.
+3. IF a feature has a single unique value in the test rows, counting a missing value as a value, THEN the system SHALL skip it for this check. No other feature SHALL be skipped.
 4. THE result of this check SHALL NOT change when the rows of `train` or `test` are reordered.
 
 ### Requirement 7: Temporal leak check (The Prophet)
@@ -128,7 +128,7 @@ Scope of this spec: data loading and splitting, configuration, the checks, the c
 
 1. WHEN the audit runs THEN the system SHALL compute ROC AUC from the test target and `y_score`.
 2. IF the metric is below `metric.threshold` THEN the system SHALL record the metric as failed.
-3. IF the metric exceeds `metric.threshold + checks.too_good_margin` THEN the system SHALL report a `warning` finding "too good to be true" with the metric and threshold as evidence.
+3. IF the metric exceeds the lower of `metric.threshold + checks.too_good_margin` and `0.99` THEN the system SHALL report a `warning` finding "too good to be true" with the metric and threshold as evidence.
 
 ### Requirement 10: Canary test (The Peeking Spirit) and determinism (The Shapeshifter)
 
@@ -150,9 +150,9 @@ Scope of this spec: data loading and splitting, configuration, the checks, the c
 
 #### Acceptance Criteria
 
-1. THE system SHALL read `[[waivers]]` entries with keys `check` (one of `row_overlap`, `target_proxy`, `temporal`), `column` (optional, for `target_proxy`) and `reason` (required, at least 10 characters).
+1. THE system SHALL read `[[waivers]]` entries with keys `check` (one of `row_overlap`, `target_proxy`, `temporal`), `column` (required for `target_proxy`, not allowed for the other checks) and `reason` (required, at least 10 characters).
 2. WHEN a finding matches a waiver THEN the system SHALL change its severity to `waived` and attach the waiver's reason.
-3. IF a waiver lacks a valid `reason`, or names a check that cannot be waived THEN the system SHALL raise `HexInputError`.
+3. IF a waiver lacks a valid `reason`, names a check that cannot be waived, is a `target_proxy` waiver without a `column`, or gives a `column` for another check THEN the system SHALL raise `HexInputError`.
 4. THE verdict and model card SHALL list every applied waiver with its reason.
 
 ### Requirement 12: Test-set use count
