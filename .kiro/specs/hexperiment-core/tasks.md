@@ -10,7 +10,7 @@
 
 ## Tasks
 
-- [ ] 1. Project scaffold, errors and shared models
+- [x] 1. Project scaffold, errors and shared models
   - Create `hexperiment/pyproject.toml`: src layout, `requires-python = ">=3.13"`, runtime dependencies `pandas`, `numpy`, `scikit-learn`, extra `dev` with `pytest`, `hypothesis`, `ruff`, console script `hexperiment = "hexperiment.cli:main"` (the target module arrives in task 16; installing does not import it), `[tool.ruff]` selecting `E`, `F`, `I`, `UP`, `B`, and `[tool.pytest.ini_options]` with `testpaths = ["tests"]`.
   - Create `hexperiment/src/hexperiment/errors.py` with `HexInputError(problem, fix)`, where `str(error)` is the problem followed by the fix.
   - Create `hexperiment/src/hexperiment/models.py` with the enums (`Status`, `Severity`, `RunMode`, `Outcome`) and the frozen dataclasses (`Finding`, `CheckResult`, `CheckSummary`, `MetricResult`, `WaiverRecord`, `SplitSignature`, `DataSummary`, `DataAuditResult`, `Verdict`), plus `to_dict` / `from_dict` helpers for the ones that are written to JSON.
