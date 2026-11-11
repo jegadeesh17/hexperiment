@@ -12,6 +12,7 @@ import sys
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
+from typing import TextIO
 
 import pandas as pd
 
@@ -134,25 +135,30 @@ def _audit_normal(
     if run_id is not None:
         return None
     verdict = _finalize_standalone(app_dir, config, result)
-    _print_summary(format_summary(verdict))
+    print_text(format_summary(verdict))
     return verdict
 
 
-def _print_summary(text: str) -> None:
-    """Print the standalone summary; a console that cannot encode it never raises."""
+def print_text(text: str, file: TextIO | None = None) -> None:
+    """Print ``text``; a console that cannot encode it never raises.
+
+    ``file`` defaults to the current ``sys.stdout``. This and ``cli.main`` are the
+    only printers of the package (Requirement 16.4).
+    """
+    stream = sys.stdout if file is None else file
     try:
-        print(text)
+        print(text, file=stream)
     except UnicodeEncodeError:
-        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        encoding = getattr(stream, "encoding", None) or "utf-8"
         line_text = (text + "\n").replace("\n", os.linesep)
         data = line_text.encode(encoding, errors="replace")
-        buffer = getattr(sys.stdout, "buffer", None)
+        buffer = getattr(stream, "buffer", None)
         if buffer is None:
-            sys.stdout.write(data.decode(encoding, errors="replace"))
+            stream.write(data.decode(encoding, errors="replace"))
         else:
-            sys.stdout.flush()
+            stream.flush()
             buffer.write(data)
-        sys.stdout.flush()
+        stream.flush()
 
 
 def _record_input_error(

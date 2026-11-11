@@ -118,7 +118,7 @@
   - Add one test that runs `run_train_script` on a tiny script: a successful run, a non-zero exit with the stderr tail, and a timeout of 1 second.
   - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 16.2, 16.3, 16.5_
 
-- [ ] 16. Command line and the scenario harness (failure-path scenarios 8, 9 and 10)
+- [x] 16. Command line and the scenario harness (failure-path scenarios 8, 9 and 10)
   - Create `hexperiment/src/hexperiment/cli.py` with `build_parser` (`run <app_dir>` with a mutually exclusive `--fast` / `--full`, full by default), `exit_code_for` (0, 1, 3) and `main`. `main` first checks `app_dir` and calls `runs.clear_app_verdict`, then loads the config, generates the run id, calls `canary.run_executions`, calls `runs.finalize_run`, prints `format_summary`, and returns the exit code. A `HexInputError` (printed as `hexperiment: <problem> <fix>`), `ExecutionFailed` (with the stderr tail) or `OSError` returns 2 with no new verdict. `main` is the only function that prints.
   - Create `hexperiment/tests/test_cli.py`: argument parsing and the default mode; `exit_code_for` for each status; the console script entry in `pyproject.toml` points at `hexperiment.cli:main`; output lines for the status, the metric against its threshold and one line per finding; missing `app_dir`, missing `train.py` and bad `hex.toml` return 2.
   - Create the scenario harness: `hexperiment/tests/app_builder.py` (writes a `hex.toml`, the shared 600-row CSV described in `design.md`, a `train.py` rendered from `tests/fixtures/scripts/<scenario>/*.py.tmpl`, and `helpers.py` where noted) and `hexperiment/tests/test_canary_scripts.py`, which runs `cli.main(["run", str(app)])` once per scenario at module scope and shares the result across its assertions.
