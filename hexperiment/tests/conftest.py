@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from hypothesis import settings
 
+from hexperiment import runs
 from hexperiment.canary import (
     ExecutionFailed,
     ExecutionTimedOut,
@@ -76,3 +77,33 @@ class FakeRunner:
 @pytest.fixture
 def fake_runner() -> type[FakeRunner]:
     return FakeRunner
+
+
+@pytest.fixture
+def refuse_unlink(monkeypatch):
+    """Make ``<app_dir>/verdict.json`` fail to delete, like a file held open.
+
+    ``install(app_dir, failures=n)`` fails the first ``n`` deletes (``None``: all of
+    them). It returns the list of attempts and the list of pauses between them; the
+    pauses are recorded, not slept.
+    """
+
+    def install(app_dir: Path, *, failures: int | None):
+        target = app_dir.resolve() / "verdict.json"
+        original = Path.unlink
+        attempts: list[int] = []
+        pauses: list[float] = []
+
+        def unlink(self, missing_ok=False):
+            if self != target:
+                return original(self, missing_ok=missing_ok)
+            attempts.append(1)
+            if failures is None or len(attempts) <= failures:
+                raise PermissionError(13, "used by another process")
+            return original(self, missing_ok=missing_ok)
+
+        monkeypatch.setattr(Path, "unlink", unlink)
+        monkeypatch.setattr(runs.time, "sleep", pauses.append)
+        return attempts, pauses
+
+    return install

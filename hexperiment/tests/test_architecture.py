@@ -132,6 +132,7 @@ def test_the_walk_finds_the_modules_of_the_package():
         "checks/__init__.py",
         "checks/metric.py",
         "config.py",
+        "console.py",
         "data.py",
         "errors.py",
         "models.py",
@@ -165,6 +166,32 @@ def test_only_canary_imports_subprocess():
         if "subprocess" in imported_roots(parse(path))
     ]
     assert importers == ["canary.py"]
+
+
+def test_only_console_calls_print():
+    printers = [
+        module_id(path)
+        for path in package_modules()
+        if any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "print"
+            for node in ast.walk(parse(path))
+        )
+    ]
+    assert printers == ["console.py"]
+
+
+def test_cli_and_auditor_print_through_the_console_module():
+    for name in ("cli.py", "auditor.py"):
+        imports = [
+            node
+            for node in ast.walk(parse(PACKAGE_DIR / name))
+            if isinstance(node, ast.ImportFrom) and node.module == "hexperiment.console"
+        ]
+        assert [alias.name for node in imports for alias in node.names] == [
+            "print_text"
+        ]
 
 
 @pytest.mark.parametrize(

@@ -4,12 +4,14 @@ A fake runner stands in for the training script, so these tests start no Python
 process; ``test_canary_scripts.py`` runs the command on real scripts.
 """
 
+import importlib
 import io
 import json
+import os
 import sys
 import tomllib
 from functools import partial
-from importlib.metadata import entry_points
+from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 
 import numpy as np
@@ -195,15 +197,34 @@ def test_the_exit_code_constants_are_the_documented_ones():
     )
 
 
-def test_the_console_script_points_at_main():
+def test_pyproject_maps_the_console_script_to_main():
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
     scripts = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["scripts"]
     assert scripts == {"hexperiment": "hexperiment.cli:main"}
+    module, _, attribute = scripts["hexperiment"].partition(":")
+    assert getattr(importlib.import_module(module), attribute) is main
+
+
+def test_the_console_script_is_installed_in_the_environment():
+    try:
+        dist = distribution("hexperiment")
+    except PackageNotFoundError:
+        pytest.skip(
+            "the hexperiment package is not installed; "
+            'run: .venv/Scripts/python -m pip install -e "hexperiment[dev]"'
+        )
     installed = {
-        e.name: e.value for e in entry_points(group="console_scripts")
-    }.get("hexperiment")
-    assert installed in (None, "hexperiment.cli:main")
-    assert cli.main is main
+        entry.name: entry.value
+        for entry in dist.entry_points
+        if entry.group == "console_scripts"
+    }
+    assert installed.get("hexperiment") == "hexperiment.cli:main", (
+        "the package is installed but has no console script 'hexperiment'; "
+        "reinstall it with pip install -e"
+    )
+    executable = "hexperiment.exe" if os.name == "nt" else "hexperiment"
+    script = Path(sys.executable).parent / executable
+    assert script.is_file(), f"{script} is missing; reinstall with pip install -e"
 
 
 # --- output ------------------------------------------------------------------------
@@ -346,12 +367,21 @@ def test_a_failed_execution_returns_2_with_the_stderr_tail(
     assert not (app / "runs").exists()
 
 
-def test_a_timed_out_execution_returns_2(tmp_path, run_with, fake_runner, capsys):
-    app = make_app(tmp_path)
-    run_with(normal=fake_runner.Plan(timed_out=True))
+def test_a_timed_out_execution_returns_2_with_the_message_of_the_runner(
+    tmp_path, capsys
+):
+    toml = HEX_TOML + "\n[run]\ntimeout_seconds = 1\n"
+    app = make_app(tmp_path, toml=toml)
+    (app / "train.py").write_text("import time\ntime.sleep(60)\n", encoding="utf-8")
     assert main(["run", str(app)]) == 2
-    assert "longer than the timeout" in capsys.readouterr().err
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith(
+        "hexperiment: train.py ran longer than 1 seconds in normal mode and was "
+        "stopped. Make training faster, or raise [run] timeout_seconds in hex.toml."
+    )
     assert stale_verdict_is_gone(app)
+    assert not (app / "runs").exists()
 
 
 def test_a_script_that_never_audits_returns_2(tmp_path, run_with, fake_runner, capsys):
@@ -389,6 +419,116 @@ def test_an_existing_run_folder_returns_2_and_stays_untouched(
     assert RUN_ID in capsys.readouterr().err
     assert (taken / "note.txt").read_text(encoding="utf-8") == "keep"
     assert stale_verdict_is_gone(app)
+
+
+# --- exit code 2 for failures that are not REJECTED --------------------------------
+
+
+def test_a_delete_that_fails_twice_is_retried_and_the_run_goes_on(
+    tmp_path, run_with, fake_runner, refuse_unlink, capsys
+):
+    app = make_app(tmp_path)
+    attempts, pauses = refuse_unlink(app, failures=2)
+    run_with(**passing_plans(fake_runner))
+    assert main(["run", str(app)]) == 0
+    assert (len(attempts), pauses) == (3, [0.2, 0.2])
+    assert json.loads((app / "verdict.json").read_text(encoding="utf-8"))["run_id"]
+
+
+def test_a_stale_verdict_that_cannot_be_deleted_returns_2_and_runs_nothing(
+    tmp_path, run_with, fake_runner, refuse_unlink, capsys
+):
+    app = make_app(tmp_path)
+    attempts, _ = refuse_unlink(app, failures=None)
+    runner = run_with(**passing_plans(fake_runner))
+    assert main(["run", str(app)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("hexperiment: ")
+    assert "could not be removed" in captured.err
+    assert "must not be trusted" in captured.err
+    assert len(attempts) == 6
+    assert runner.calls == []
+    assert not (app / "runs").exists()
+
+
+@pytest.mark.parametrize("error", [RuntimeError("boom"), KeyError("key")])
+def test_an_unexpected_exception_returns_2_with_the_type_and_a_traceback(
+    error, tmp_path, run_with, fake_runner, monkeypatch, capsys
+):
+    app = make_app(tmp_path)
+    run_with(**passing_plans(fake_runner))
+
+    def explode(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(cli, "finalize_run", explode)
+    assert main(["run", str(app)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    first, *rest = captured.err.splitlines()
+    assert first == f"hexperiment: internal error: {type(error).__name__}: {error}"
+    assert any(line.startswith("Traceback") for line in rest)
+    assert stale_verdict_is_gone(app)
+    assert not (app / "runs").exists()
+
+
+def test_an_unexpected_exception_while_running_returns_2(
+    tmp_path, monkeypatch, capsys
+):
+    app = make_app(tmp_path)
+
+    def explode(*args, **kwargs):
+        raise ZeroDivisionError("division by zero")
+
+    monkeypatch.setattr(cli, "run_executions", explode)
+    assert main(["run", str(app)]) == 2
+    assert "internal error: ZeroDivisionError: division by zero" in (
+        capsys.readouterr().err
+    )
+    assert stale_verdict_is_gone(app)
+
+
+def test_a_keyboard_interrupt_is_not_swallowed(
+    tmp_path, run_with, fake_runner, monkeypatch
+):
+    app = make_app(tmp_path)
+    run_with(**passing_plans(fake_runner))
+
+    def interrupt(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "finalize_run", interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        main(["run", str(app)])
+
+
+@pytest.mark.parametrize("error", [OSError("closed pipe"), ValueError("I/O on closed")])
+def test_a_failure_to_print_the_summary_keeps_the_status_exit_code(
+    error, tmp_path, run_with, fake_runner, monkeypatch
+):
+    app = make_app(tmp_path)
+    run_with(**leaking_plans(fake_runner))
+    printed = []
+
+    def print_text(text, file=None):
+        printed.append(text)
+        raise error
+
+    monkeypatch.setattr(cli, "print_text", print_text)
+    assert main(["run", str(app)]) == 1
+    assert len(printed) == 1
+    assert printed[0].startswith("REJECTED (full)")
+    stored = json.loads((app / "verdict.json").read_text(encoding="utf-8"))
+    assert stored["status"] == "REJECTED"
+
+
+def test_a_failure_to_print_an_error_still_returns_2(tmp_path, monkeypatch):
+    def print_text(text, file=None):
+        raise OSError("closed pipe")
+
+    monkeypatch.setattr(cli, "print_text", print_text)
+    assert main(["run", str(tmp_path / "nowhere")]) == 2
 
 
 # --- console encoding --------------------------------------------------------------

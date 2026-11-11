@@ -306,6 +306,30 @@ def test_clear_app_verdict_without_a_file_does_nothing(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+def test_clear_app_verdict_retries_a_delete_that_fails_twice(tmp_path, refuse_unlink):
+    (tmp_path / "verdict.json").write_text("{}", encoding="utf-8")
+    attempts, pauses = refuse_unlink(tmp_path, failures=2)
+    clear_app_verdict(tmp_path)
+    assert len(attempts) == 3
+    assert pauses == [0.2, 0.2]
+    assert not (tmp_path / "verdict.json").exists()
+
+
+def test_clear_app_verdict_gives_up_after_five_retries(tmp_path, refuse_unlink):
+    (tmp_path / "verdict.json").write_text("{}", encoding="utf-8")
+    attempts, pauses = refuse_unlink(tmp_path, failures=None)
+    with pytest.raises(OSError) as caught:
+        clear_app_verdict(tmp_path)
+    message = str(caught.value)
+    assert "could not be removed" in message
+    assert "must not be trusted" in message
+    assert str(tmp_path / "verdict.json") in message
+    assert isinstance(caught.value.__cause__, PermissionError)
+    assert len(attempts) == 6
+    assert pauses == [0.2] * 5
+    assert (tmp_path / "verdict.json").exists()
+
+
 # --- finalize_run --------------------------------------------------------------------
 
 RUN_A = "20251101-090000-aaaaaa"
@@ -431,3 +455,96 @@ def test_failed_app_copy_removes_its_temporary_file(tmp_path, monkeypatch):
         finalize_run(tmp_path, make_config(tmp_path), fast_report(), run_id=RUN_A)
     assert sorted(p.name for p in tmp_path.iterdir()) == ["runs"]
     assert (tmp_path / "runs" / RUN_A / "verdict.json").exists()
+
+
+# --- finalize_run: the run folder is complete or absent (Requirement 15.1) ----------
+
+
+def failing_write(monkeypatch, filename: str) -> None:
+    original = runs._write_text
+
+    def write(path, text):
+        if path.name == filename:
+            raise OSError("disk full")
+        original(path, text)
+
+    monkeypatch.setattr(runs, "_write_text", write)
+
+
+@pytest.mark.parametrize("filename", ["model_card.md", "verdict.json"])
+def test_a_write_error_leaves_no_run_folder_and_history_still_works(
+    tmp_path, monkeypatch, filename
+):
+    config = make_config(tmp_path)
+    finalize_run(tmp_path, config, fast_report(), run_id=RUN_A)
+    app_before = (tmp_path / "verdict.json").read_bytes()
+    failing_write(monkeypatch, filename)
+    with pytest.raises(OSError, match="disk full"):
+        finalize_run(tmp_path, config, full_report(), run_id=RUN_B)
+    assert not (tmp_path / "runs" / RUN_B).exists()
+    assert [v.run_id for v in load_history(tmp_path)] == [RUN_A]
+    assert (tmp_path / "verdict.json").read_bytes() == app_before
+
+
+def test_the_card_is_written_before_the_verdict(tmp_path, monkeypatch):
+    written = []
+    original = runs._write_text
+
+    def write(path, text):
+        written.append(path.name)
+        original(path, text)
+
+    monkeypatch.setattr(runs, "_write_text", write)
+    finalize_run(tmp_path, make_config(tmp_path), fast_report(), run_id=RUN_A)
+    assert written == ["model_card.md", "verdict.json"]
+
+
+def test_a_leftover_partial_folder_is_ignored_then_replaced(tmp_path):
+    config = make_config(tmp_path)
+    finalize_run(tmp_path, config, fast_report(), run_id=RUN_A)
+    leftover = tmp_path / "runs" / f".partial-{RUN_B}"
+    leftover.mkdir()
+    (leftover / "verdict.json").write_text("{not json", encoding="utf-8")
+    (leftover / "stale.txt").write_text("old", encoding="utf-8")
+    assert [v.run_id for v in load_history(tmp_path)] == [RUN_A]
+    verdict = finalize_run(tmp_path, config, full_report(), run_id=RUN_B)
+    assert verdict.run_id == RUN_B
+    assert not leftover.exists()
+    folder = tmp_path / "runs" / RUN_B
+    assert sorted(p.name for p in folder.iterdir()) == ["model_card.md", "verdict.json"]
+    assert [v.run_id for v in load_history(tmp_path)] == [RUN_A, RUN_B]
+
+
+def test_a_partial_folder_left_by_a_write_error_is_replaced_by_the_next_run(
+    tmp_path, monkeypatch
+):
+    config = make_config(tmp_path)
+    with monkeypatch.context() as patch:
+        failing_write(patch, "verdict.json")
+        with pytest.raises(OSError):
+            finalize_run(tmp_path, config, fast_report(), run_id=RUN_A)
+    partial = tmp_path / "runs" / f".partial-{RUN_A}"
+    assert (partial / "model_card.md").is_file()
+    assert load_history(tmp_path) == []
+    finalize_run(tmp_path, config, fast_report(), run_id=RUN_A)
+    assert not partial.exists()
+    assert [v.run_id for v in load_history(tmp_path)] == [RUN_A]
+
+
+def test_a_run_folder_that_appears_during_the_write_is_not_overwritten(
+    tmp_path, monkeypatch
+):
+    taken = tmp_path / "runs" / RUN_A
+    original = runs._write_text
+
+    def write(path, text):
+        original(path, text)
+        if path.name == "verdict.json":
+            taken.mkdir()
+            (taken / "note.txt").write_text("keep", encoding="utf-8")
+
+    monkeypatch.setattr(runs, "_write_text", write)
+    with pytest.raises(FileExistsError, match=RUN_A):
+        finalize_run(tmp_path, make_config(tmp_path), fast_report(), run_id=RUN_A)
+    assert [p.name for p in taken.iterdir()] == ["note.txt"]
+    assert not (tmp_path / "verdict.json").exists()

@@ -8,16 +8,20 @@ temporary folder and runs ``cli.main`` once, in this process, which starts
 import contextlib
 import io
 import json
+import runpy
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import pytest
+from sklearn.metrics import roc_auc_score
 
-from app_builder import build_app, place_stale_verdict
+import hexperiment
+from app_builder import THRESHOLD, build_app, place_stale_verdict
 from hexperiment import load_history
 from hexperiment.cli import main
+from hexperiment.config import ChecksConfig
 from hexperiment.models import Status, Verdict
 
 
@@ -44,6 +48,12 @@ class ScenarioRun:
 
     def hex_dir(self, mode: str) -> Path:
         return self.app / ".hex" / mode
+
+    @property
+    def scrambled_rows(self) -> int:
+        """Rows that the canary execution's ``load`` reports as scrambled."""
+        marker = self.hex_dir("canary") / "loaded.json"
+        return json.loads(marker.read_text(encoding="utf-8"))["n_scrambled"]
 
 
 def run_scenario(
@@ -222,6 +232,9 @@ class TestTrainOnlyFit:
         assert run.hex_dir("canary").is_dir()
         assert not run.hex_dir("control").exists()
 
+    def test_the_canary_execution_scrambled_test_rows(self, run):
+        assert run.scrambled_rows > 0
+
     def test_the_run_is_kept_as_evidence(self, run):
         (folder,) = run.run_folders
         assert (folder / "verdict.json").read_bytes() == (
@@ -244,6 +257,10 @@ class TestUnrelatedFit:
         assert outcome_of(run.verdict, "canary") == "passed"
         assert errors_of(run.verdict) == []
 
+    def test_training_is_deterministic(self, run):
+        assert outcome_of(run.verdict, "determinism") == "passed"
+        assert findings_of(run.verdict, "determinism") == []
+
     def test_only_the_split_order_hint_warns(self, run):
         (finding,) = run.verdict["findings"]
         assert finding["check"] == "split_order"
@@ -251,6 +268,60 @@ class TestUnrelatedFit:
         assert finding["location"] == f"train.py:{line_of(run.app, '.fit(reference)')}"
 
     def test_no_control_execution_was_needed(self, run):
+        assert not run.hex_dir("control").exists()
+
+    def test_the_canary_execution_scrambled_test_rows(self, run):
+        assert run.scrambled_rows > 0
+
+
+class TestFitOnAllRows(LeakScenario):
+    """Scenario 12: the model sees the test rows, the training features do not move."""
+
+    suspect = None
+
+    @pytest.fixture(scope="class")
+    @classmethod
+    def run(cls, tmp_path_factory) -> ScenarioRun:
+        return run_scenario(tmp_path_factory, "fit_on_all_rows")
+
+    def test_it_is_detected_through_the_training_scores_alone(self, run):
+        (error,) = errors_of(run.verdict)
+        assert error["evidence"]["feature_rows_changed"] == 0
+        assert error["evidence"]["rows_changed"] > 0
+        assert error["evidence"]["largest_change"] > 1e-9
+
+
+class TestNoTrainScores:
+    """Scenario 13: without ``y_score_train`` the canary cannot clear the run."""
+
+    @pytest.fixture(scope="class")
+    @classmethod
+    def run(cls, tmp_path_factory) -> ScenarioRun:
+        return run_scenario(tmp_path_factory, "no_train_scores")
+
+    def test_the_run_is_unverified_with_exit_code_3(self, run):
+        assert run.code == 3
+        assert run.stderr == ""
+        assert run.verdict["status"] == "UNVERIFIED"
+        assert run.verdict["metric"]["passed"] is True
+        assert run.stdout.splitlines()[0].startswith("UNVERIFIED (full)")
+
+    def test_the_canary_is_inconclusive_and_nothing_is_an_error(self, run):
+        assert outcome_of(run.verdict, "canary") == "inconclusive"
+        assert outcome_of(run.verdict, "determinism") == "passed"
+        assert errors_of(run.verdict) == []
+
+    def test_the_warning_shows_how_to_pass_y_score_train(self, run):
+        (warning,) = findings_of(run.verdict, "canary")
+        assert warning["severity"] == "warning"
+        assert warning["ghost"] is None
+        assert "without training predictions" in warning["message"]
+        assert "y_score_train=model.predict_proba(train[features])[:, 1]" in (
+            warning["fix"]
+        )
+
+    def test_no_control_execution_was_needed(self, run):
+        assert run.hex_dir("canary").is_dir()
         assert not run.hex_dir("control").exists()
 
 
@@ -318,12 +389,16 @@ class TestDirectRead:
 
 
 class TestRepeatRun:
-    """Requirement 13.5: the same full run twice gives the same verdict content."""
+    """Requirement 13.5: the same full run twice gives the same verdict content.
+
+    The scenario has a finding (the split-order warning), so the comparison of the
+    findings is not vacuous.
+    """
 
     @pytest.fixture(scope="class")
     @classmethod
     def runs(cls, tmp_path_factory) -> tuple[ScenarioRun, list[Verdict]]:
-        first = run_scenario(tmp_path_factory, "train_only_fit")
+        first = run_scenario(tmp_path_factory, "unrelated_fit")
         second_out, second_err = io.StringIO(), io.StringIO()
         with (
             contextlib.redirect_stdout(second_out),
@@ -342,6 +417,7 @@ class TestRepeatRun:
         _, (first, second) = runs
         assert first.status == second.status == Status.APPROVED
         assert first.metric == second.metric
+        assert first.findings != ()
         assert first.findings == second.findings
 
     def test_the_second_run_counts_as_another_test_set_use(self, runs):
@@ -448,3 +524,26 @@ class TestNoAudit:
 
     def test_the_stale_verdict_no_longer_exists(self, run):
         assert not (run.app / "verdict.json").exists()
+
+
+def test_the_clean_pipeline_scores_clear_of_the_threshold_and_the_too_good_cutoff(
+    tmp_path, monkeypatch
+):
+    """Scenario 4 must pass the metric gate without raising "too good to be true".
+
+    The template runs in this process with ``audit`` replaced by a capture, so no
+    subprocess is started.
+    """
+    for name in ("HEX_MODE", "HEX_RUN_ID"):
+        monkeypatch.delenv(name, raising=False)
+    captured: dict[str, Any] = {}
+
+    def capture(train, test, y_score, features, script, y_score_train=None):
+        captured["auc"] = roc_auc_score(test["target"], y_score)
+
+    monkeypatch.setattr(hexperiment, "audit", capture)
+    app = build_app(tmp_path, "train_only_fit")
+    runpy.run_path(str(app / "train.py"), run_name="__main__")
+    cutoff = min(THRESHOLD + ChecksConfig().too_good_margin, 0.99)
+    assert captured["auc"] >= THRESHOLD + 0.02
+    assert captured["auc"] <= cutoff - 0.02

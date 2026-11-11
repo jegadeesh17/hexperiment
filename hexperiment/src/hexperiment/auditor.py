@@ -8,11 +8,9 @@ arguments (Requirement 2.5).
 from __future__ import annotations
 
 import os
-import sys
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import TextIO
 
 import pandas as pd
 
@@ -31,6 +29,7 @@ from hexperiment.config import (
     load_config,
     run_id_from_env,
 )
+from hexperiment.console import print_text
 from hexperiment.data import (
     ArrayLike1D,
     validate_audit_inputs,
@@ -137,28 +136,6 @@ def _audit_normal(
     verdict = _finalize_standalone(app_dir, config, result)
     print_text(format_summary(verdict))
     return verdict
-
-
-def print_text(text: str, file: TextIO | None = None) -> None:
-    """Print ``text``; a console that cannot encode it never raises.
-
-    ``file`` defaults to the current ``sys.stdout``. This and ``cli.main`` are the
-    only printers of the package (Requirement 16.4).
-    """
-    stream = sys.stdout if file is None else file
-    try:
-        print(text, file=stream)
-    except UnicodeEncodeError:
-        encoding = getattr(stream, "encoding", None) or "utf-8"
-        line_text = (text + "\n").replace("\n", os.linesep)
-        data = line_text.encode(encoding, errors="replace")
-        buffer = getattr(stream, "buffer", None)
-        if buffer is None:
-            stream.write(data.decode(encoding, errors="replace"))
-        else:
-            stream.flush()
-            buffer.write(data)
-        stream.flush()
 
 
 def _record_input_error(
