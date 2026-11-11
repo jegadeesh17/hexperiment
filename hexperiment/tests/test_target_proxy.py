@@ -1,3 +1,6 @@
+import time
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -517,3 +520,124 @@ def test_reordering_rows_never_changes_the_result(
     order.shuffle(shuffled_train)
     order.shuffle(shuffled_test)
     assert run(shuffled_train, shuffled_test) == expected
+
+
+# --- dates stored as text (Requirement 6.1) ------------------------------------------
+
+ISO_DATE = "%Y-%m-%d"
+ISO_DATETIME_T = "%Y-%m-%dT%H:%M:%S"
+ISO_DATETIME_ZONE = "%Y-%m-%dT%H:%M:%SZ"
+ISO_DATETIME_SPACE = "%Y-%m-%d %H:%M:%S"
+
+
+def iso_strings(frame: pd.DataFrame, seed: int, fmt: str, separate: bool = True):
+    """ISO strings, one distinct moment per row.
+
+    Class 0 falls on days 0 to 19 and class 1 on days 30 to 49 when ``separate`` is
+    true, so the date alone gives the class away. Every moment is distinct, so the
+    category score cannot see it and only the value score can.
+    """
+    gen = np.random.default_rng(seed)
+    cls = frame["y"].to_numpy() if separate else gen.integers(0, 2, size=len(frame))
+    days = cls * 30 + gen.integers(0, 20, size=len(frame))
+    seconds = gen.permutation(len(frame)) + 1000 * seed  # distinct across frames
+    moments = pd.Timestamp("2024-01-01") + pd.to_timedelta(days, "D")
+    moments = moments + pd.to_timedelta(seconds, "s")
+    return pd.Series(moments.strftime(fmt), index=frame.index, dtype=object)
+
+
+def with_iso(seed: int, fmt: str, separate: bool = True):
+    train, test = noisy_frames(seed=seed)
+    return (
+        train.assign(f=iso_strings(train, 1, fmt, separate)),
+        test.assign(f=iso_strings(test, 2, fmt, separate)),
+    )
+
+
+@pytest.mark.parametrize(
+    "fmt", [ISO_DATE, ISO_DATETIME_T, ISO_DATETIME_ZONE, ISO_DATETIME_SPACE]
+)
+def test_iso_strings_that_separate_the_classes_are_flagged(fmt: str) -> None:
+    train, test = with_iso(seed=21, fmt=fmt)
+    assert test["f"].dtype == object
+    assert score(train, test) == 1.0
+    (finding,) = check(train, test).findings
+    assert finding.location == "f"
+    assert finding.ghost == "The Possession"
+
+
+def test_iso_strings_in_a_string_dtype_column_are_flagged() -> None:
+    train, test = with_iso(seed=22, fmt=ISO_DATETIME_T)
+    train, test = train.astype({"f": "string"}), test.astype({"f": "string"})
+    assert score(train, test) == 1.0
+
+
+def test_iso_strings_with_missing_values_for_one_class_are_flagged() -> None:
+    train, test = with_iso(seed=23, fmt=ISO_DATE)
+    train, test = train.copy(), test.copy()
+    train.loc[train["y"] == 0, "f"] = None
+    test.loc[test["y"] == 0, "f"] = None
+    assert score(train, test) == 1.0
+
+
+@pytest.mark.parametrize("fmt", [ISO_DATE, ISO_DATETIME_T, ISO_DATETIME_ZONE])
+def test_random_iso_strings_are_not_flagged(fmt: str) -> None:
+    train, test = with_iso(seed=24, fmt=fmt, separate=False)
+    value = score(train, test)
+    assert value < 0.7
+    assert check(train, test).findings == ()
+
+
+@pytest.mark.parametrize("where", ["train", "test"])
+def test_one_value_that_is_not_a_date_keeps_the_column_a_text_feature(
+    where: str,
+) -> None:
+    train, test = with_iso(seed=25, fmt=ISO_DATETIME_T)
+    train, test = train.copy(), test.copy()
+    (train if where == "train" else test).iloc[3, train.columns.get_loc("f")] = "n/a"
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # parsing warnings must not leak out
+        value = score(train, test)
+    # Every moment is distinct, so as text the column gives away nothing.
+    assert value == 0.5
+    assert check(train, test).findings == ()
+
+
+def test_other_date_formats_are_not_recognised() -> None:
+    train, test = with_iso(seed=26, fmt="%d/%m/%Y %H:%M:%S")
+    assert score(train, test) == 0.5
+
+
+def test_a_text_column_of_ids_costs_one_parse_attempt_and_is_not_flagged(
+    monkeypatch,
+) -> None:
+    n = 100_000
+    gen = np.random.default_rng(5)
+    y = gen.integers(0, 2, size=2 * n)
+    ids = pd.Series([f"user-{i:07d}" for i in range(2 * n)], dtype=object)
+    frame = pd.DataFrame({"f": ids, "y": y})
+    train, test = frame.iloc[:n].copy(), frame.iloc[n:].copy()
+    real = pd.to_datetime
+    calls = []
+
+    def spy(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(pd, "to_datetime", spy)
+    started = time.monotonic()
+    value = score(train, test)
+    assert time.monotonic() - started < 10
+    assert len(calls) == 1
+    assert value == 0.5
+    assert check(train, test).findings == ()
+
+
+def test_a_non_text_object_column_is_not_parsed_as_dates() -> None:
+    # Integers in an object column would parse as epoch times; they must not.
+    train, test = noisy_frames(seed=27)
+    values = pd.Series(np.arange(len(train) + len(test)), dtype=object)
+    train = train.assign(f=values.iloc[: len(train)].to_numpy())
+    test = test.assign(f=values.iloc[len(train) :].to_numpy())
+    assert train["f"].dtype == object
+    assert score(train, test) == 0.5

@@ -8,6 +8,7 @@ arguments (Requirement 2.5).
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -114,25 +115,44 @@ def _audit_normal(
             validated.features,
             validated.y_score_train,
         )
+        write_snapshot(app_dir, snapshot)
+        result = run_data_checks(
+            train,
+            test,
+            validated,
+            config=config,
+            script_source=_read_source(script),
+            script_name=script.name,
+        )
     except HexInputError as error:
+        # Requirement 4.7: an input error from a check is recorded like one
+        # from the validation.
         _record_input_error(app_dir, config, run_id, error)
         raise
-    write_snapshot(app_dir, snapshot)
-    result = run_data_checks(
-        train,
-        test,
-        validated,
-        config=config,
-        script_source=_read_source(script),
-        script_name=script.name,
-    )
     result = replace(result, run_id=run_id)
     write_result(app_dir, result, run_id)
     if run_id is not None:
         return None
     verdict = _finalize_standalone(app_dir, config, result)
-    print(format_summary(verdict))
+    _print_summary(format_summary(verdict))
     return verdict
+
+
+def _print_summary(text: str) -> None:
+    """Print the standalone summary; a console that cannot encode it never raises."""
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        line_text = (text + "\n").replace("\n", os.linesep)
+        data = line_text.encode(encoding, errors="replace")
+        buffer = getattr(sys.stdout, "buffer", None)
+        if buffer is None:
+            sys.stdout.write(data.decode(encoding, errors="replace"))
+        else:
+            sys.stdout.flush()
+            buffer.write(data)
+        sys.stdout.flush()
 
 
 def _record_input_error(
@@ -178,6 +198,7 @@ def _input_error_finding(error: HexInputError) -> Finding:
 def _read_source(script: Path) -> str | None:
     """The text of the training script, or ``None`` when it cannot be read."""
     try:
-        return script.read_text(encoding="utf-8")
+        # utf-8-sig: a byte order mark must not break the parse of the hint.
+        return script.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeDecodeError):
         return None

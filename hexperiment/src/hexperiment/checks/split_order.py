@@ -21,6 +21,29 @@ UNAPPLIED_FIX = (
 _SPLIT_NAMES = frozenset({"split", "train_test_split"})
 _QUALIFIED_SPLIT = "hexperiment.split"
 _FIT_METHODS = frozenset({"fit", "fit_transform", "fit_resample"})
+_READER_NAMES = frozenset(
+    {
+        "read_csv",
+        "read_parquet",
+        "read_excel",
+        "read_json",
+        "read_feather",
+        "read_table",
+        "read_fwf",
+        "read_pickle",
+        "read_sql",
+        "read_orc",
+        "loadtxt",
+        "genfromtxt",
+    }
+)
+READER_MESSAGE = (
+    "this reads data without hexperiment.load(); the canary test cannot scramble "
+    "this copy"
+)
+READER_FIX = (
+    "load the data with hexperiment.load() and derive everything from that frame"
+)
 _STATISTIC_METHODS = frozenset(
     {"mean", "median", "std", "quantile", "min", "max", "transform"}
 )
@@ -39,6 +62,11 @@ def check_split_order(source: str | None, script_name: str) -> CheckResult:
     ignored. If the source is unavailable or cannot be parsed, or holds no split
     call, the result is one ``warning`` and the outcome ``inconclusive``
     (Requirement 8.3).
+
+    A call to a data reader (``read_csv`` and the others in Requirement 8.4)
+    anywhere in the script is a ``warning`` at its line: the canary test cannot
+    scramble a copy of the data that ``hexperiment.load`` did not return. These
+    warnings do not depend on the split call.
     """
     if source is None:
         return _inconclusive(script_name, "the script text could not be read")
@@ -52,20 +80,29 @@ def check_split_order(source: str | None, script_name: str) -> CheckResult:
         (node for node in ast.walk(tree) if isinstance(node, ast.Call)),
         key=lambda node: (node.lineno, node.col_offset),
     )
+    readers = tuple(
+        _reader_finding(script_name, name, node.lineno)
+        for node in calls
+        if (name := _reader_name(node, targets)) is not None
+    )
     first_split = next((node for node in calls if _is_split_call(node, targets)), None)
     if first_split is None:
-        return _inconclusive(script_name, "the script has no call to a split function")
+        return _inconclusive(
+            script_name, "the script has no call to a split function", readers
+        )
     nested = _argument_calls(first_split)
-    findings = tuple(
+    hints = tuple(
         _finding(script_name, name, node.lineno, first_split.lineno)
         for node in calls
         if (node.lineno < first_split.lineno or id(node) in nested)
         and (name := _suspect_method(node, modules)) is not None
     )
-    return CheckResult(CHECK, None, Outcome.PASSED, findings)
+    return CheckResult(CHECK, None, Outcome.PASSED, _by_line(hints + readers))
 
 
-def _inconclusive(script_name: str, reason: str) -> CheckResult:
+def _inconclusive(
+    script_name: str, reason: str, readers: tuple[Finding, ...] = ()
+) -> CheckResult:
     finding = Finding(
         check=CHECK,
         ghost=None,
@@ -75,7 +112,41 @@ def _inconclusive(script_name: str, reason: str) -> CheckResult:
         evidence={},
         fix=UNAPPLIED_FIX,
     )
-    return CheckResult(CHECK, None, Outcome.INCONCLUSIVE, (finding,))
+    return CheckResult(CHECK, None, Outcome.INCONCLUSIVE, (finding, *readers))
+
+
+def _by_line(findings: tuple[Finding, ...]) -> tuple[Finding, ...]:
+    # sorted is stable, so findings on one line keep their order.
+    return tuple(sorted(findings, key=lambda f: int(f.location.rpartition(":")[2])))
+
+
+def _reader_finding(script_name: str, call: str, line: int) -> Finding:
+    return Finding(
+        check=CHECK,
+        ghost=None,
+        severity=Severity.WARNING,
+        location=f"{script_name}:{line}",
+        message=READER_MESSAGE,
+        evidence={"call": call},
+        fix=READER_FIX,
+    )
+
+
+def _reader_name(node: ast.Call, targets: dict[str, str]) -> str | None:
+    """Return the name of the data reader that the call invokes, else ``None``.
+
+    Only the callee name counts (``pd.read_csv`` and ``read_csv`` both are
+    ``read_csv``). A bare name bound by ``from pandas import read_csv as rc`` is
+    resolved to the name it stands for (Requirement 8.4).
+    """
+    func = node.func
+    if isinstance(func, ast.Attribute):
+        name = func.attr
+    elif isinstance(func, ast.Name):
+        name = targets.get(func.id, func.id).rpartition(".")[2]
+    else:
+        return None
+    return name if name in _READER_NAMES else None
 
 
 def _finding(script_name: str, call: str, line: int, first_split_line: int) -> Finding:

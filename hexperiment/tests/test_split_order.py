@@ -482,3 +482,155 @@ def test_any_text_gives_a_result_with_warnings_only(text: str) -> None:
     assert all(f.severity is Severity.WARNING for f in result.findings)
     if result.outcome is Outcome.INCONCLUSIVE:
         assert len(result.findings) == 1
+
+
+# --- direct data reads (Requirement 8.4) ---------------------------------------------
+
+READER_MESSAGE = (
+    "this reads data without hexperiment.load(); the canary test cannot scramble "
+    "this copy"
+)
+READER_FIX = (
+    "load the data with hexperiment.load() and derive everything from that frame"
+)
+READERS = [
+    "read_csv",
+    "read_parquet",
+    "read_excel",
+    "read_json",
+    "read_feather",
+    "read_table",
+    "read_fwf",
+    "read_pickle",
+    "read_sql",
+    "read_orc",
+    "loadtxt",
+    "genfromtxt",
+]
+
+
+def test_pandas_read_csv_in_the_script_warns_with_its_line() -> None:
+    result = check(
+        """
+        import pandas as pd
+        import hexperiment
+
+        df = pd.read_csv("data.csv")
+        train, test = hexperiment.split(df)
+        """
+    )
+    assert result.outcome is Outcome.PASSED
+    (finding,) = result.findings
+    assert finding.location == "train.py:4"
+    assert finding.check == "split_order"
+    assert finding.ghost is None
+    assert finding.severity is Severity.WARNING
+    assert finding.message == READER_MESSAGE
+    assert finding.fix == READER_FIX
+    assert finding.evidence == {"call": "read_csv"}
+
+
+@pytest.mark.parametrize("reader", READERS)
+def test_every_listed_reader_warns(reader: str) -> None:
+    result = check(
+        f"""
+        data = lib.{reader}("x")
+        train, test = split(data)
+        """
+    )
+    (finding,) = result.findings
+    assert (finding.location, finding.evidence) == ("train.py:1", {"call": reader})
+
+
+def test_a_bare_reader_name_and_an_import_alias_warn() -> None:
+    result = check(
+        """
+        from pandas import read_csv, read_json as rj
+
+        a = read_csv("a.csv")
+        b = rj("b.json")
+        train, test = split(a)
+        """
+    )
+    assert lines_of(result) == [3, 4]
+    assert [f.evidence["call"] for f in result.findings] == ["read_csv", "read_json"]
+
+
+def test_a_reader_after_the_split_still_warns() -> None:
+    result = check(
+        """
+        import hexperiment
+
+        train, test = hexperiment.split(hexperiment.load())
+        extra = open_data().read_csv("x.csv")
+        """
+    )
+    assert lines_of(result) == [4]
+    assert result.outcome is Outcome.PASSED
+
+
+def test_hexperiment_load_is_not_a_reader() -> None:
+    result = check(
+        """
+        import hexperiment
+        from hexperiment import load
+
+        df = hexperiment.load()
+        other = load()
+        train, test = hexperiment.split(df)
+        """
+    )
+    assert result == CheckResult("split_order", None, Outcome.PASSED, ())
+
+
+def test_a_script_with_no_split_call_still_gets_the_reader_warning() -> None:
+    result = check(
+        """
+        import pandas as pd
+
+        df = pd.read_csv("data.csv")
+        """
+    )
+    assert result.outcome is Outcome.INCONCLUSIVE
+    unapplied, reader = result.findings
+    assert "could not be applied" in unapplied.message
+    assert unapplied.location == "train.py"
+    assert (reader.location, reader.message) == ("train.py:3", READER_MESSAGE)
+
+
+def test_reader_and_hint_warnings_are_listed_in_line_order() -> None:
+    result = check(
+        """
+        import pandas as pd
+
+        df = pd.read_csv("data.csv")
+        df["x"] = df["x"].fillna(df["x"].mean())
+        extra = pd.read_json("more.json")
+        train, test = split(df)
+        """
+    )
+    assert lines_of(result) == [3, 4, 5]
+    assert [f.message for f in result.findings][0] == READER_MESSAGE
+
+
+def test_an_unparseable_script_has_no_reader_warnings() -> None:
+    result = check("df = pd.read_csv(\n")
+    (finding,) = result.findings
+    assert "could not be applied" in finding.message
+
+
+@given(
+    reader=st.sampled_from(READERS),
+    padding=st.integers(0, 5),
+    has_split=st.booleans(),
+)
+def test_a_reader_is_reported_at_its_line_wherever_the_split_is(
+    reader: str, padding: int, has_split: bool
+) -> None:
+    lines = ["import pandas as pd"] * padding + [f"df = pd.{reader}('x')"]
+    if has_split:
+        lines.append("train, test = split(df)")
+    result = check_split_order("\n".join(lines) + "\n", "train.py")
+    readers = [f for f in result.findings if f.message == READER_MESSAGE]
+    assert [f.location for f in readers] == [f"train.py:{padding + 1}"]
+    assert (result.outcome is Outcome.PASSED) == has_split

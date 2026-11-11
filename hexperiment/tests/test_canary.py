@@ -18,6 +18,7 @@ from hexperiment.canary import (
     SCORE_TOLERANCE,
     CanaryOutcome,
     ExecutionFailed,
+    ExecutionTimedOut,
     LoadMarker,
     Snapshot,
     build_snapshot,
@@ -762,10 +763,14 @@ def weaker_warnings(outcome: CanaryOutcome) -> list[Finding]:
     return [f for f in outcome.findings if "weaker" in f.message]
 
 
+def score_warnings(outcome: CanaryOutcome) -> list[Finding]:
+    return [f for f in outcome.findings if "without training predictions" in f.message]
+
+
 @pytest.mark.parametrize(
     ("canary_change", "control_change", "expected"),
     [
-        (False, False, Outcome.PASSED),
+        (False, False, Outcome.INCONCLUSIVE),
         (True, False, Outcome.FAILED),
         (True, True, Outcome.INCONCLUSIVE),
     ],
@@ -778,14 +783,46 @@ def test_missing_training_scores_warns_in_steps_4_to_6(
     control = ControlRunner(changed_row(normal) if control_change else normal)
     outcome = decide_canary(normal, canary, clean_marker(), control, ())
     assert outcome.outcome is expected
-    (warning,) = weaker_warnings(outcome)
+    (warning,) = score_warnings(outcome)
     assert warning.check == "canary"
     assert warning.ghost is None
     assert warning.severity is Severity.WARNING
-    assert "y_score_train" in warning.fix
+    assert warning.fix == (
+        "pass y_score_train=model.predict_proba(train[features])[:, 1] to "
+        "hexperiment.audit"
+    )
     if expected is Outcome.FAILED:
         spirit = next(f for f in outcome.findings if f.ghost == "The Peeking Spirit")
         assert spirit.evidence["largest_change"] is None
+
+
+def test_step_4_without_training_scores_is_inconclusive_and_needs_no_control():
+    # Requirement 2.6: equal hashes do not rule out a model fitted on test rows.
+    normal = make_snapshot(scores=None)
+    control = ControlRunner(normal)
+    outcome = decide_canary(normal, normal, clean_marker(), control, ())
+    assert outcome.outcome is Outcome.INCONCLUSIVE
+    assert outcome.determinism is Outcome.PASSED
+    assert control.calls == 0
+    (warning,) = outcome.findings
+    assert "compared" in warning.message
+    assert "training features" in warning.message
+    assert "inconclusive" in warning.message
+
+
+def test_step_4_with_training_scores_still_passes():
+    normal = make_snapshot()
+    outcome = decide_canary(normal, normal, clean_marker(), ControlRunner(normal), ())
+    assert (outcome.outcome, outcome.determinism) == (Outcome.PASSED, Outcome.PASSED)
+    assert outcome.findings == ()
+
+
+def test_a_difference_without_training_scores_is_still_reported():
+    normal = make_snapshot(scores=None)
+    control = ControlRunner(normal)
+    outcome = decide_canary(normal, changed_row(normal), clean_marker(), control, ())
+    assert outcome.outcome is Outcome.FAILED
+    assert control.calls == 1
 
 
 def test_scores_present_gives_no_weaker_warning():
@@ -1032,8 +1069,10 @@ def test_training_scores_in_some_executions_only_never_pass(
         assert len(mixed_warnings(outcome)) == 1
         assert weaker_warnings(outcome) == []
     elif not any(compared):
-        assert len(weaker_warnings(outcome)) == 1
+        # Either the weaker warning (a difference) or the step 4 warning (none).
+        assert len(score_warnings(outcome)) == 1
         assert mixed_warnings(outcome) == []
+        assert outcome.outcome is not Outcome.PASSED
     else:
         assert weaker_warnings(outcome) == mixed_warnings(outcome) == []
 
@@ -1670,6 +1709,18 @@ def test_a_failed_normal_execution_without_an_input_error_raises(
     assert runner.calls == [ExecMode.NORMAL]
 
 
+@pytest.mark.parametrize("full", [True, False])
+def test_a_timeout_is_never_accepted_as_a_recorded_input_error(
+    tmp_path, fake_runner, full
+):
+    plan = fake_runner.Plan(result=audit_result(input_error=True), timed_out=True)
+    runner = fake_runner(normal=plan, canary=canary_plan(fake_runner))
+    config = make_config(tmp_path)
+    with pytest.raises(ExecutionTimedOut):
+        run_executions(tmp_path, config, RUN, full=full, runner=runner)
+    assert runner.calls == [ExecMode.NORMAL]
+
+
 def test_a_failed_execution_with_an_input_error_of_another_run_raises(
     tmp_path, fake_runner
 ):
@@ -1856,19 +1907,158 @@ def test_run_train_script_starts_python_directly_with_the_documented_arguments(
 ):
     monkeypatch.delenv("PYTHONHASHSEED", raising=False)
     calls = []
+    waits = []
 
-    def fake_run(args, **kwargs):
-        calls.append((args, kwargs))
-        return subprocess.CompletedProcess(args, 0, "", "")
+    class FakeProcess:
+        pid = 1
+        returncode = 0
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+        def __init__(self, args, **kwargs):
+            calls.append((args, kwargs))
+
+        def wait(self, timeout=None):
+            waits.append(timeout)
+            return 0
+
+        def poll(self):
+            return 0
+
+    monkeypatch.setattr(subprocess, "Popen", FakeProcess)
     run_train_script(tmp_path, ExecMode.CONTROL, RUN, 12.5)
     ((args, kwargs),) = calls
+    assert waits == [12.5]
     assert args == [sys.executable, "train.py"]
     assert kwargs.get("shell", False) is False
     assert kwargs["cwd"] == tmp_path
-    assert kwargs["timeout"] == 12.5
-    assert kwargs["capture_output"] is True
+    assert kwargs["stdin"] is subprocess.DEVNULL
     assert kwargs["env"]["HEX_MODE"] == "control"
     assert kwargs["env"]["HEX_RUN_ID"] == RUN
+    assert kwargs["env"]["PYTHONIOENCODING"] == "utf-8"
     assert "PYTHONHASHSEED" not in kwargs["env"]
+
+
+def test_run_train_script_does_not_use_pipes_for_output(tmp_path, monkeypatch):
+    # Requirement 16.3: a pipe held by a surviving child would keep the call waiting.
+    seen = {}
+    real_popen = subprocess.Popen
+
+    def spy(args, **kwargs):
+        seen.update(kwargs)
+        return real_popen(args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", spy)
+    write_script(tmp_path, "print('out')\n")
+    run_train_script(tmp_path, ExecMode.NORMAL, RUN, 60)
+    for stream in ("stdout", "stderr"):
+        assert seen[stream] not in (subprocess.PIPE, subprocess.DEVNULL, None)
+        assert seen[stream].closed  # the temporary file is gone afterwards
+
+
+def test_run_train_script_does_not_wait_for_input(tmp_path):
+    write_script(
+        tmp_path,
+        """
+        import sys
+
+        with open("stdin.txt", "w", encoding="utf-8") as handle:
+            handle.write(repr(sys.stdin.read()))
+        """,
+    )
+    started = time.monotonic()
+    run_train_script(tmp_path, ExecMode.NORMAL, RUN, 60)
+    assert (tmp_path / "stdin.txt").read_text(encoding="utf-8") == "''"
+    assert time.monotonic() - started < 30
+
+
+def test_run_train_script_gives_the_child_the_new_mode_and_run_id(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("HEX_MODE", "control")
+    monkeypatch.setenv("HEX_RUN_ID", "20000101-000000-stale0")
+    write_script(
+        tmp_path,
+        """
+        import os
+
+        with open("seen.txt", "w", encoding="utf-8") as handle:
+            handle.write(os.environ["HEX_MODE"] + " " + os.environ["HEX_RUN_ID"])
+        """,
+    )
+    run_train_script(tmp_path, ExecMode.CANARY, RUN, 60)
+    assert (tmp_path / "seen.txt").read_text(encoding="utf-8") == f"canary {RUN}"
+
+
+def test_run_train_script_reports_non_ascii_stderr_intact(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONIOENCODING", "ascii")  # the child must override this
+    write_script(
+        tmp_path,
+        """
+        import sys
+
+        print("naïve café 日本語 ✓", file=sys.stderr)
+        sys.exit(3)
+        """,
+    )
+    with pytest.raises(ExecutionFailed, match="exited with code 3") as info:
+        run_train_script(tmp_path, ExecMode.NORMAL, RUN, 60)
+    assert "naïve café 日本語 ✓" in str(info.value)
+
+
+def test_run_train_script_replaces_bytes_that_are_not_utf8_in_stderr(tmp_path):
+    write_script(
+        tmp_path,
+        """
+        import sys
+
+        sys.stderr.buffer.write(b"before \\xff after\\n")
+        sys.stderr.flush()
+        sys.exit(1)
+        """,
+    )
+    with pytest.raises(ExecutionFailed, match="before \ufffd after"):
+        run_train_script(tmp_path, ExecMode.NORMAL, RUN, 60)
+
+
+def test_run_train_script_timeout_raises_the_timeout_error_with_stderr(tmp_path):
+    write_script(
+        tmp_path,
+        """
+        import sys, time
+
+        print("still working", file=sys.stderr, flush=True)
+        time.sleep(60)
+        """,
+    )
+    with pytest.raises(ExecutionTimedOut, match="still working"):
+        run_train_script(tmp_path, ExecMode.NORMAL, RUN, 2)
+    assert issubclass(ExecutionTimedOut, ExecutionFailed)
+
+
+def test_run_train_script_timeout_kills_child_processes(tmp_path):
+    # Requirement 16.3: a worker the script started must not keep the run alive.
+    write_script(
+        tmp_path,
+        """
+        import pathlib, subprocess, sys, time
+
+        worker = (
+            "import pathlib, time\\n"
+            "for i in range(300):\\n"
+            "    pathlib.Path('beat.txt').write_text(str(i))\\n"
+            "    time.sleep(0.1)\\n"
+        )
+        subprocess.Popen([sys.executable, "-c", worker])
+        while not pathlib.Path("beat.txt").exists():
+            time.sleep(0.05)
+        time.sleep(60)
+        """,
+    )
+    started = time.monotonic()
+    with pytest.raises(ExecutionTimedOut):
+        run_train_script(tmp_path, ExecMode.NORMAL, RUN, 2)
+    assert time.monotonic() - started < 10
+    beat = tmp_path / "beat.txt"
+    assert beat.exists()
+    before = beat.read_text()
+    time.sleep(0.6)
+    assert beat.read_text() == before  # the worker stopped writing: it is dead

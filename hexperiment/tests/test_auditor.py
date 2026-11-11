@@ -1,6 +1,10 @@
 """Tests of ``audit`` with real apps in ``tmp_path`` (Requirements 2.1 to 2.5, 4.7)."""
 
+import copy
+import io
 import json
+import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -332,6 +336,67 @@ def test_an_input_error_found_while_building_the_snapshot_is_recorded_too(
     assert read_result(script.parent, RUN).input_error.check == "input"
 
 
+@pytest.mark.parametrize("run_id", [RUN, None])
+def test_an_input_error_raised_by_a_check_is_recorded_and_raised_again(
+    script, monkeypatch, run_id
+):
+    # Requirement 4.7: a check such as the time parse can raise HexInputError.
+    run_in(monkeypatch, "normal", run_id)
+
+    def failing_check(*args, **kwargs):
+        raise HexInputError("the time column cannot be parsed.", "fix the column.")
+
+    monkeypatch.setattr("hexperiment.auditor.run_data_checks", failing_check)
+    train, test, score, score_train, features = make_inputs()
+    with pytest.raises(HexInputError, match="time column cannot be parsed"):
+        audit(train, test, score, features, script, score_train)
+    app = script.parent
+    result = read_result(app, run_id) if run_id else None
+    if run_id:
+        assert result.input_error.check == "input"
+        assert result.input_error.message == "the time column cannot be parsed."
+        assert result.input_error.fix == "fix the column."
+        assert result.metric is None
+    else:
+        verdict = json.loads((app / "verdict.json").read_text(encoding="utf-8"))
+        assert verdict["status"] == "REJECTED"
+        assert [f["check"] for f in verdict["findings"]] == ["input"]
+
+
+def test_a_byte_order_mark_in_the_script_does_not_break_the_hint(script, monkeypatch):
+    run_in(monkeypatch, None, RUN)
+    script.write_bytes(b"\xef\xbb\xbf" + TRAIN_PY.encode("utf-8"))
+    train, test, score, score_train, features = make_inputs()
+    audit(train, test, score, features, script, score_train)
+    checks = {c.name: c for c in read_result(script.parent, RUN).checks}
+    assert checks["split_order"].outcome is Outcome.PASSED
+    assert checks["split_order"].findings == ()
+
+
+def test_the_summary_is_printed_even_when_the_console_cannot_encode_it(
+    script, monkeypatch
+):
+    raw = io.BytesIO()
+    console = io.TextIOWrapper(raw, encoding="ascii", write_through=True)
+    monkeypatch.setattr(sys, "stdout", console)
+    monkeypatch.setattr("hexperiment.auditor.format_summary", lambda v: "naïve ✓ ok")
+    train, test, score, score_train, features = make_inputs()
+    assert audit(train, test, score, features, script, score_train) is not None
+    assert raw.getvalue() == f"na?ve ? ok{os.linesep}".encode()
+
+
+def test_a_summary_that_the_console_can_encode_is_printed_unchanged(
+    script, monkeypatch
+):
+    raw = io.BytesIO()
+    console = io.TextIOWrapper(raw, encoding="utf-8", write_through=True)
+    monkeypatch.setattr(sys, "stdout", console)
+    monkeypatch.setattr("hexperiment.auditor.format_summary", lambda v: "naïve ✓ ok")
+    train, test, score, score_train, features = make_inputs()
+    audit(train, test, score, features, script, score_train)
+    assert raw.getvalue() == f"naïve ✓ ok{os.linesep}".encode()
+
+
 def test_a_single_class_test_target_is_an_input_error_in_normal_mode(
     script, monkeypatch
 ):
@@ -382,7 +447,9 @@ def test_a_missing_hex_toml_raises_before_anything_is_written(script, monkeypatc
 
 def copy_of(value):
     if isinstance(value, pd.DataFrame | pd.Series):
-        return value.copy(deep=True)
+        clone = value.copy(deep=True)
+        clone.attrs = copy.deepcopy(value.attrs)
+        return clone
     if isinstance(value, np.ndarray):
         return value.copy()
     return list(value)
@@ -391,8 +458,10 @@ def copy_of(value):
 def assert_unchanged(after, before) -> None:
     if isinstance(after, pd.DataFrame):
         pd.testing.assert_frame_equal(after, before, check_exact=True)
+        assert after.attrs == before.attrs
     elif isinstance(after, pd.Series):
         pd.testing.assert_series_equal(after, before, check_exact=True)
+        assert after.attrs == before.attrs
     elif isinstance(after, np.ndarray):
         assert after.dtype == before.dtype
         assert np.array_equal(after, before, equal_nan=True)
@@ -412,6 +481,7 @@ def test_audit_never_modifies_its_arguments(
     train, test, score, score_train, _ = make_inputs()
     for frame in (train, test):
         frame["cat"] = np.where(frame["x"] > 0, "a", "b")
+        frame.attrs["hexperiment"] = {"app_dir": "somewhere", "cutoff": [1, 2]}
     train.loc[train.index[:5], "z"] = np.nan
     features = ["x", "z", "cat"]
     wrap = {"array": lambda a: a, "list": list, "series": pd.Series}[container]

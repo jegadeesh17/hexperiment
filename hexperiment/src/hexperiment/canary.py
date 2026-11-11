@@ -19,14 +19,16 @@ import math
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import tempfile
 import zipfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from importlib.metadata import version as package_version
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 import numpy as np
 import pandas as pd
@@ -59,6 +61,10 @@ PEEKING_SPIRIT = "The Peeking Spirit"
 SHAPESHIFTER = "The Shapeshifter"
 
 _SPLIT_ORDER_CHECK = "split_order"
+_PASS_SCORES_FIX = (
+    "pass y_score_train=model.predict_proba(train[features])[:, 1] to "
+    "hexperiment.audit"
+)
 _LINE_LOCATION = re.compile(r".+:\d+")
 _EVIDENCE_DECIMALS = 6
 
@@ -263,6 +269,13 @@ def _decide_rows(
             # Requirements 2.6, 10.3: the predictions of one execution were not
             # compared, so equal hashes do not show that nothing changed.
             return CanaryOutcome(Outcome.INCONCLUSIVE, Outcome.INCONCLUSIVE, warnings)
+        if normal.y_score_train is None:
+            # Requirement 2.6: with no predictions in either execution only the
+            # training features were compared, so a model fitted on test rows
+            # is not ruled out.
+            return CanaryOutcome(
+                Outcome.INCONCLUSIVE, Outcome.PASSED, (_no_scores_warning(),)
+            )
         return CanaryOutcome(Outcome.PASSED, Outcome.PASSED, warnings)
     # Steps 5 and 6: a difference; a control execution tells a leak apart from
     # non-deterministic training (Requirement 10.3).
@@ -458,8 +471,17 @@ def _weaker_warning() -> Finding:
     return _warning(
         "the canary test is weaker without training predictions: only the "
         "training features were compared",
-        "pass y_score_train (the predicted probabilities for the training rows) "
-        "to hexperiment.audit",
+        _PASS_SCORES_FIX,
+        {},
+    )
+
+
+def _no_scores_warning() -> Finding:
+    return _warning(
+        "the canary test is inconclusive without training predictions: it "
+        "compared only the training features, so it cannot rule out a model "
+        "fitted on test rows",
+        _PASS_SCORES_FIX,
         {},
     )
 
@@ -566,6 +588,14 @@ class ExecutionFailed(RuntimeError):
 
     Not exported, and not a ``HexInputError``, which is reserved for invalid input.
     The command line maps it to exit code 2 (Requirement 16.5).
+    """
+
+
+class ExecutionTimedOut(ExecutionFailed):
+    """A training execution ran longer than ``run.timeout_seconds`` (Requirement 16.3).
+
+    A timeout never counts as the recorded input error of Requirement 4.7: the
+    script did not finish, so what it left in ``.hex/`` is not a result.
     """
 
 
@@ -835,6 +865,7 @@ def _boolean(value: Any) -> bool:
 type Runner = Callable[[Path, ExecMode, str, float], None]
 
 _STDERR_TAIL_LINES = 40
+_STDERR_READ_BYTES = 1 << 20
 
 
 def run_train_script(
@@ -846,35 +877,56 @@ def run_train_script(
     directory, without a shell, and with ``HEX_MODE`` and ``HEX_RUN_ID`` set.
     ``PYTHONHASHSEED`` is left as the caller has it: a script whose result depends
     on hash order is not deterministic, and that should surface as The Shapeshifter
-    (Requirement 10.4). A timeout or a non-zero exit raises ``ExecutionFailed``
-    with the last lines of stderr (Requirements 16.3, 16.5).
+    (Requirement 10.4). A non-zero exit raises ``ExecutionFailed`` and a timeout
+    raises its subclass ``ExecutionTimedOut``, both with the last lines of stderr
+    (Requirements 16.3, 16.5).
+
+    Output goes to temporary files, not pipes, and stdin is closed, so a child
+    process that outlives the script (joblib or multiprocessing workers) can
+    neither keep this call waiting for a pipe nor wait for input. On a timeout the
+    whole process tree is killed (Requirement 16.3).
     """
-    environment = {**os.environ, ENV_MODE: mode.value, ENV_RUN_ID: run_id}
-    try:
-        completed = subprocess.run(
+    environment = {
+        **os.environ,
+        ENV_MODE: mode.value,
+        ENV_RUN_ID: run_id,
+        "PYTHONIOENCODING": "utf-8",
+    }
+    with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+        process = subprocess.Popen(
             [sys.executable, SCRIPT_NAME],
             cwd=app_dir,
             env=environment,
-            capture_output=True,
-            text=True,
-            errors="replace",
-            timeout=timeout_seconds,
+            stdin=subprocess.DEVNULL,
+            stdout=stdout,
+            stderr=stderr,
+            start_new_session=os.name != "nt",
         )
-    except subprocess.TimeoutExpired as expired:
-        raise ExecutionFailed(
+        timed_out = False
+        try:
+            process.wait(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+        finally:
+            if process.poll() is None:
+                _kill_process_tree(process)
+                process.wait()
+        tail = _read_stderr_tail(stderr)
+    if timed_out:
+        raise ExecutionTimedOut(
             _failure_message(
                 f"{SCRIPT_NAME} ran longer than {timeout_seconds:g} seconds in "
                 f"{mode.value} mode and was stopped. Make training faster, or "
                 "raise [run] timeout_seconds in hex.toml.",
-                expired.stderr,
+                tail,
             )
-        ) from None
-    if completed.returncode != 0:
+        )
+    if process.returncode != 0:
         raise ExecutionFailed(
             _failure_message(
-                f"{SCRIPT_NAME} exited with code {completed.returncode} in "
+                f"{SCRIPT_NAME} exited with code {process.returncode} in "
                 f"{mode.value} mode. Fix the error and run it again.",
-                completed.stderr,
+                tail,
             )
         )
 
@@ -923,6 +975,9 @@ def _run_normal(
     clear_mode_dir(app_dir, ExecMode.NORMAL)
     try:
         runner(app_dir, ExecMode.NORMAL, run_id, timeout)
+    except ExecutionTimedOut:
+        # Requirement 16.3: a stopped script never counts as a recorded error.
+        raise
     except ExecutionFailed:
         # Requirement 4.7: audit raised an input error after recording it.
         recorded = _recorded_input_error(app_dir, run_id)
@@ -950,6 +1005,34 @@ def _recorded_input_error(app_dir: Path, run_id: str) -> DataAuditResult | None:
     except ExecutionFailed:
         return None
     return result if result.input_error is not None else None
+
+
+def _kill_process_tree(process: subprocess.Popen[bytes]) -> None:
+    """Kill ``process`` and every process it started (Requirement 16.3)."""
+    try:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(process.pid)],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+        else:
+            os.killpg(process.pid, signal.SIGKILL)
+    except OSError:
+        pass
+    # The tree kill can miss the script itself (for example when taskkill is not
+    # on the path); kill it directly so the wait that follows always returns.
+    process.kill()
+
+
+def _read_stderr_tail(stream: IO[bytes]) -> str:
+    """Decode the end of the stderr file written by the child."""
+    stream.seek(0, os.SEEK_END)
+    size = stream.tell()
+    stream.seek(max(0, size - _STDERR_READ_BYTES))
+    return stream.read().decode("utf-8", errors="replace")
 
 
 def _failure_message(headline: str, stderr: str | bytes | None) -> str:

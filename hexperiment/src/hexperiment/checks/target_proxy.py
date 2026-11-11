@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Sequence
 
 import numpy as np
@@ -64,10 +65,15 @@ def standalone_score(
         return None
     _require_two_classes(y_true_test, target)
     kind = _kind(test_values)
+    values = test_values
+    if kind is None:
+        dates = _iso_datetimes(train[feature], test_values)
+        if dates is not None:
+            kind, values = _KIND_DATETIME, dates
     scores: list[float] = []
     if kind is not None:
-        scores.append(_value_score(test_values, kind, y_true_test))
-    if kind is None or _few_levels(test_values, kind):
+        scores.append(_value_score(values, kind, y_true_test))
+    if kind is None or _few_levels(values, kind):
         scores.append(
             _category_score(train[feature], test_values, y_true_train, y_true_test)
         )
@@ -144,6 +150,46 @@ def _kind(values: pd.Series) -> str | None:
 def _few_levels(values: pd.Series, kind: str) -> bool:
     """True for a numeric feature with at most ``MAX_CATEGORY_LEVELS`` levels."""
     return kind in _KINDS_NUMERIC and values.nunique() <= MAX_CATEGORY_LEVELS
+
+
+def _is_text(values: pd.Series) -> bool:
+    """True for an object or string column whose non-missing values are all text."""
+    if values.dtype != object and not pd.api.types.is_string_dtype(values.dtype):
+        return False
+    return pd.api.types.infer_dtype(values, skipna=True) in ("string", "empty")
+
+
+def _iso_datetimes(
+    train_values: pd.Series, test_values: pd.Series
+) -> pd.Series | None:
+    """Parse a text feature as ISO 8601 dates, or return ``None`` if it is not one.
+
+    ``load`` reads CSV without parsing dates, so a date column arrives as text. It
+    counts as a datetime feature when every non-missing value in train and test
+    parses with ``format="ISO8601"`` and ``utc=True``; one value that does not parse
+    keeps it a text feature (Requirement 6.1). All values go through one parse call,
+    which raises at the first value that fails, so an ID column costs one attempt.
+    The result has the index of ``test_values``, with ``NaT`` where it is missing.
+    """
+    if not (_is_text(test_values) and _is_text(train_values)):
+        return None
+    test_present = test_values.dropna()
+    if test_present.empty:
+        return None
+    combined = np.concatenate(
+        [
+            test_present.to_numpy(dtype=object),
+            train_values.dropna().to_numpy(dtype=object),
+        ]
+    )
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            parsed = pd.to_datetime(combined, utc=True, format="ISO8601")
+    except (ValueError, TypeError, OverflowError):
+        return None
+    dates = pd.Series(parsed[: len(test_present)], index=test_present.index)
+    return dates.reindex(test_values.index)
 
 
 def _value_score(

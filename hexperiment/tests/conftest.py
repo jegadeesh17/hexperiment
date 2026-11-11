@@ -6,6 +6,7 @@ from hypothesis import settings
 
 from hexperiment.canary import (
     ExecutionFailed,
+    ExecutionTimedOut,
     LoadMarker,
     Snapshot,
     write_load_marker,
@@ -34,6 +35,7 @@ class FakeRunner:
         result: DataAuditResult | None = None
         written_run_id: str | None = None  # written in place of the real run id
         fail: str | None = None  # raise ExecutionFailed, like a non-zero exit
+        timed_out: bool = False  # raise ExecutionTimedOut, like a stopped script
 
     def __init__(
         self,
@@ -67,6 +69,8 @@ class FakeRunner:
             write_result(app_dir, plan.result, written)
         if plan.fail is not None:
             raise ExecutionFailed(plan.fail)
+        if plan.timed_out:
+            raise ExecutionTimedOut("train.py ran longer than the timeout")
 
 
 @pytest.fixture

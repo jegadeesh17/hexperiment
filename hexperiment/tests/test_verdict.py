@@ -3,12 +3,19 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+import numpy as np
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from hexperiment.canary import CanaryOutcome, skipped_outcome
-from hexperiment.config import HexConfig, Waiver, parse_config
+from hexperiment.canary import (
+    CanaryOutcome,
+    LoadMarker,
+    Snapshot,
+    decide_canary,
+    skipped_outcome,
+)
+from hexperiment.config import ExecMode, HexConfig, Waiver, parse_config
 from hexperiment.errors import HexInputError
 from hexperiment.models import (
     CheckResult,
@@ -1023,3 +1030,37 @@ def test_equal_inputs_with_another_run_id_and_date_give_equal_results(
     assert one.findings == two.findings
     assert one.checks == two.checks
     assert one.waivers == two.waivers
+
+
+# --- a full run without training predictions (Requirement 2.6) -----------------------
+
+
+def snapshot_without_scores(mode: ExecMode) -> Snapshot:
+    return Snapshot(
+        mode=mode,
+        run_id=RUN_ID,
+        features=("x",),
+        train_ids=np.arange(4, dtype=np.int64),
+        test_ids=np.arange(4, 6, dtype=np.int64),
+        train_row_hash=np.arange(4, dtype=np.uint64),
+        y_score_train=None,
+    )
+
+
+def test_a_full_run_without_training_scores_and_no_difference_ends_unverified():
+    normal = snapshot_without_scores(ExecMode.NORMAL)
+    canary = snapshot_without_scores(ExecMode.CANARY)
+    marker = LoadMarker(ExecMode.CANARY, RUN_ID, np.array([4, 5], dtype=np.int64))
+
+    def no_control() -> Snapshot:
+        raise AssertionError("no difference, so no control execution")
+
+    outcome = decide_canary(normal, canary, marker, no_control, ())
+    verdict = build(canary=outcome, mode=RunMode.FULL)
+    assert verdict.status is Status.UNVERIFIED
+    assert verdict.metric.passed
+    canary_check = next(c for c in verdict.checks if c.name == "canary")
+    assert canary_check.outcome is Outcome.INCONCLUSIVE
+    (warning,) = [f for f in verdict.findings if f.check == "canary"]
+    assert warning.severity is Severity.WARNING
+    assert "y_score_train" in warning.fix
