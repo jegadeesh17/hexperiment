@@ -22,7 +22,7 @@ hexperiment/               the skeleton: the reusable kit
 apps/                      two applications built on the skeleton
   <app-one>/               hex.toml, fetch_data.py, train.py, runs/
   <app-two>/
-power/                     the Kiro power packaging (POWER.md, steering, hooks)
+power/                     the Kiro power (Agent Plugins format: plugin.json, mcp.json, skills/)
 ```
 
 - Each app is self-contained: its own `hex.toml`, data fetch script, training script and `runs/` history. Raw data is downloaded by `fetch_data.py`, not committed.
