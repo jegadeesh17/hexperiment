@@ -27,7 +27,13 @@
           "**/hexperiment/**",
           "**/apps/**",
           "**/power/**",
-          "**/.kiro/specs/**/tasks.md"
+          "**/.kiro/specs/**/tasks.md",
+          ".kiro/hooks/**",
+          ".kiro/workflows/**",
+          ".kiro/agents/ghost-hunter.json",
+          "**/.kiro/hooks/**",
+          "**/.kiro/workflows/**",
+          "**/.kiro/agents/ghost-hunter.json"
         ],
         "effect": "allow"
       },
@@ -36,12 +42,20 @@
         "match": [
           "**/requirements.md",
           "**/.kiro/steering/**",
-          "**/.kiro/agents/**",
           "**/docs/**",
           "**/.git/**",
           "**/.env*",
           "**/*.pem",
-          "**/*.key"
+          "**/*.key",
+          "**/.kiro/agents/builder.json",
+          "**/.kiro/agents/reviewer.json",
+          "**/.kiro/agents/spec-writer.json",
+          ".kiro/agents/builder.json",
+          ".kiro/agents/reviewer.json",
+          ".kiro/agents/spec-writer.json",
+          "**/.kiro/settings/**",
+          ".kiro/settings/**",
+          ".kiro/steering/**"
         ],
         "effect": "deny"
       },

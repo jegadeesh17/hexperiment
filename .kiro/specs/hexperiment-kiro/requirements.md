@@ -55,7 +55,7 @@ Scope: the `hexperiment hook` and `hexperiment init` commands, the Kiro hook, wo
 
 1. THE repository SHALL contain `.kiro/agents/ghost-hunter.json`, a custom agent in the Kiro CLI V3 permission format, used by the workflow.
 2. THE ghost hunter SHALL be allowed to write only Python files inside app folders.
-3. THE ghost hunter SHALL be denied writing `hex.toml`, `verdict.json`, `model_card.md`, anything under an app's `runs/`, `.hex/`, `data/` or `haunted/` folders, anything under `.kiro/`, and the `hexperiment` package itself; deny rules SHALL take precedence over allow rules.
+3. THE ghost hunter SHALL be denied writing `hex.toml`, `verdict.json`, `model_card.md`, `fetch_data.py`, anything under an app's `runs/`, `.hex/`, `data/` or `haunted/` folders, anything under `.kiro/`, and the `hexperiment` package itself; deny rules SHALL take precedence over allow rules.
 4. THE ghost hunter's shell access SHALL be limited to `hexperiment run` and `hexperiment run --fast` on an app, and SHALL deny every other command, including version control, deletion and network commands.
 5. THE ghost hunter's prompt SHALL state that thresholds and waivers are the human's decision; that removing the `audit` call, or a feature that is not the cause of a finding, does not count as a fix; that dropping a column flagged by The Possession is a fix only when the column is recorded after the outcome, and the agent must say why it is; and that it must report a finding it cannot fix instead of working around it.
 6. THE agent file SHALL pass `kiro-cli agent validate`.
@@ -107,7 +107,7 @@ Scope: the `hexperiment hook` and `hexperiment init` commands, the Kiro hook, wo
 
 #### Acceptance Criteria
 
-1. THE tests SHALL cover: event parsing and app lookup in `hexperiment hook` (including events with no path, paths outside the workspace and non-Python files), the exit code and output of the hook command for an approved, a rejected and a failed run, each MCP tool through an in-memory MCP client session, the workspace guard, `init` creating and skipping files, and the drift check between `init --kiro` and `.kiro/`.
+1. THE tests SHALL cover: event parsing and app lookup in `hexperiment hook` (including events with no path, paths outside the workspace and non-Python files), the exit code and output of the hook command for a clean (`UNVERIFIED`), a rejected and a failed run, each MCP tool through an in-memory MCP client session, the workspace guard, `init` creating and skipping files, and the drift check between `init --kiro` and `.kiro/`.
 2. THE hook, workflow, agent and power JSON files SHALL be checked by tests for the fields their Kiro formats require.
 3. THE core package's runtime dependencies SHALL stay `pandas`, `numpy` and `scikit-learn`; the MCP SDK SHALL be pinned in the `mcp` extra.
 4. THE full test suite, including the new tests, SHALL pass with `.venv/Scripts/python -m pytest hexperiment/tests -q` in under 90 seconds, and `ruff` SHALL report no problems.
