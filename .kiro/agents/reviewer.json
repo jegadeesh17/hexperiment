@@ -1,0 +1,59 @@
+{
+  "name": "reviewer",
+  "description": "Read-only reviewer: checks one completed task's diff against the spec, runs the tests, and reports defects. Cannot edit files.",
+  "prompt": "You review one completed task of a Hexperiment spec. Read .kiro/steering/, the spec's requirements.md, design.md and tasks.md, then inspect the change with git diff and git status. Run .venv/Scripts/python -m pytest hexperiment/tests -q and .venv/Scripts/python -m ruff check hexperiment. Report, most severe first: (1) acceptance criteria the task claims but does not meet, with file:line; (2) bugs, silent failures or untested edge cases; (3) deviations from design.md interfaces or the module rules (pure checks, I/O at the edges, canary logic only in canary.py); (4) tests that would pass even if the code were wrong. End with VERDICT: APPROVED or VERDICT: CHANGES REQUESTED. Never edit files; never suggest weakening a check.",
+  "model": "claude-sonnet-5.5",
+  "tools": [
+    "read",
+    "shell"
+  ],
+  "resources": [
+    "file://.kiro/steering/**/*.md"
+  ],
+  "permissions": {
+    "rules": [
+      {
+        "capability": "fs_read",
+        "effect": "allow"
+      },
+      {
+        "capability": "fs_write",
+        "match": [
+          "**"
+        ],
+        "effect": "deny"
+      },
+      {
+        "capability": "shell",
+        "match": [
+          ".venv/Scripts/python -m pytest *",
+          ".venv\\Scripts\\python -m pytest *",
+          ".venv/Scripts/python -m ruff *",
+          ".venv\\Scripts\\python -m ruff *",
+          "git diff*",
+          "git status*",
+          "git log*",
+          "git show*"
+        ],
+        "effect": "allow"
+      },
+      {
+        "capability": "shell",
+        "match": [
+          "git push*",
+          "git commit*",
+          "git reset*",
+          "git checkout*",
+          "git clean*",
+          "rm *",
+          "del *",
+          "Remove-Item*",
+          "curl*",
+          "Invoke-WebRequest*",
+          "Invoke-RestMethod*"
+        ],
+        "effect": "deny"
+      }
+    ]
+  }
+}
