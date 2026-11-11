@@ -103,7 +103,7 @@
   - Add Hypothesis tests: `format_run_id` always matches `^\d{8}-\d{6}-[0-9a-f]{6}$`; adding any number of input-error verdicts to the history never changes the count.
   - _Requirements: 12.1, 13.2, 13.3, 15.1, 15.2, 16.5_
 
-- [ ] 14. The `audit` entry point, the public API and the architecture test
+- [x] 14. The `audit` entry point, the public API and the architecture test
   - Create `hexperiment/src/hexperiment/auditor.py` with `audit`: locate the app from `script`, load the config, read the mode and run id, validate (full validation in normal mode, `validate_snapshot_inputs` only in canary and control mode), write the snapshot in every mode, return after the snapshot in canary and control mode, run `run_data_checks` and write `result.json` in normal mode, and finalize a `fast` run itself when `HEX_RUN_ID` is not set. An input error in normal mode is written to `result.json` (and, when standalone, to a `REJECTED` verdict) and then re-raised. `audit` never modifies its arguments.
   - Finish `hexperiment/src/hexperiment/__init__.py` so that `__all__` is exactly `audit`, `load`, `split`, `load_history`, `HexInputError`, `Verdict`, `Finding`.
   - Create `hexperiment/tests/test_auditor.py` with tmp-path apps and the environment set through `monkeypatch`: normal mode writes snapshot, `result.json` and no verdict when `HEX_RUN_ID` is set; standalone mode writes a `fast` verdict and counts a test-set use; canary and control mode write only the snapshot; input errors in each mode; inputs unchanged after the call; `y_score_train` absent.
