@@ -1138,7 +1138,7 @@ Orchestration branches that need no real script (the id-set mismatch, the scramb
 
 ### Time budget (17.5)
 
-Python start plus the pandas and scikit-learn imports cost about 2 s per spawned execution. Scenarios 1 to 8 and 11 spawn 3 executions at most (about 6 to 8 s each); scenario 9 runs for about 1 s; scenario 10 for about 2 s. The scenario file is expected to take 58 s or less (50 s before scenario 11 was added). The other test files should take 20 s or less together, with the Hypothesis settings above. Each scenario is one test class whose class-scoped fixture runs the CLI once and shares the result across the class's assertions, so scenarios can also be spread across test workers. If the budget is at risk, merge scenarios rather than adding a separate test stage (Resolved question 13). Scenarios 4 and 5 are the first candidates: both end `APPROVED` and can be one script that fits a pipeline on training rows and also fits a scaler on an unrelated dataset.
+Python start plus the pandas and scikit-learn imports cost about 8 to 9 s per spawned execution on the reference laptop (scikit-learn alone about 5 s). The scenarios spawn about 28 executions, so `test_canary_scripts.py` takes about 250 s when run serially, and the whole suite about 330 s. The suite therefore runs in parallel with `pytest-xdist` (`addopts = "-n auto --dist loadscope"` in `pyproject.toml`): each scenario is one test class, `loadscope` keeps a class on one worker so its fixture runs once, and the classes spread across the CPU cores. On 8 logical cores the suite takes about 70 s. Merging scenarios (Resolved question 13) saves under 20 s and is no longer needed; Hypothesis settings are not lowered.
 
 ### Architecture tests
 

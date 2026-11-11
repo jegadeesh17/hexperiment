@@ -133,8 +133,8 @@
   - Use `LogisticRegression` with a fixed `random_state` in every template. If a leak scenario is not detected, fix the cause in `data.tilt_column` or the canary comparison, not the fixture.
   - _Requirements: 1.5, 10.1, 10.4, 10.5, 10.6, 13.5, 17.3_
 
-- [ ] 18. Final verification
-  - Run the whole suite with `.venv/Scripts/python -m pytest hexperiment/tests -q --durations=10` and confirm it passes in under 90 seconds on a laptop CPU. If it does not, merge scenarios 4 and 5 into one script (Resolved question 13 in `design.md`); do not add a separate test stage and do not lower Hypothesis settings.
+- [x] 18. Final verification
+  - Run the whole suite with `.venv/Scripts/python -m pytest hexperiment/tests -q --durations=10` and confirm it passes in under 90 seconds on a laptop CPU. The suite runs in parallel through `pytest-xdist` (`addopts` in `pyproject.toml`); do not add a separate test stage and do not lower Hypothesis settings.
   - Run `.venv/Scripts/python -m ruff check hexperiment` and confirm it reports no problems.
   - Confirm that the `.venv/Scripts/python -m pip install -e 'hexperiment[dev]'` command still works from a clean checkout and that `.venv/Scripts/hexperiment run --help` prints the usage.
   - Confirm that each check module has example-based tests for a leaking and a clean case and at least one Hypothesis test, that the clean-data test passes, and that no runtime dependency beyond `pandas`, `numpy` and `scikit-learn` was added.
