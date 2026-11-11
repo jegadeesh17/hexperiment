@@ -5,8 +5,12 @@
 hexperiment/               the skeleton: the reusable kit
   pyproject.toml
   src/hexperiment/
-    __init__.py            public API: audit, Verdict, Finding, HexInputError
+    __init__.py            public API: load, split, audit, load_history, Verdict, Finding, HexInputError
+    errors.py              HexInputError
+    models.py              shared dataclasses and enums (Finding, Verdict, outcomes)
     config.py              loads and validates hex.toml
+    auditor.py             the in-script audit() (validation, data checks, snapshot)
+    runs.py                run ids, run folders, history
     data.py                load() and split(), including canary scrambling
     checks/                one module per check, each a pure function returning findings
     canary.py              snapshots and the normal / canary / control comparison

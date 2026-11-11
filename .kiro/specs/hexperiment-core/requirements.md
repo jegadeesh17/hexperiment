@@ -33,7 +33,12 @@ Scope of this spec: data loading and splitting, configuration, the checks, the c
 2. THE package SHALL expose `split(df)` that returns `(train, test)` DataFrames, preserving the row-id index.
 3. WHERE `split.time_column` is configured, `split` SHALL put the latest `split.test_fraction` of rows (by time) in `test` and the rest in `train`.
 4. WHERE `split.time_column` is not configured, `split` SHALL assign each row to `test` when a seeded hash of its row id falls below `split.test_fraction`, so that membership depends only on the row id and the seed, never on the row's values.
-5. WHEN `load` runs with `HEX_MODE=canary` THEN the system SHALL compute the test row ids exactly as `split` would, and within those rows independently permute the values of every column except `split.time_column`, using a fixed seed, before returning the DataFrame.
+5. WHEN `load` runs with `HEX_MODE=canary` THEN the system SHALL compute the test row ids exactly as `split` would and, using a fixed seed, replace the values in those rows of every column except `split.time_column` (a "tilted resample"), before returning the DataFrame:
+   - a column with exactly two distinct non-missing test values (including a binary target and boolean columns) SHALL have the two values swapped;
+   - a column with three or more distinct non-missing test values SHALL have each non-missing test value replaced by a draw, with replacement, from the upper half of its non-missing test values (by value order for numeric columns; the more frequent half of its categories for non-numeric columns), with that pool widened downward until it holds at least two distinct values;
+   - a column with one distinct non-missing test value SHALL be unchanged, and missing values SHALL stay missing;
+   - the replacement SHALL never introduce a value that the column did not already contain in its test rows.
+   The tilt moves each column's mean, quantiles and category frequencies systematically, so leaks through column-level statistics (for example mean imputation or a scaler fitted on all rows) change training and are detected.
 6. IF `data.path` is missing or the file is empty THEN `load` SHALL raise `HexInputError` naming the path.
 
 ### Requirement 2: Audit entry point
@@ -209,8 +214,8 @@ Scope of this spec: data loading and splitting, configuration, the checks, the c
 #### Acceptance Criteria
 
 1. EACH check SHALL have example-based tests for a leaking case and a clean case.
-2. EACH data check SHALL have at least one property-based test written with `hypothesis`, including: any test row copied from train is detected by the overlap check; a feature equal to the target is always detected by the proxy check; reordering rows never changes any check result; `split` membership never depends on row values.
-3. THE canary test SHALL have tests with small training scripts proving: imputing with the mean of all rows before the split is detected; a scaler fitted on all rows before the split is detected; a leak inside a helper function in another module is detected; fitting on training rows only is not flagged; fitting on an unrelated dataset before the split is not flagged; a script without fixed seeds is reported as The Shapeshifter, not The Peeking Spirit.
+2. EACH data check SHALL have at least one property-based test written with `hypothesis`, including: any test row copied from train is detected by the overlap check; a feature equal to the target is always detected by the proxy check; reordering rows never changes any check result; `split` membership never depends on row values; the canary scramble never introduces a value absent from a column's original test rows, never makes a column with two or more distinct test values constant, and always leaves both classes in a binary target.
+3. THE canary test SHALL have tests with small training scripts proving: imputing with the mean of all rows before the split is detected; a scaler fitted on all rows before the split is detected; a target encoding computed over all rows before the split is detected; a leak inside a helper function in another module is detected; fitting on training rows only is not flagged; fitting on an unrelated dataset before the split is not flagged; a script without fixed seeds is reported as The Shapeshifter, not The Peeking Spirit.
 4. A synthetic clean dataset (independent random features) SHALL produce no `error` findings.
 5. THE full test suite SHALL pass with `.venv/Scripts/python -m pytest hexperiment/tests -q` and finish in under 90 seconds on a laptop CPU.
 6. THE package SHALL pass `ruff check hexperiment`.
