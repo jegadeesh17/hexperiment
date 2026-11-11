@@ -96,7 +96,7 @@
   - Add a Hypothesis test: for arbitrary text in app names, descriptions, column names and evidence, every table row in the rendered card has the same number of cells as its header.
   - _Requirements: 11.4, 14.1, 14.2, 14.3_
 
-- [ ] 13. Run store and history
+- [x] 13. Run store and history
   - Create `hexperiment/src/hexperiment/runs.py` with `format_run_id`, `new_run_id`, pure `count_test_set_uses` (same split block; input-error verdicts excluded), `load_history` (reads `runs/*/verdict.json`, sorts by `(created_at, run_id)`, a malformed file raises `HexInputError` naming it, a missing `runs/` returns an empty list), `clear_app_verdict` and `finalize_run`.
   - `finalize_run` adds 1 to the use count unless the run is an input error, takes the version from `importlib.metadata`, creates `runs/<run_id>/` with `exist_ok=False` (an existing folder raises and is left untouched), writes `verdict.json` and `model_card.md` as UTF-8, and copies `verdict.json` to the app directory through a temporary file and `os.replace`.
   - Create `hexperiment/tests/test_runs.py`: run id format and uniqueness; history ordering; never overwriting an earlier run folder; the app-level copy equals the run copy; `count_test_set_uses` counts fast, full, `REJECTED` and `UNVERIFIED` runs with the same split block and ignores input-error runs; `clear_app_verdict` with and without a file; malformed history file.
