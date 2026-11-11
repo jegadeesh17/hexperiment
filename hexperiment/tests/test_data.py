@@ -1491,6 +1491,33 @@ REJECTED_AUDIT_INPUTS = {
         lambda: {"test": audit_frames()[1].drop(columns="y")},
         ["'y'", "missing from test"],
     ),
+    # Requirement 4.2: missing target values
+    "target has missing values in train": (
+        lambda: {"train": with_train_column("y", [0, 1, None, 1, 0, None, 0, 1])},
+        ["'y'", "2 missing value(s) in train", "8 rows", "dropna(subset=['y'])"],
+    ),
+    "target has missing values in test": (
+        lambda: {"test": with_test_column("y", [0, 1, np.nan, 1])},
+        ["'y'", "1 missing value(s) in test", "4 rows"],
+    ),
+    "string target has a missing value in test": (
+        lambda: {"test": with_test_column("y", ["no", "yes", None, "yes"])},
+        ["'y'", "1 missing value(s) in test"],
+    ),
+    "nullable target has a missing value in train": (
+        lambda: {
+            "train": with_train_column(
+                "y", pd.array([0, 1, 0, 1, 0, 1, 0, pd.NA], dtype="Int64")
+            )
+        },
+        ["'y'", "1 missing value(s) in train"],
+    ),
+    # Requirement 4.5: no features
+    "features is an empty list": (
+        lambda: {"features": []},
+        ["features is empty", "features=['age', 'plan']"],
+    ),
+    "features is an empty tuple": (lambda: {"features": ()}, ["features is empty"]),
     # Requirement 4.3
     "single-class test target": (
         lambda: {"test": with_test_column("y", [0, 0, 0, 0])},
@@ -1646,6 +1673,29 @@ def test_validate_audit_inputs_reports_the_first_problem_in_the_documented_order
         (  # 4.2 before 4.4
             {"test": test.drop(columns="y"), "y_score": SCORES_TEST[:2]},
             "missing from test",
+        ),
+        (  # 4.2 (missing column) before 4.2 (missing values)
+            {"test": test.drop(columns="y"), "train": train.assign(y=np.nan)},
+            "missing from test",
+        ),
+        (  # 4.2 (missing values) before 4.4
+            {"test": test.assign(y=[0, 1, np.nan, 1]), "y_score": SCORES_TEST[:2]},
+            "missing value(s) in test",
+        ),
+        (  # 4.2 (train) before 4.2 (test)
+            {
+                "train": train.assign(y=np.nan),
+                "test": test.assign(y=[0, 1, np.nan, 1]),
+            },
+            "in train",
+        ),
+        (  # 4.4 before 4.5 (empty features)
+            {"y_score": scores_with(0, np.nan), "features": []},
+            "NaN",
+        ),
+        (  # 4.5 (empty features) before 4.6
+            {"features": [], "config": audit_config(time_column="gone")},
+            "features is empty",
         ),
         (  # 4.4 before 4.5
             {"y_score": scores_with(0, np.nan), "features": ["nope"]},
@@ -1891,6 +1941,10 @@ def test_validate_snapshot_inputs_does_not_modify_its_arguments() -> None:
         ),
         (lambda: {"test": audit_frames()[1].drop(columns=["y", "c"])}, "missing from"),
         (lambda: {"test": audit_frames()[1].iloc[:0]}, "test is empty"),
+        (
+            lambda: {"test": with_test_column("y", [0, 1, np.nan, 1])},
+            "missing value(s) in test",
+        ),
     ],
     ids=[
         "single-class test target",
@@ -1899,6 +1953,7 @@ def test_validate_snapshot_inputs_does_not_modify_its_arguments() -> None:
         "missing time column",
         "test frame without columns",
         "empty test",
+        "missing test target values",
     ],
 )
 def test_snapshot_validation_accepts_what_only_scoring_needs(

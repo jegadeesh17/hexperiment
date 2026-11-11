@@ -301,9 +301,10 @@ def validate_audit_inputs(
     """Validate the arguments of ``audit`` in normal mode (Requirement 4).
 
     Raises ``HexInputError`` for the first problem found, checked in this order:
-    an empty frame (4.1); a missing target column (4.2); a score array of the
-    wrong length, with NaN or outside ``[0, 1]`` (4.4); a feature missing from
-    either frame (4.5); a missing or unparseable time column (4.6); a test
+    an empty frame (4.1); a missing target column (4.2); missing values in the
+    target of either frame (4.2); a score array of the wrong length, with NaN or
+    outside ``[0, 1]`` (4.4); an empty ``features`` list, or a feature missing
+    from either frame (4.5); a missing or unparseable time column (4.6); a test
     target with a single class (4.3). Nothing is modified.
     """
     _require_rows(train, "train")
@@ -311,6 +312,8 @@ def validate_audit_inputs(
     target = config.target
     for label, frame in (("train", train), ("test", test)):
         _require_target(frame, label, target.column)
+    for label, frame in (("train", train), ("test", test)):
+        _require_target_values(frame, label, target.column)
     scores = _as_scores(y_score, "y_score")
     scores_train = (
         None if y_score_train is None else _as_scores(y_score_train, "y_score_train")
@@ -322,6 +325,7 @@ def validate_audit_inputs(
     if scores_train is not None:
         _require_probabilities(scores_train, "y_score_train")
     names = _feature_names(features)
+    _require_some_features(names)
     _require_features(names, (("train", train), ("test", test)))
     time_column = config.split.time_column
     if time_column is not None:
@@ -477,6 +481,17 @@ def _require_target(frame: pd.DataFrame, label: str, column: str) -> None:
         )
 
 
+def _require_target_values(frame: pd.DataFrame, label: str, column: str) -> None:
+    missing = int(frame[column].isna().sum())
+    if missing:
+        raise HexInputError(
+            f"target column {column!r} has {missing} missing value(s) in {label} "
+            f"({len(frame)} rows).",
+            f"Remove the rows with a missing {column!r} before hexperiment.split "
+            f"(for example df.dropna(subset=[{column!r}])), or fill in the label.",
+        )
+
+
 def _as_scores(values: ArrayLike1D, name: str) -> NDArray[np.float64]:
     """Return ``values`` as a one-dimensional float64 copy."""
     try:
@@ -540,6 +555,15 @@ def _feature_names(features: Sequence[str]) -> tuple[str, ...]:
     return tuple(features)
 
 
+def _require_some_features(names: tuple[str, ...]) -> None:
+    if not names:
+        raise HexInputError(
+            "features is empty, so the model used no input columns.",
+            "Pass the names of the columns the model was trained on, for example "
+            "features=['age', 'plan'].",
+        )
+
+
 def _require_features(
     names: tuple[str, ...], frames: Sequence[tuple[str, pd.DataFrame]]
 ) -> None:
@@ -558,7 +582,7 @@ def _require_features(
 
 
 def _is_positive(frame: pd.DataFrame, target: TargetConfig) -> NDArray[np.bool_]:
-    """Label rows ``target == positive``; a missing target value is not positive."""
+    """Label rows ``target == positive``; missing values were rejected earlier."""
     matches = frame[target.column].eq(target.positive)
     return matches.fillna(False).to_numpy(dtype=bool)
 
