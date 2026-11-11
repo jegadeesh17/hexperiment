@@ -8,15 +8,19 @@ time; in a leak-free pipeline its snapshot equals the normal one (Requirement 10
 Layer 1 (snapshots, comparison, the canary decision) is pure: it has no file,
 process or clock access. Layer 2 is the ``.hex/`` exchange protocol: the files
 that a training execution leaves for the parent process, and the readers that
-refuse files from another run or another format.
+refuse files from another run or another format. Layer 3 starts ``train.py`` and
+orchestrates the executions of one run (Requirements 10.1, 16.2, 16.3).
 """
 
 from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import shutil
+import subprocess
+import sys
 import zipfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -28,7 +32,7 @@ import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
-from hexperiment.config import ExecMode
+from hexperiment.config import ENV_MODE, ENV_RUN_ID, ExecMode, HexConfig
 from hexperiment.errors import HexInputError
 from hexperiment.models import (
     CheckResult,
@@ -824,3 +828,140 @@ def _boolean(value: Any) -> bool:
     if not isinstance(value, bool):
         raise TypeError("expected a boolean")
     return value
+
+
+# --- Layer 3: running train.py and orchestrating a run -------------------------------
+
+type Runner = Callable[[Path, ExecMode, str, float], None]
+
+_STDERR_TAIL_LINES = 40
+
+
+def run_train_script(
+    app_dir: Path, mode: ExecMode, run_id: str, timeout_seconds: float
+) -> None:
+    """Run ``<app_dir>/train.py`` once in ``mode`` (Requirement 16.2).
+
+    The script runs with the current interpreter, with ``app_dir`` as its working
+    directory, without a shell, and with ``HEX_MODE`` and ``HEX_RUN_ID`` set.
+    ``PYTHONHASHSEED`` is left as the caller has it: a script whose result depends
+    on hash order is not deterministic, and that should surface as The Shapeshifter
+    (Requirement 10.4). A timeout or a non-zero exit raises ``ExecutionFailed``
+    with the last lines of stderr (Requirements 16.3, 16.5).
+    """
+    environment = {**os.environ, ENV_MODE: mode.value, ENV_RUN_ID: run_id}
+    try:
+        completed = subprocess.run(
+            [sys.executable, SCRIPT_NAME],
+            cwd=app_dir,
+            env=environment,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as expired:
+        raise ExecutionFailed(
+            _failure_message(
+                f"{SCRIPT_NAME} ran longer than {timeout_seconds:g} seconds in "
+                f"{mode.value} mode and was stopped. Make training faster, or "
+                "raise [run] timeout_seconds in hex.toml.",
+                expired.stderr,
+            )
+        ) from None
+    if completed.returncode != 0:
+        raise ExecutionFailed(
+            _failure_message(
+                f"{SCRIPT_NAME} exited with code {completed.returncode} in "
+                f"{mode.value} mode. Fix the error and run it again.",
+                completed.stderr,
+            )
+        )
+
+
+def run_executions(
+    app_dir: Path,
+    config: HexConfig,
+    run_id: str,
+    *,
+    full: bool,
+    runner: Runner = run_train_script,
+) -> ExecutionReport:
+    """Run the executions of one run and decide the canary (Requirement 10.1).
+
+    A fast run executes ``normal`` only and reports the canary as skipped. A full
+    run also executes ``canary``, and ``control`` only when ``decide_canary`` asks
+    for it. The folder of a mode is cleared before its execution, and the snapshot
+    must exist and carry ``run_id`` afterwards, otherwise ``ExecutionFailed`` is
+    raised (Requirements 2.3, 16.5). A failed normal execution is accepted only when
+    it left an input error in ``result.json``; the other executions are then skipped
+    (Requirement 4.7). ``<app_dir>/verdict.json`` is never read or written.
+    """
+    timeout = config.run.timeout_seconds
+    result, normal = _run_normal(app_dir, run_id, timeout, runner)
+    if not full:
+        return ExecutionReport(result, skipped_outcome(), RunMode.FAST)
+    if normal is None:
+        return ExecutionReport(result, skipped_outcome(), RunMode.FULL)
+    canary = _run_snapshot(app_dir, ExecMode.CANARY, run_id, timeout, runner)
+    marker = read_load_marker(app_dir, ExecMode.CANARY, run_id)
+
+    def run_control() -> Snapshot:
+        return _run_snapshot(app_dir, ExecMode.CONTROL, run_id, timeout, runner)
+
+    outcome = decide_canary(normal, canary, marker, run_control, hint_locations(result))
+    return ExecutionReport(result, outcome, RunMode.FULL)
+
+
+# --- helpers for Layer 3 -------------------------------------------------------------
+
+
+def _run_normal(
+    app_dir: Path, run_id: str, timeout: float, runner: Runner
+) -> tuple[DataAuditResult, Snapshot | None]:
+    """Run the normal execution; the snapshot is ``None`` for an input error."""
+    clear_mode_dir(app_dir, ExecMode.NORMAL)
+    try:
+        runner(app_dir, ExecMode.NORMAL, run_id, timeout)
+    except ExecutionFailed:
+        # Requirement 4.7: audit raised an input error after recording it.
+        recorded = _recorded_input_error(app_dir, run_id)
+        if recorded is None:
+            raise
+        return recorded, None
+    result = read_result(app_dir, run_id)
+    if result.input_error is not None:
+        return result, None
+    return result, read_snapshot(app_dir, ExecMode.NORMAL, run_id)
+
+
+def _run_snapshot(
+    app_dir: Path, mode: ExecMode, run_id: str, timeout: float, runner: Runner
+) -> Snapshot:
+    clear_mode_dir(app_dir, mode)
+    runner(app_dir, mode, run_id, timeout)
+    return read_snapshot(app_dir, mode, run_id)
+
+
+def _recorded_input_error(app_dir: Path, run_id: str) -> DataAuditResult | None:
+    """The normal ``result.json`` of this run when it carries an input error."""
+    try:
+        result = read_result(app_dir, run_id)
+    except ExecutionFailed:
+        return None
+    return result if result.input_error is not None else None
+
+
+def _failure_message(headline: str, stderr: str | bytes | None) -> str:
+    tail = _stderr_tail(stderr)
+    if not tail:
+        return headline
+    return f"{headline}\nLast lines of stderr:\n{tail}"
+
+
+def _stderr_tail(stderr: str | bytes | None) -> str:
+    if stderr is None:
+        return ""
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", errors="replace")
+    return "\n".join(stderr.rstrip().splitlines()[-_STDERR_TAIL_LINES:])

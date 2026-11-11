@@ -1,6 +1,11 @@
 import json
 import math
+import subprocess
+import sys
+import textwrap
+import time
 from dataclasses import replace
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -24,12 +29,14 @@ from hexperiment.canary import (
     read_load_marker,
     read_result,
     read_snapshot,
+    run_executions,
+    run_train_script,
     skipped_outcome,
     write_load_marker,
     write_result,
     write_snapshot,
 )
-from hexperiment.config import WAIVABLE_CHECKS, ExecMode
+from hexperiment.config import WAIVABLE_CHECKS, ExecMode, HexConfig, parse_config
 from hexperiment.models import (
     CheckResult,
     DataAuditResult,
@@ -37,6 +44,7 @@ from hexperiment.models import (
     Finding,
     MetricResult,
     Outcome,
+    RunMode,
     Severity,
 )
 
@@ -1463,3 +1471,404 @@ def test_write_then_read_snapshot_returns_equal_arrays(tmp_path, snapshot):
     write_snapshot(tmp_path, snapshot)
     read = read_snapshot(tmp_path, snapshot.mode, snapshot.run_id)
     assert_same_snapshot(read, snapshot)
+
+
+# --- run_executions with a fake runner (Requirements 10.1 to 10.5, 16.5) -----------
+
+
+def make_config(app_dir: Path, timeout_seconds: float = 120) -> HexConfig:
+    raw = {
+        "data": {"path": "data.csv"},
+        "target": {"column": "target"},
+        "metric": {"name": "roc_auc", "threshold": 0.8},
+        "run": {"timeout_seconds": timeout_seconds},
+    }
+    return parse_config(raw, source=app_dir / "hex.toml", app_dir=app_dir)
+
+
+def hinted_result() -> DataAuditResult:
+    hint = CheckResult(
+        "split_order", None, Outcome.PASSED, (split_order_finding("train.py:14"),)
+    )
+    return replace(audit_result(), checks=(hint,))
+
+
+def run_full(app_dir: Path, runner, **config):
+    return run_executions(
+        app_dir, make_config(app_dir, **config), RUN, full=True, runner=runner
+    )
+
+
+def normal_plan(fake_runner, **changes):
+    plan = fake_runner.Plan(snapshot=make_snapshot(), result=audit_result())
+    return replace(plan, **changes)
+
+
+def canary_plan(fake_runner, snapshot=None, marker="clean", **changes):
+    plan = fake_runner.Plan(
+        snapshot=make_snapshot() if snapshot is None else snapshot,
+        marker=clean_marker() if marker == "clean" else marker,
+    )
+    return replace(plan, **changes)
+
+
+def leak_plans(fake_runner, **changes):
+    """Normal, a canary that differs in one row, and a control equal to normal."""
+    return {
+        "normal": normal_plan(fake_runner),
+        "canary": canary_plan(fake_runner, snapshot=changed_row(make_snapshot())),
+        "control": fake_runner.Plan(snapshot=make_snapshot()),
+    } | changes
+
+
+def test_a_fast_run_executes_normal_once_and_skips_the_canary(tmp_path, fake_runner):
+    runner = fake_runner(normal=normal_plan(fake_runner))
+    config = make_config(tmp_path)
+    report = run_executions(tmp_path, config, RUN, full=False, runner=runner)
+    assert runner.calls == [ExecMode.NORMAL]
+    assert report.mode is RunMode.FAST
+    assert report.canary == skipped_outcome()
+    assert report.result == audit_result()
+
+
+def test_a_fast_run_still_needs_the_snapshot_of_the_normal_execution(
+    tmp_path, fake_runner
+):
+    runner = fake_runner(normal=fake_runner.Plan(result=audit_result()))
+    config = make_config(tmp_path)
+    with pytest.raises(ExecutionFailed, match="did not call hexperiment.audit"):
+        run_executions(tmp_path, config, RUN, full=False, runner=runner)
+
+
+def test_a_full_run_with_equal_snapshots_executes_twice(tmp_path, fake_runner):
+    runner = fake_runner(
+        normal=normal_plan(fake_runner), canary=canary_plan(fake_runner)
+    )
+    report = run_full(tmp_path, runner)
+    assert runner.calls == [ExecMode.NORMAL, ExecMode.CANARY]
+    assert report.mode is RunMode.FULL
+    assert report.canary == CanaryOutcome(Outcome.PASSED, Outcome.PASSED, ())
+    assert report.result == audit_result()
+
+
+def test_a_differing_canary_triggers_exactly_one_control_run(tmp_path, fake_runner):
+    runner = fake_runner(**leak_plans(fake_runner))
+    run_full(tmp_path, runner)
+    assert runner.calls == [ExecMode.NORMAL, ExecMode.CANARY, ExecMode.CONTROL]
+
+
+def test_a_control_that_matches_normal_gives_the_peeking_spirit(tmp_path, fake_runner):
+    report = run_full(tmp_path, fake_runner(**leak_plans(fake_runner)))
+    assert report.canary.outcome is Outcome.FAILED
+    assert report.canary.determinism is Outcome.PASSED
+    (finding,) = report.canary.findings
+    assert finding.ghost == "The Peeking Spirit"
+    assert finding.severity is Severity.ERROR
+    assert finding.evidence["rows_changed"] == 1
+
+
+def test_a_control_that_differs_gives_the_shapeshifter(tmp_path, fake_runner):
+    different = with_scores(make_snapshot(), (0.1, 0.2, 0.3, 0.5))
+    plans = leak_plans(fake_runner, control=fake_runner.Plan(snapshot=different))
+    runner = fake_runner(**plans)
+    report = run_full(tmp_path, runner)
+    assert runner.calls == [ExecMode.NORMAL, ExecMode.CANARY, ExecMode.CONTROL]
+    assert report.canary.outcome is Outcome.INCONCLUSIVE
+    assert report.canary.determinism is Outcome.FAILED
+    (finding,) = report.canary.findings
+    assert finding.ghost == "The Shapeshifter"
+    assert finding.severity is Severity.WARNING
+
+
+def test_the_peeking_spirit_lists_the_lines_of_the_split_order_hint(
+    tmp_path, fake_runner
+):
+    normal = normal_plan(fake_runner, result=hinted_result())
+    report = run_full(tmp_path, fake_runner(**leak_plans(fake_runner, normal=normal)))
+    (finding,) = report.canary.findings
+    assert finding.fix.endswith("Suspect lines: train.py:14.")
+
+
+def test_differing_id_sets_skip_the_canary_without_a_control_run(
+    tmp_path, fake_runner
+):
+    other_ids = make_snapshot(train_ids=(0, 1, 2, 100), scores=None)
+    runner = fake_runner(
+        normal=normal_plan(fake_runner),
+        canary=canary_plan(fake_runner, snapshot=other_ids),
+    )
+    report = run_full(tmp_path, runner)
+    assert runner.calls == [ExecMode.NORMAL, ExecMode.CANARY]
+    assert report.canary.outcome is Outcome.SKIPPED
+    assert report.canary.determinism is Outcome.SKIPPED
+    (warning,) = report.canary.findings
+    assert warning.severity is Severity.WARNING
+
+
+def test_scrambled_rows_in_train_give_not_applied(tmp_path, fake_runner):
+    canary = canary_plan(
+        fake_runner,
+        snapshot=changed_row(make_snapshot()),
+        marker=clean_marker(scrambled=(3, 4, 5)),
+    )
+    runner = fake_runner(normal=normal_plan(fake_runner), canary=canary)
+    report = run_full(tmp_path, runner)
+    assert runner.calls == [ExecMode.NORMAL, ExecMode.CANARY]
+    assert report.canary.outcome is Outcome.NOT_APPLIED
+    assert report.canary.determinism is Outcome.SKIPPED
+    (warning,) = report.canary.findings
+    assert "scrambled test rows ended up in the training set" in warning.message
+
+
+def test_a_missing_load_marker_gives_not_applied(tmp_path, fake_runner):
+    runner = fake_runner(
+        normal=normal_plan(fake_runner),
+        canary=canary_plan(fake_runner, marker=None),
+    )
+    report = run_full(tmp_path, runner)
+    assert runner.calls == [ExecMode.NORMAL, ExecMode.CANARY]
+    assert report.canary.outcome is Outcome.NOT_APPLIED
+    (warning,) = report.canary.findings
+    assert "did not load its data with hexperiment.load" in warning.message
+
+
+@pytest.mark.parametrize("exits_with_error", [True, False])
+def test_an_input_error_stops_after_the_first_execution(
+    tmp_path, fake_runner, exits_with_error
+):
+    failure = "train.py exited with code 1" if exits_with_error else None
+    runner = fake_runner(
+        normal=fake_runner.Plan(result=audit_result(input_error=True), fail=failure),
+        canary=canary_plan(fake_runner),
+    )
+    report = run_full(tmp_path, runner)
+    assert runner.calls == [ExecMode.NORMAL]
+    assert report.mode is RunMode.FULL
+    assert report.canary == skipped_outcome()
+    assert report.result.input_error == error_finding()
+    assert report.result.metric is None
+
+
+def test_a_fast_run_with_an_input_error_is_a_fast_report(tmp_path, fake_runner):
+    plan = fake_runner.Plan(
+        result=audit_result(input_error=True), fail="train.py exited with code 1"
+    )
+    runner = fake_runner(normal=plan)
+    config = make_config(tmp_path)
+    report = run_executions(tmp_path, config, RUN, full=False, runner=runner)
+    assert report.mode is RunMode.FAST
+    assert report.result.input_error == error_finding()
+
+
+def test_a_failed_normal_execution_without_an_input_error_raises(
+    tmp_path, fake_runner
+):
+    normal = normal_plan(fake_runner, fail="train.py exited with code 1: boom")
+    runner = fake_runner(**leak_plans(fake_runner, normal=normal))
+    with pytest.raises(ExecutionFailed, match="exited with code 1: boom"):
+        run_full(tmp_path, runner)
+    assert runner.calls == [ExecMode.NORMAL]
+
+
+def test_a_failed_execution_with_an_input_error_of_another_run_raises(
+    tmp_path, fake_runner
+):
+    plan = fake_runner.Plan(
+        result=audit_result(input_error=True),
+        written_run_id=OTHER_RUN,
+        fail="train.py exited with code 1: boom",
+    )
+    runner = fake_runner(normal=plan, canary=canary_plan(fake_runner))
+    with pytest.raises(ExecutionFailed, match="boom"):
+        run_full(tmp_path, runner)
+    assert runner.calls == [ExecMode.NORMAL]
+
+
+def test_a_script_that_never_audits_raises(tmp_path, fake_runner):
+    runner = fake_runner()
+    with pytest.raises(ExecutionFailed, match="did not call hexperiment.audit"):
+        run_full(tmp_path, runner)
+    assert runner.calls == [ExecMode.NORMAL]
+
+
+def test_a_missing_normal_snapshot_raises(tmp_path, fake_runner):
+    runner = fake_runner(normal=fake_runner.Plan(result=audit_result()))
+    with pytest.raises(ExecutionFailed, match="did not call hexperiment.audit"):
+        run_full(tmp_path, runner)
+    assert runner.calls == [ExecMode.NORMAL]
+
+
+@pytest.mark.parametrize("mode", [ExecMode.NORMAL, ExecMode.CANARY, ExecMode.CONTROL])
+def test_a_snapshot_of_another_run_raises_in_every_mode(tmp_path, fake_runner, mode):
+    plans = leak_plans(fake_runner)
+    plans[mode.value] = replace(plans[mode.value], written_run_id=OTHER_RUN)
+    with pytest.raises(ExecutionFailed, match="another run is using this app"):
+        run_full(tmp_path, fake_runner(**plans))
+
+
+def test_a_canary_execution_that_fails_raises(tmp_path, fake_runner):
+    canary = canary_plan(fake_runner, fail="train.py exited with code 1: canary")
+    runner = fake_runner(normal=normal_plan(fake_runner), canary=canary)
+    with pytest.raises(ExecutionFailed, match="canary"):
+        run_full(tmp_path, runner)
+    assert runner.calls == [ExecMode.NORMAL, ExecMode.CANARY]
+
+
+def test_a_missing_canary_snapshot_raises(tmp_path, fake_runner):
+    runner = fake_runner(normal=normal_plan(fake_runner))
+    with pytest.raises(ExecutionFailed, match="canary mode"):
+        run_full(tmp_path, runner)
+    assert runner.calls == [ExecMode.NORMAL, ExecMode.CANARY]
+
+
+def test_a_missing_control_snapshot_raises(tmp_path, fake_runner):
+    plans = leak_plans(fake_runner, control=None)
+    runner = fake_runner(**plans)
+    with pytest.raises(ExecutionFailed, match="control mode"):
+        run_full(tmp_path, runner)
+    assert runner.calls == [ExecMode.NORMAL, ExecMode.CANARY, ExecMode.CONTROL]
+
+
+def test_a_control_execution_that_fails_raises(tmp_path, fake_runner):
+    control = fake_runner.Plan(fail="train.py exited with code 1: control")
+    runner = fake_runner(**leak_plans(fake_runner, control=control))
+    with pytest.raises(ExecutionFailed, match="control"):
+        run_full(tmp_path, runner)
+
+
+@pytest.mark.parametrize("mode", [ExecMode.NORMAL, ExecMode.CANARY, ExecMode.CONTROL])
+def test_the_folder_of_a_mode_is_cleared_before_its_execution(
+    tmp_path, fake_runner, mode
+):
+    # A runner that writes nothing must never be read through a stale file.
+    plans = leak_plans(fake_runner)
+    plans[mode.value] = fake_runner.Plan()
+    write_snapshot(tmp_path, make_snapshot(mode=mode))
+    write_load_marker(tmp_path, clean_marker())
+    if mode is ExecMode.NORMAL:
+        write_result(tmp_path, audit_result(), RUN)
+    with pytest.raises(ExecutionFailed, match="did not call hexperiment.audit"):
+        run_full(tmp_path, fake_runner(**plans))
+
+
+def test_the_configured_timeout_reaches_every_execution(tmp_path, fake_runner):
+    runner = fake_runner(**leak_plans(fake_runner))
+    run_full(tmp_path, runner, timeout_seconds=7.5)
+    assert runner.timeouts == [7.5, 7.5, 7.5]
+
+
+@pytest.mark.parametrize("full", [False, True])
+def test_run_executions_never_touches_the_app_level_verdict(
+    tmp_path, fake_runner, full
+):
+    runner = fake_runner(
+        normal=normal_plan(fake_runner), canary=canary_plan(fake_runner)
+    )
+    config = make_config(tmp_path)
+    run_executions(tmp_path, config, RUN, full=full, runner=runner)
+    assert not (tmp_path / "verdict.json").exists()
+
+    (tmp_path / "verdict.json").write_text("sentinel", encoding="utf-8")
+    run_executions(tmp_path, config, RUN, full=full, runner=runner)
+    assert (tmp_path / "verdict.json").read_text(encoding="utf-8") == "sentinel"
+
+
+def test_run_executions_leaves_the_app_verdict_alone_when_it_fails(
+    tmp_path, fake_runner
+):
+    (tmp_path / "verdict.json").write_text("sentinel", encoding="utf-8")
+    with pytest.raises(ExecutionFailed):
+        run_full(tmp_path, fake_runner())
+    assert (tmp_path / "verdict.json").read_text(encoding="utf-8") == "sentinel"
+
+
+# --- run_train_script (Requirements 16.2, 16.3, 16.5) --------------------------------
+
+
+def write_script(app_dir: Path, body: str) -> None:
+    (app_dir / "train.py").write_text(textwrap.dedent(body), encoding="utf-8")
+
+
+def test_run_train_script_runs_the_script_in_the_app_folder_with_the_run_env(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("PYTHONHASHSEED", raising=False)
+    monkeypatch.chdir(tmp_path.parent)  # the caller's folder is not the app's
+    write_script(
+        tmp_path,
+        """
+        import json, os, sys
+
+        seen = {
+            "mode": os.environ.get("HEX_MODE"),
+            "run_id": os.environ.get("HEX_RUN_ID"),
+            "hash_seed": os.environ.get("PYTHONHASHSEED"),
+            "cwd": os.getcwd(),
+            "executable": sys.executable,
+        }
+        with open("seen.json", "w", encoding="utf-8") as handle:
+            json.dump(seen, handle)
+        """,
+    )
+    run_train_script(tmp_path, ExecMode.CANARY, RUN, 60)
+    seen = read_json(tmp_path / "seen.json")
+    assert (seen["mode"], seen["run_id"]) == ("canary", RUN)
+    assert seen["hash_seed"] is None
+    assert Path(seen["cwd"]).samefile(tmp_path)
+    assert Path(seen["executable"]).samefile(sys.executable)
+
+
+def test_run_train_script_raises_with_the_last_40_lines_of_stderr(tmp_path):
+    write_script(
+        tmp_path,
+        """
+        import sys
+
+        for i in range(1, 61):
+            print(f"err {i:03d}", file=sys.stderr)
+        sys.exit(3)
+        """,
+    )
+    with pytest.raises(ExecutionFailed, match="exited with code 3") as info:
+        run_train_script(tmp_path, ExecMode.NORMAL, RUN, 60)
+    message = str(info.value)
+    assert "err 060" in message
+    assert "err 021" in message
+    assert "err 020" not in message
+
+
+def test_run_train_script_reports_an_exception_of_the_script(tmp_path):
+    write_script(tmp_path, "raise ValueError('boom from train.py')\n")
+    with pytest.raises(ExecutionFailed, match="boom from train.py"):
+        run_train_script(tmp_path, ExecMode.NORMAL, RUN, 60)
+
+
+def test_run_train_script_stops_a_script_after_the_timeout(tmp_path):
+    write_script(tmp_path, "import time\ntime.sleep(60)\n")
+    started = time.monotonic()
+    with pytest.raises(ExecutionFailed, match="longer than 1 seconds"):
+        run_train_script(tmp_path, ExecMode.NORMAL, RUN, 1)
+    assert time.monotonic() - started < 30
+
+
+def test_run_train_script_starts_python_directly_with_the_documented_arguments(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("PYTHONHASHSEED", raising=False)
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    run_train_script(tmp_path, ExecMode.CONTROL, RUN, 12.5)
+    ((args, kwargs),) = calls
+    assert args == [sys.executable, "train.py"]
+    assert kwargs.get("shell", False) is False
+    assert kwargs["cwd"] == tmp_path
+    assert kwargs["timeout"] == 12.5
+    assert kwargs["capture_output"] is True
+    assert kwargs["env"]["HEX_MODE"] == "control"
+    assert kwargs["env"]["HEX_RUN_ID"] == RUN
+    assert "PYTHONHASHSEED" not in kwargs["env"]
