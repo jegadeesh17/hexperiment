@@ -1,0 +1,114 @@
+{
+  "app": "hotel-cancellations",
+  "checks": [
+    {
+      "ghost": "The Doppelganger",
+      "name": "row_overlap",
+      "outcome": "passed"
+    },
+    {
+      "ghost": "The Possession",
+      "name": "target_proxy",
+      "outcome": "failed"
+    },
+    {
+      "ghost": "The Prophet",
+      "name": "temporal",
+      "outcome": "not applicable"
+    },
+    {
+      "ghost": null,
+      "name": "split_order",
+      "outcome": "passed"
+    },
+    {
+      "ghost": "The Peeking Spirit",
+      "name": "canary",
+      "outcome": "failed"
+    },
+    {
+      "ghost": "The Shapeshifter",
+      "name": "determinism",
+      "outcome": "passed"
+    }
+  ],
+  "created_at": "2026-11-11T19:50:51Z",
+  "data": {
+    "n_test": 16027,
+    "n_train": 95457,
+    "positive_rate_test": 0.266113,
+    "positive_rate_train": 0.369412,
+    "test_time_range": null,
+    "train_time_range": null
+  },
+  "findings": [
+    {
+      "check": "target_proxy",
+      "evidence": {
+        "score": 1.0,
+        "threshold": 0.95
+      },
+      "fix": "check whether this column is recorded after the outcome; if so, drop it",
+      "ghost": "The Possession",
+      "location": "reservation_status",
+      "message": "reservation_status alone predicts the target with AUC 1.0000",
+      "severity": "error"
+    },
+    {
+      "check": "split_order",
+      "evidence": {
+        "call": "transform",
+        "first_split_line": 103
+      },
+      "fix": "this runs before the split; make sure it does not use test rows",
+      "ghost": null,
+      "location": "train.py:100",
+      "message": "transform() is called before the first split",
+      "severity": "warning"
+    },
+    {
+      "check": "canary",
+      "evidence": {
+        "feature_rows_changed": 95309,
+        "largest_change": 0.0,
+        "rows_changed": 95309,
+        "train_rows": 95457
+      },
+      "fix": "test rows influenced training; fit preprocessing on training rows only, after the split. Suspect lines: train.py:100.",
+      "ghost": "The Peeking Spirit",
+      "location": "train.py",
+      "message": "scrambling the test rows changed 95309 of 95457 training rows",
+      "severity": "error"
+    },
+    {
+      "check": "metric",
+      "evidence": {
+        "threshold": 0.85,
+        "value": 1.0
+      },
+      "fix": "treat this as a leak until proven otherwise: look for a column that encodes the target",
+      "ghost": null,
+      "location": "metric",
+      "message": "too good to be true: roc_auc 1.0000 is above 0.9900, the most that the threshold 0.85 and the margin allow",
+      "severity": "warning"
+    }
+  ],
+  "hexperiment_version": "0.1.0",
+  "metric": {
+    "name": "roc_auc",
+    "passed": true,
+    "threshold": 0.85,
+    "value": 1.0
+  },
+  "mode": "full",
+  "run_id": "20261111-194957-38a52f",
+  "split": {
+    "data_path": "data/prepared.csv",
+    "seed": 0,
+    "test_fraction": 0.2,
+    "time_column": null
+  },
+  "status": "REJECTED",
+  "test_set_uses": 1,
+  "waivers": []
+}

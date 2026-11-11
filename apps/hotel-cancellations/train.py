@@ -1,7 +1,3 @@
-# Honest training script: will a hotel booking be cancelled? (Requirements 2.1, 2.4)
-#
-# Every learned step sits inside one Pipeline that is fitted on training rows only.
-# Overlap with the training rows is removed from the test rows after the split.
 from __future__ import annotations
 
 import numpy as np
@@ -25,6 +21,9 @@ CATEGORICAL = [
     "deposit_type",
     "agent",
     "customer_type",
+    # reservation_status is dropped: it is recorded when the booking ends
+    # (Check-Out, Canceled, No-Show), so it encodes the outcome and is unknown at
+    # prediction time.
 ]
 NUMERIC = [
     "lead_time",
@@ -44,12 +43,9 @@ NUMERIC = [
     "adr",
     "required_car_parking_spaces",
     "total_of_special_requests",
+    "country_cancel_rate",  # Built from training rows only, after the split.
 ]
 FEATURES = CATEGORICAL + NUMERIC
-# Not used. reservation_status and reservation_status_date are filled in when the
-# booking ends (cancelled, checked out, no-show), so they contain the answer.
-# assigned_room_type is assigned at check-in or after a change, so it is not known
-# when the cancellation happens. company is 94% missing.
 
 
 def drop_seen_test_rows(
@@ -65,6 +61,19 @@ def drop_seen_test_rows(
     seen = set(pd.util.hash_pandas_object(train[key], index=False))
     keep = ~pd.util.hash_pandas_object(test[key], index=False).isin(seen).to_numpy()
     return test.loc[keep]
+
+
+def add_country_cancel_rate(
+    train: pd.DataFrame, test: pd.DataFrame
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Add the cancel rate per country, computed from the training rows only.
+
+    Test rows look the rate up; countries unseen in training get NaN.
+    """
+    rate = train.groupby("country", dropna=False)[TARGET].mean()
+    train = train.assign(country_cancel_rate=train["country"].map(rate))
+    test = test.assign(country_cancel_rate=test["country"].map(rate))
+    return train, test
 
 
 def build_model(categorical: list[str], numeric: list[str]) -> Pipeline:
@@ -99,6 +108,7 @@ def main() -> None:
     # An id, not a quantity.
     df["agent"] = df["agent"].fillna(-1).astype(int).astype(str)
     train, test = hexperiment.split(df)
+    train, test = add_country_cancel_rate(train, test)
     test = drop_seen_test_rows(train, test, FEATURES + [TARGET])
     model = build_model(CATEGORICAL, NUMERIC).fit(train[FEATURES], train[TARGET])
     hexperiment.audit(
