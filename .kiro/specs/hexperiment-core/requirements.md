@@ -52,7 +52,7 @@ Scope of this spec: data loading and splitting, configuration, the checks, the c
 3. WHEN `audit` runs in `normal` mode THEN the system SHALL run the data checks (Requirements 5 to 9) and write a snapshot to `<app_dir>/.hex/normal/` containing the train and test row ids, a hash of `train[features]` per row, and `y_score_train`.
 4. WHEN `audit` runs in `canary` or `control` mode THEN the system SHALL write only the snapshot (to `<app_dir>/.hex/<mode>/`) and SHALL NOT write a verdict or model card.
 5. THE audit SHALL NOT modify `train`, `test`, `y_score` or `y_score_train`.
-6. IF `y_score_train` is not given THEN the canary comparison SHALL use only the per-row hashes of `train[features]`, and the verdict SHALL include a `warning` that the canary test is weaker without training predictions.
+6. IF `y_score_train` is not given THEN the canary comparison SHALL use only the per-row hashes of `train[features]`; a difference SHALL still be reported as in Requirement 10, but no difference SHALL make the canary outcome `inconclusive` (so the run is at best `UNVERIFIED`), with a `warning` that shows how to pass `y_score_train`. A pipeline that fits the model on test rows without changing `train[features]` is visible only through `y_score_train`.
 
 ### Requirement 3: Configuration (`hex.toml`)
 
@@ -116,9 +116,10 @@ Scope of this spec: data loading and splitting, configuration, the checks, the c
 
 #### Acceptance Criteria
 
-1. WHEN the audit runs THEN the system SHALL parse `script` with Python's `ast` module without executing it, and find the first call to `split`, `hexperiment.split` or `train_test_split`.
+1. WHEN the audit runs THEN the system SHALL parse `script` with Python's `ast` module without executing it, and find the first call to `split`, `hexperiment.split` or `train_test_split`, also through import aliases. Calls nested in the arguments of that split call count as earlier calls.
 2. IF a call to `fit`, `fit_transform` or `fit_resample`, or a call to `mean`, `median`, `std`, `quantile`, `min`, `max` or `transform` on a DataFrame or Series expression, appears on an earlier line than that first split call THEN the system SHALL report a `warning` finding (never an `error`) with the file and line number as location and the hint "this runs before the split; make sure it does not use test rows".
 3. IF the script cannot be parsed or no split call is found THEN the system SHALL report a `warning` finding saying the hint could not be applied.
+4. IF the script calls a data reader (`read_csv`, `read_parquet`, `read_excel`, `read_json`, `read_feather`, `read_table`, `read_fwf`, `read_pickle`, `read_sql`, `read_orc`, `loadtxt` or `genfromtxt`) THEN the system SHALL report a `warning` finding at that line saying the data is read without `hexperiment.load()`, so the canary test cannot scramble this copy.
 
 ### Requirement 9: Metric gate and the "too good" warning
 
