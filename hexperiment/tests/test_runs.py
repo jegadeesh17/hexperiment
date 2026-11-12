@@ -2,6 +2,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from importlib.metadata import version
@@ -217,8 +218,7 @@ def test_count_ignores_runs_with_another_split_block():
         replace(SIGNATURE, time_column="signup_date"),
     ]
     history = [
-        make_verdict(f"20251101-09000{i}-aaaaaa", split=s)
-        for i, s in enumerate(other)
+        make_verdict(f"20251101-09000{i}-aaaaaa", split=s) for i, s in enumerate(other)
     ]
     history.append(make_verdict("20251101-090100-bbbbbb"))
     assert count_test_set_uses(history, SIGNATURE) == 1
@@ -616,8 +616,9 @@ def test_a_refused_lock_leaves_the_first_holder_in_place(tmp_path):
 def test_app_lock_is_refused_while_another_process_holds_it(tmp_path):
     holder = start_holder(tmp_path)
     try:
-        with pytest.raises(HexInputError, match="another hexperiment run"), app_lock(
-            tmp_path
+        with (
+            pytest.raises(HexInputError, match="another hexperiment run"),
+            app_lock(tmp_path),
         ):
             pass
     finally:
@@ -634,8 +635,17 @@ def test_app_lock_is_released_when_the_holder_is_killed(tmp_path):
     finally:
         holder.kill()
         holder.communicate()
-    with app_lock(tmp_path):
-        pass
+    # Windows frees the locks of a killed process a moment after it ends, later
+    # when the machine is busy, so the lock is retried for a while (Requirement 8.2).
+    deadline = time.monotonic() + 10
+    while True:
+        try:
+            with app_lock(tmp_path):
+                break
+        except HexInputError:
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(0.1)
 
 
 def test_app_lock_does_not_touch_run_history_or_verdict(tmp_path):
