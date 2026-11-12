@@ -13,6 +13,7 @@ from hexperiment.gallery.sources import (
     RUN_ID_PATTERN,
     read_app,
     read_benchmark,
+    read_fonts,
     read_stylesheet,
 )
 from hexperiment.models import Severity, Status
@@ -212,6 +213,68 @@ def test_the_stylesheet_is_listed_as_package_data():
     table = tomllib.loads(pyproject.read_text(encoding="utf-8"))
     patterns = table["tool"]["setuptools"]["package-data"]["hexperiment.gallery"]
     assert any(PurePath("assets/gallery.css").full_match(p) for p in patterns)
+
+
+# fonts
+
+FONT_FILES = [
+    "LICENSE-SpecialElite.txt",
+    "OFL-Archivo.txt",
+    "archivo-latin.woff2",
+    "special-elite-latin.woff2",
+]
+
+
+def test_read_fonts_returns_the_four_files_sorted_by_name():
+    names = [name for name, _ in read_fonts()]
+    assert names == sorted(FONT_FILES)
+    assert set(names) == set(FONT_FILES)
+
+
+def test_the_woff2_files_are_woff2_and_the_licences_have_lf_endings():
+    for name, data in read_fonts():
+        if name.endswith(".woff2"):
+            assert data.startswith(b"wOF2"), name
+        else:
+            assert data, name
+            assert b"\r" not in data, name
+
+
+def test_the_woff2_bytes_are_returned_as_they_are():
+    folder = Path(sources.__file__).parent / "assets" / "fonts"
+    for name, data in read_fonts():
+        if name.endswith(".woff2"):
+            assert data == (folder / name).read_bytes()
+
+
+def fake_package(monkeypatch, root: Path) -> None:
+    monkeypatch.setattr(sources.resources, "files", lambda package: root)
+
+
+def test_a_missing_fonts_folder_is_refused(tmp_path, monkeypatch):
+    (tmp_path / "assets").mkdir()
+    fake_package(monkeypatch, tmp_path)
+    with pytest.raises(HexInputError, match="fonts are missing") as caught:
+        read_fonts()
+    assert "Reinstall the package" in str(caught.value)
+
+
+def test_a_fonts_folder_without_a_woff2_file_is_refused(tmp_path, monkeypatch):
+    fonts = tmp_path / "assets" / "fonts"
+    fonts.mkdir(parents=True)
+    (fonts / "OFL-Archivo.txt").write_bytes(b"licence\n")
+    fake_package(monkeypatch, tmp_path)
+    with pytest.raises(HexInputError, match="fonts are missing"):
+        read_fonts()
+
+
+def test_licence_text_is_normalised(tmp_path, monkeypatch):
+    fonts = tmp_path / "assets" / "fonts"
+    fonts.mkdir(parents=True)
+    (fonts / "b.woff2").write_bytes(b"wOF2\r\n")
+    (fonts / "a.txt").write_bytes(b"one\r\ntwo\rthree\n")
+    fake_package(monkeypatch, tmp_path)
+    assert read_fonts() == (("a.txt", b"one\ntwo\nthree\n"), ("b.woff2", b"wOF2\r\n"))
 
 
 # benchmark

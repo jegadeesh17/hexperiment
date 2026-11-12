@@ -64,6 +64,36 @@ def read_stylesheet() -> bytes:
         ) from None
 
 
+def read_fonts() -> tuple[tuple[str, bytes], ...]:
+    """The packaged font files and licences, sorted by name.
+
+    ``.woff2`` bytes are returned as they are; text files get LF line endings.
+    """
+    try:
+        folder = resources.files(STYLESHEET_PACKAGE) / "assets" / "fonts"
+        entries = sorted(
+            (item for item in folder.iterdir() if item.is_file()),
+            key=lambda item: item.name,
+        )
+        fonts = tuple(
+            (
+                item.name,
+                item.read_bytes()
+                if item.name.endswith(".woff2")
+                else normalize_bytes(item.read_bytes()),
+            )
+            for item in entries
+        )
+        if not any(name.endswith(".woff2") for name, _ in fonts):
+            raise FileNotFoundError("no .woff2 file in assets/fonts")
+    except (OSError, ModuleNotFoundError) as error:
+        raise HexInputError(
+            f"the fonts are missing from the install ({error}).",
+            "Reinstall the package: pip install --force-reinstall hexperiment.",
+        ) from None
+    return fonts
+
+
 def read_benchmark(path: Path) -> Benchmark:
     """Read and validate a benchmark results file (a BOM is accepted)."""
     try:

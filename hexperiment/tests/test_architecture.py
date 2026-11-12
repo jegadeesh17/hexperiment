@@ -44,6 +44,7 @@ PURE_FILES = {
     "pages.py",
     "links.py",
     "site.py",
+    "art.py",
     # gallery/benchmark.py is deliberately NOT listed: it reads no file and no clock,
     # but it imports ``datetime`` to parse ``created_at`` (hexperiment-benchmark,
     # Requirement 4.1: ISO 8601 UTC), which FORBIDDEN_IN_PURE forbids.

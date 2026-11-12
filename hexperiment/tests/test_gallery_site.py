@@ -15,7 +15,7 @@ from gallery_builder import (
 )
 from hexperiment.errors import HexInputError
 from hexperiment.gallery.links import broken_links, page_links
-from hexperiment.gallery.markup import TAGS
+from hexperiment.gallery.markup import ART_TAGS, TAGS
 from hexperiment.gallery.pages import FONTS_URL
 from hexperiment.gallery.records import (
     Benchmark,
@@ -161,6 +161,25 @@ def test_marker_stylesheet_and_evidence_copies_are_stored_as_given():
     assert files["assets/gallery.css"] == STYLESHEET
     assert files["demo/verdict.json"] == source.last_verdict_json
     assert files["demo/model_card.md"] == source.approved_card
+
+
+FONTS = (
+    ("LICENSE-SpecialElite.txt", b"licence text\n"),
+    ("special-elite-latin.woff2", b"wOF2\x00\x01\r\n\xff"),
+)
+
+
+def test_the_fonts_are_written_under_assets_fonts_byte_for_byte():
+    files = build_site(dataclasses.replace(inputs(one_app()), fonts=FONTS))
+    for name, data in FONTS:
+        assert files[f"assets/fonts/{name}"] == data
+    fonts = [p for p in files if p.startswith("assets/fonts/")]
+    assert fonts == [f"assets/fonts/{name}" for name, _ in FONTS]
+
+
+def test_without_fonts_no_font_file_is_written():
+    files = build_site(inputs(one_app()))
+    assert not any(p.startswith("assets/fonts/") for p in files)
 
 
 def test_a_repeated_name_is_refused_by_the_pure_function_too():
@@ -438,7 +457,7 @@ def test_the_hostile_site_has_only_allowlisted_tags_and_attributes():
     check_links_independently(files, REPO)
     for path, page in structures(files).items():
         for tag, attrs in page.starts:
-            assert tag in TAGS, (path, tag)
+            assert tag in TAGS | ART_TAGS, (path, tag)
             for name in attrs:
                 assert not name.startswith("on"), (path, name)
                 assert name != "style", path

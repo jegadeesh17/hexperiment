@@ -19,6 +19,7 @@ from hexperiment.gallery.summary import (
 )
 
 MARKER_TEXT = "Built by hexperiment gallery. The next build replaces this folder.\n"
+FONTS_DIR = "assets/fonts"
 
 
 def build_site(inputs: GalleryInputs) -> dict[str, bytes]:
@@ -38,10 +39,13 @@ def build_site(inputs: GalleryInputs) -> dict[str, bytes]:
     files: dict[str, bytes] = {
         MARKER_FILENAME: MARKER_TEXT.encode("utf-8"),
         STYLESHEET_PATH: inputs.stylesheet,
-        LANDING_PATH: document(
-            landing_page(summaries, hero, inputs.benchmark, inputs.repo_url)
-        ),
     }
+
+    for name, data in inputs.fonts:
+        files[f"{FONTS_DIR}/{name}"] = data
+    files[LANDING_PATH] = document(
+        landing_page(summaries, hero, inputs.benchmark, inputs.repo_url)
+    )
     for summary, source in zip(summaries, inputs.apps, strict=True):
         files[f"{summary.slug}/index.html"] = document(
             case_page(summary, source, inputs.repo_url)

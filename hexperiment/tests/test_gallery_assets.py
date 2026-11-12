@@ -53,6 +53,20 @@ def test_the_stylesheet_ships_as_package_data():
     assert any(PurePath("assets/gallery.css").full_match(p) for p in patterns)
 
 
+def test_the_fonts_ship_as_package_data():
+    pyproject = Path(sources.__file__).resolve().parents[3] / "pyproject.toml"
+    table = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    patterns = table["tool"]["setuptools"]["package-data"]["hexperiment.gallery"]
+    assert "assets/fonts/*" in patterns
+    for name in (
+        "special-elite-latin.woff2",
+        "archivo-latin.woff2",
+        "LICENSE-SpecialElite.txt",
+        "OFL-Archivo.txt",
+    ):
+        assert any(PurePath(f"assets/fonts/{name}").full_match(p) for p in patterns)
+
+
 def test_the_hex_colours_are_exactly_the_six_of_the_steering_file(css):
     found = {c.upper() for c in re.findall(r"#[0-9A-Fa-f]{3,8}\b", css)}
     assert found == set(COLOURS.values())

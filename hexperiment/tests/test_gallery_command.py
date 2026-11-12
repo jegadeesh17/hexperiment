@@ -99,6 +99,11 @@ def test_a_build_writes_the_site_and_prints_the_path(world, tmp_path):
             ".hexperiment-gallery",
             "assets",
             "assets/gallery.css",
+            "assets/fonts",
+            "assets/fonts/LICENSE-SpecialElite.txt",
+            "assets/fonts/OFL-Archivo.txt",
+            "assets/fonts/archivo-latin.woff2",
+            "assets/fonts/special-elite-latin.woff2",
             "demo",
             "demo/index.html",
             "demo/model_card.md",
@@ -110,6 +115,13 @@ def test_a_build_writes_the_site_and_prints_the_path(world, tmp_path):
             "other/verdict.json",
         ]
     )
+
+
+def test_a_build_writes_the_fonts(world, tmp_path):
+    out = tmp_path / "fresh"
+    assert call(world, out_dir=out).exit_code == 0
+    for name in ("special-elite-latin.woff2", "archivo-latin.woff2"):
+        assert (out / "assets" / "fonts" / name).read_bytes().startswith(b"wOF2")
 
 
 def test_a_marked_gallery_is_replaced(world):
@@ -425,7 +437,9 @@ def test_lf_and_crlf_apps_give_the_same_site_bytes(tmp_path):
         path_lf, path_crlf = lf / relative, crlf / relative
         if path_lf.is_file():
             assert path_lf.read_bytes() == path_crlf.read_bytes(), relative
-            assert b"\r" not in path_lf.read_bytes(), relative
+            # Font files are binary: a 0x0D byte in them is data, not a line end.
+            if not relative.endswith(".woff2"):
+                assert b"\r" not in path_lf.read_bytes(), relative
 
 
 def test_the_apps_and_their_test_set_uses_are_unchanged_for_crlf(tmp_path):

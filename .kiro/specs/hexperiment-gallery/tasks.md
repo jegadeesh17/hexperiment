@@ -121,7 +121,7 @@
   - Tests added: about 16. None starts a Python process.
   - Verify: `.venv/Scripts/python -m pytest hexperiment/tests/test_gallery_assets.py hexperiment/tests/test_gallery_sources.py -q`, then the two full commands.
 
-- [ ] 12a. Fonts and art
+- [x] 12a. Fonts and art
   - Read "Redesign of the pages" in `design.md` first; it supersedes the older sections it names. The reference pages are `.kiro/specs/hexperiment-gallery/mockups/landing.html` and `case.html`.
   - In `hexperiment/pyproject.toml`, set `"hexperiment.gallery" = ["assets/*.css", "assets/fonts/*"]`. The font files are already in `gallery/assets/fonts/`; do not change them.
   - Add `read_fonts()` to `gallery/sources.py`, the `fonts` field to `GalleryInputs` in `gallery/records.py`, the font files to `build_site` in `gallery/site.py` and `fonts=read_fonts()` to `_build` in `gallery/command.py`, as in "Fonts plumbing".

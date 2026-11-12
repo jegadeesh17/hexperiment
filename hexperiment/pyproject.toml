@@ -32,7 +32,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 hexperiment = ["templates/**/*"]
-"hexperiment.gallery" = ["assets/*.css"]
+"hexperiment.gallery" = ["assets/*.css", "assets/fonts/*"]
 
 [tool.ruff]
 src = ["src", "tests"]

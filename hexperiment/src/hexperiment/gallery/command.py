@@ -14,6 +14,7 @@ from hexperiment.gallery.site import build_site
 from hexperiment.gallery.sources import (
     read_app,
     read_benchmark,
+    read_fonts,
     read_stylesheet,
 )
 from hexperiment.gallery.summary import MARKER_FILENAME, assign_slugs
@@ -131,7 +132,11 @@ def _build(
     stylesheet = read_stylesheet()
     files = build_site(
         GalleryInputs(
-            apps=sources, benchmark=benchmark, repo_url=url, stylesheet=stylesheet
+            apps=sources,
+            benchmark=benchmark,
+            repo_url=url,
+            stylesheet=stylesheet,
+            fonts=read_fonts(),
         )
     )
     return write_site(files, out_dir)

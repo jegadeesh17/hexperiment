@@ -5,6 +5,8 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from hexperiment.gallery.markup import (
+    ART_TAGS,
+    TAGS,
     Markup,
     code,
     document,
@@ -79,6 +81,20 @@ def test_strings_are_escaped_and_markup_is_not():
     assert el("p", "<b>", literal("<br>")).html == "<p>&lt;b&gt;<br></p>\n"
 
 
+@pytest.mark.parametrize("tag", ["svg", "i", "use", "path"])
+def test_art_tags_are_refused_by_el(tag):
+    with pytest.raises(ValueError, match="not allowed"):
+        el(tag)
+
+
+def test_strong_is_an_inline_tag():
+    assert el("strong", "a").html == "<strong>a</strong>"
+
+
+def test_art_tags_and_tags_do_not_overlap():
+    assert not ART_TAGS & TAGS
+
+
 def test_children_are_flattened_and_none_is_skipped():
     assert el("ul", [el("li", "a"), None, (el("li", "b"),)]).html == (
         "<ul><li>a</li>\n<li>b</li>\n</ul>\n"
@@ -137,7 +153,13 @@ def test_unsafe_addresses_are_refused(href):
 
 @pytest.mark.parametrize(
     "href",
-    ["../index.html", "assets/gallery.css", "#main", "https://github.com/o/r", "http://x.example/"],
+    [
+        "../index.html",
+        "assets/gallery.css",
+        "#main",
+        "https://github.com/o/r",
+        "http://x.example/",
+    ],
 )
 def test_relative_and_http_addresses_are_accepted(href):
     assert f'href="{href}"' in el("a", "x", href=href).html

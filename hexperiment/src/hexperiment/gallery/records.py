@@ -56,3 +56,4 @@ class GalleryInputs:
     benchmark: Benchmark | None
     repo_url: str | None
     stylesheet: bytes
+    fonts: tuple[tuple[str, bytes], ...] = ()  # (file name, bytes), sorted by name

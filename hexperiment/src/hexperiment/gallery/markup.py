@@ -16,7 +16,12 @@ from dataclasses import dataclass
 TAGS = frozenset(
     "html head meta title link body header nav main footer section div h1 h2 h3 "
     "p a ol ul li dl dt dd table caption thead tbody tfoot tr th td code em span "
-    "time".split()
+    "time strong".split()
+)
+# Tags that only the constants of art.py contain. el() still refuses them.
+ART_TAGS = frozenset(
+    "svg defs symbol use g path rect circle ellipse line lineargradient stop "
+    "pattern text i".split()
 )
 VOID_TAGS = frozenset({"meta", "link", "br"})
 BLOCK_TAGS = frozenset(
