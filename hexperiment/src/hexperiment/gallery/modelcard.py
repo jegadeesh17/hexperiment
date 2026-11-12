@@ -105,8 +105,22 @@ def _waivers_table(verdict: Verdict) -> Markup:
     return _scroll("Waivers", el("table", head, el("tbody", rows)))
 
 
-def model_card_section(verdict: Verdict, *, card_href: str) -> Markup:
-    """The card of ``verdict``: status, metric, split, data, checks, waivers, uses."""
+def _group(title: str, content: Markup, *, wide: bool = False) -> Markup:
+    """One ``h3`` with the content that follows it."""
+    return el(
+        "div",
+        el("h3", title),
+        content,
+        class_="card-group wide" if wide else "card-group",
+    )
+
+
+def model_card_section(verdict: Verdict) -> Markup:
+    """The card of ``verdict``: status, metric, split, data, checks, waivers, uses.
+
+    Each heading and its content form one ``div.card-group``; the groups that hold
+    a table are ``wide``. The link to ``model_card.md`` is on the page, not here.
+    """
     status = _pairs(
         [
             ("Verdict", verdict.status.value),
@@ -122,20 +136,12 @@ def model_card_section(verdict: Verdict, *, card_href: str) -> Markup:
     )
     return el(
         "div",
-        el("h3", "Status"),
-        status,
-        el("h3", "Metric"),
-        _pairs(_metric_pairs(verdict)),
-        el("h3", "Split"),
-        _pairs(_split_pairs(verdict)),
-        el("h3", "Data"),
-        _pairs(_data_pairs(verdict)),
-        el("h3", "Checks"),
-        _checks_table(verdict),
-        el("h3", "Waivers"),
-        _waivers_table(verdict),
-        el("h3", "Test-set uses"),
-        el("p", uses),
-        el("p", el("a", "model_card.md", href=card_href)),
-        class_="model-card",
+        _group("Status", status),
+        _group("Metric", _pairs(_metric_pairs(verdict))),
+        _group("Split", _pairs(_split_pairs(verdict))),
+        _group("Data", _pairs(_data_pairs(verdict))),
+        _group("Checks", _checks_table(verdict), wide=True),
+        _group("Waivers", _waivers_table(verdict), wide=True),
+        _group("Test-set uses", el("p", uses)),
+        class_="card",
     )

@@ -80,8 +80,9 @@ def test_shell_head_and_landmarks():
     assert "<title>Hexperiment: demo</title>" in html
     assert page.tags("main") == [{}]
     assert len(page.tags("header")) == len(page.tags("footer")) == 1
-    assert page.tags("div")[0] == {"id": "content", "tabindex": "-1"}
-    assert [a for a in page.tags("h1")] == [{}]
+    content = [d for d in page.tags("div") if d.get("id") == "content"]
+    assert content == [{"class": "wrap", "id": "content", "tabindex": "-1"}]
+    assert [a for a in page.tags("h1")] == [{"id": "case-title"}]
 
 
 def test_the_only_stylesheet_link_is_relative_and_nothing_names_another_origin():
@@ -113,16 +114,17 @@ def test_titles_differ_between_apps():
     assert "<title>Hexperiment: beta</title>" in b
 
 
-def test_repo_link_in_header_and_footer_for_github():
+def test_repo_link_in_the_navigation_for_github():
     html = build(repo_url=REPO)
     links = [a for a in Page(html).tags("a") if a.get("href") == REPO]
-    assert len(links) == 2
-    assert html.count("Source on GitHub") == 2
+    assert len(links) == 1
+    assert html.count("Source on GitHub") == 1
+    assert f'<a href="../index.html#cases">All cases</a><a href="{REPO}">' in html
 
 
 def test_repo_link_label_for_another_host():
     html = build(repo_url="https://example.org/x")
-    assert html.count("Source code") == 2
+    assert html.count("Source code") == 1
     assert "Source on GitHub" not in html
 
 
@@ -191,25 +193,56 @@ def runs_source():
     )
 
 
+def compact(html: str) -> str:
+    """The markup with the white space between tags removed."""
+    return re.sub(r">\s+<", "><", html)
+
+
 def test_every_field_of_a_timeline_entry():
-    html = build(runs_source())
+    html = compact(build(runs_source()))
     page = Page(html)
     items = [a for a in page.tags("li") if a.get("class") == "run"]
     assert len(items) == 3
     assert '<ol class="record">' in html
+    assert (
+        '<p class="run-head"><span class="status status-rejected">'
+        '<span class="mark" aria-hidden="true"></span>REJECTED</span>'
+        ', full check, score <span class="score">1.0000</span></p>'
+        '<p class="run-meta"><time datetime="2026-11-11T19:50:51Z">'
+        "2026-11-11 19:50:51 UTC</time>, test set used 1 time</p>"
+    ) in html
+    assert (
+        ', fast check, score <span class="score">0.9090</span></p>'
+        '<p class="run-meta"><time datetime="2026-11-12T08:01:02Z">'
+        "2026-11-12 08:01:02 UTC</time>, test set used 2 times</p>"
+    ) in html
+    assert html.count('<div><p class="run-head">') == 3
     text = squeeze(html)
-    assert "REJECTED full 1.0000 2026-11-11 19:50:51 UTC test set used 1 time" in text
-    unverified = "UNVERIFIED fast 0.9090 2026-11-12 08:01:02 UTC test set used 2 times"
-    assert unverified in text
-    assert '<time datetime="2026-11-12T08:01:02Z">' in html
-    assert text.index("REJECTED") < text.index("UNVERIFIED") < text.index("APPROVED")
+    record = text.split("Every recorded run")[1]
+    assert record.index("REJECTED") < record.index("UNVERIFIED")
+    assert record.index("UNVERIFIED") < record.index("APPROVED")
+
+
+def test_the_record_section_and_its_lede():
+    html = compact(build(runs_source()))
+    assert (
+        '<section class="page" aria-labelledby="record-title"><div class="wrap">'
+        '<h2 id="record-title">Every recorded run</h2>'
+        '<p class="lede">Oldest first. An error stops a model; a warning is worth '
+        "a look.</p>"
+    ) in html
 
 
 def test_finding_shows_ghost_severity_location_message_and_fix():
-    text = squeeze(build(runs_source()))
-    assert "The Possession error at reservation_status" in text
-    assert "reservation_status alone predicts the target with AUC 1.0000" in text
-    assert "Fix: Check whether this column is recorded after the outcome." in text
+    html = compact(build(runs_source()))
+    assert (
+        '<li class="finding finding-error"><p class="what"><em>The Possession</em>'
+        ' at <code>reservation_status</code><span class="sev">error</span></p>'
+        '<p class="msg">reservation_status alone predicts the target with AUC '
+        "1.0000</p>"
+        '<p class="fix">Fix: Check whether this column is recorded after the '
+        "outcome."
+    ) in html
 
 
 def test_finding_without_ghost_shows_check_name():
@@ -220,18 +253,25 @@ def test_finding_without_ghost_shows_check_name():
         location="train.py:3",
     )
     source = make_source(runs=[make_verdict(findings=[finding])])
-    html = build(source)
-    assert "split_order warning at" in squeeze(html)
+    html = compact(build(source))
+    assert (
+        '<p class="what">split_order at <code>train.py:3</code>'
+        '<span class="sev">warning</span></p>'
+    ) in html
     assert 'class="finding finding-warning"' in html
 
 
 def test_waived_finding_shows_reason():
     finding = make_finding(severity=Severity.WAIVED, waiver_reason="known at booking")
-    html = build(make_source(runs=[make_verdict(findings=[finding])]))
-    text = squeeze(html)
-    assert "The Possession waived at reservation_status" in text
-    assert "Waiver reason: known at booking" in text
+    html = compact(build(make_source(runs=[make_verdict(findings=[finding])])))
+    assert '<span class="sev">waived</span>' in html
+    assert '<p class="waiver">Waiver reason: known at booking</p>' in html
     assert 'class="finding finding-waived"' in html
+
+
+def test_only_waived_findings_have_a_waiver_paragraph():
+    html = build(runs_source())
+    assert 'class="waiver"' not in html
 
 
 def test_findings_are_listed_errors_then_waived_then_warnings():
@@ -246,12 +286,15 @@ def test_findings_are_listed_errors_then_waived_then_warnings():
 
 
 def test_a_run_without_findings():
-    assert "No findings." in build()
+    assert '<p class="clear">No findings.</p>' in build()
+    assert 'class="findings"' not in build()
 
 
 def test_a_run_without_score():
     source = make_source(runs=[make_verdict(Status.REJECTED, value=None)])
-    assert "REJECTED full no score" in squeeze(build(source))
+    html = compact(build(source))
+    assert "REJECTED</span>, full check, no score</p>" in html
+    assert 'class="score"' not in html
 
 
 def test_time_that_is_not_utc_iso_is_shown_as_written():
@@ -264,19 +307,72 @@ def test_fact_line_and_heading():
     source = make_source(
         "hotel", description="Will it be cancelled?", target="is_canceled"
     )
-    html = build(source, slug="hotel")
-    assert "<h1>hotel</h1>" in html
-    assert "Will it be cancelled?" in html
+    html = compact(build(source, slug="hotel"))
+    assert '<h1 id="case-title">hotel</h1>' in html
+    assert '<p class="desc">Will it be cancelled?</p>' in html
     assert (
-        "target is_canceled, metric roc_auc, threshold 0.8500, 1 recorded run"
-        in squeeze(html)
-    )
-    assert '<a href="../index.html">All cases</a>' in html
+        '<dl class="facts">'
+        "<div><dt>target</dt><dd><code>is_canceled</code></dd></div>"
+        "<div><dt>metric</dt><dd>roc_auc</dd></div>"
+        "<div><dt>threshold</dt><dd>0.8500</dd></div>"
+        "<div><dt>recorded runs</dt><dd>1</dd></div></dl>"
+    ) in html
+    assert (
+        '<a href="../index.html" class="wordmark">Hexperiment</a>'
+        '<nav aria-label="Site"><a href="../index.html#cases">All cases</a></nav>'
+    ) in html
+
+
+def test_the_head_section_and_its_scores():
+    source = make_source(runs=[rejected(1.0), approved(0.9096)])
+    html = compact(build(source))
+    assert (
+        '<section class="page case-head" aria-labelledby="case-title">'
+        '<header class="site-head"><div class="wrap">'
+    ) in html
+    assert html.index('class="corner"') < html.index('id="content"')
+    assert (
+        '<div class="scores">'
+        '<div><span class="v o">1.0000</span><span class="k">first run, '
+        '<span class="status status-rejected"><span class="mark" '
+        'aria-hidden="true"></span>REJECTED</span></span></div>'
+        '<span class="dash" aria-hidden="true"></span>'
+        '<div><span class="v g">0.9096</span><span class="k">last run, '
+        '<span class="status status-approved"><span class="mark" '
+        'aria-hidden="true"></span>APPROVED</span></span></div></div>'
+    ) in html
+
+
+@pytest.mark.parametrize(
+    ("run", "cls", "shown"),
+    [
+        (rejected(0.9), "o", "0.9000"),
+        (approved(0.9), "g", "0.9000"),
+        (make_verdict(Status.UNVERIFIED, "fast", None), "u", "no score"),
+    ],
+)
+def test_the_score_classes_of_the_head(run, cls, shown):
+    html = build(make_source(runs=[run]))
+    assert f'<span class="v {cls}">{shown}</span>' in html
 
 
 def test_empty_description_is_left_out():
     html = build(make_source(description=""))
     assert "<p></p>" not in html
+    assert 'class="desc"' not in html
+
+
+def test_the_case_page_has_one_main_without_an_id_and_the_end_block():
+    html = compact(build())
+    assert html.count("<main>") == 1
+    assert html.index("</main>") < html.index('<div class="end">')
+    assert html.index('<div class="end"><svg class="graveyard"') > 0
+    assert (
+        '<footer class="site-foot"><div class="wrap">'
+        f'<p class="motto">{MOTTO}</p>'
+        '<span><a href="../index.html#cases">All cases</a>. '
+        "Released under the MIT licence.</span></div></footer></div>"
+    ) in html
 
 
 # fix, card, raw files
@@ -288,9 +384,12 @@ def test_no_fix_section_without_haunted_script():
 
 def test_fix_section_with_diff():
     source = make_source(haunted="a\nscale()\nb\n", train="a\nb\n")
-    html = build(source)
+    html = compact(build(source))
     text = squeeze(html)
-    assert "<h2>The fix</h2>" in html
+    assert (
+        '<section class="page" aria-labelledby="fix-title"><div class="wrap">'
+        '<h2 id="fix-title">The fix</h2><p class="lede">'
+    ) in html
     assert "haunted/train.py against train.py: 1 line removed, 0 lines added." in text
     assert 'class="diff"' in html
     assert 'class="line line-removed"' in html
@@ -299,25 +398,35 @@ def test_fix_section_with_diff():
 def test_identical_scripts_sentence():
     source = make_source(haunted="a\n", train="a\n")
     html = build(source)
-    assert "The two scripts are identical." in html
+    assert '<p class="lede">The two scripts are identical.</p>' in html
     assert 'class="diff"' not in html
 
 
 def test_no_approved_run_yet():
     source = make_source(runs=[rejected(1.0)])
-    html = build(source)
-    assert "No approved run yet." in html
+    html = compact(build(source))
+    assert "<p>No approved run yet.</p>" in html
     assert "model_card.md" not in html
-    assert '<a href="verdict.json">verdict.json</a>' in html
+    assert '<p class="raw">Raw files: <a href="verdict.json">verdict.json</a>.</p>' in (
+        html
+    )
 
 
 def test_model_card_of_the_last_approved_run_and_raw_links():
     source = make_source(runs=[approved(0.91), rejected(0.99), approved(0.9096)])
-    html = build(source)
-    assert "Model card of the last approved run" in html
+    html = compact(build(source))
+    assert (
+        '<section class="page" aria-labelledby="card-title"><div class="wrap">'
+        '<h2 id="card-title">Model card of the last approved run</h2>'
+        '<div class="card"><div class="card-group"><h3>Status</h3>'
+    ) in html
     assert "0.9096" in html
-    assert '<a href="model_card.md">model_card.md</a>' in html
-    assert '<a href="verdict.json">verdict.json</a>' in html
+    assert (
+        '<p class="raw">Raw files: <a href="verdict.json">verdict.json</a> and '
+        '<a href="model_card.md">model_card.md</a>.</p></div></section></main>'
+    ) in html
+    assert html.count('href="model_card.md"') == 1
+    assert "Raw files</h2>" not in html
 
 
 # hostile strings

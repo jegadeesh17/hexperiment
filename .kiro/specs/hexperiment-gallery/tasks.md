@@ -147,7 +147,7 @@
   - Tests added: about 30. None starts a Python process.
   - Verify: `.venv/Scripts/python -m pytest hexperiment/tests/test_gallery_pages.py hexperiment/tests/test_gallery_summary.py hexperiment/tests/test_gallery_site.py hexperiment/tests/test_gallery_assets.py -q`, then the two full commands.
 
-- [ ] 12d. The case page
+- [x] 12d. The case page
   - In `gallery/pages.py`, rebuild the case page as in "Case page" of the redesign section (head with scores and facts, record with run head, run meta and findings, the fix, the model card with the raw-files line, the end block). In `gallery/modelcard.py`, regroup the section as described there, without changing its content.
   - Tests: add the case-page tests of "Tests" in the redesign section to `test_gallery_pages.py` and update the ones that pin the old case markup; update `test_gallery_modelcard.py`. Delete `OLD_PAGE_CLASSES` and its use from `test_gallery_assets.py`: every class of the built site must now have a rule.
   - _Requirements: 3.1 to 3.7, 5.2_

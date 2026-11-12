@@ -1,4 +1,5 @@
 import dataclasses
+import re
 from html import unescape
 
 from gallery_builder import make_verdict
@@ -13,8 +14,8 @@ from hexperiment.models import (
 )
 
 
-def build(verdict, href="model_card.md"):
-    return model_card_section(verdict, card_href=href).html
+def build(verdict):
+    return model_card_section(verdict).html
 
 
 def rich_verdict(**changes):
@@ -63,9 +64,38 @@ def test_every_value_of_requirement_3_4_appears():
         "target_proxy",
         "The Possession",
         "3 time(s)",
-        'href="model_card.md"',
     ):
         assert expected in text
+
+
+def test_the_card_is_groups_of_a_heading_and_its_content():
+    html = build(rich_verdict())
+    assert html.startswith('<div class="card"><div class="card-group"><h3>Status</h3>')
+    titles = re.findall(r'<div class="card-group[^"]*"><h3>([^<]*)</h3>', html)
+    assert titles == [
+        "Status",
+        "Metric",
+        "Split",
+        "Data",
+        "Checks",
+        "Waivers",
+        "Test-set uses",
+    ]
+    assert html.count("<h3>") == html.count('<div class="card-group') == 7
+    assert "model-card" not in html
+
+
+def test_only_the_groups_with_a_table_are_wide():
+    html = build(rich_verdict())
+    wide = re.findall(r'<div class="card-group wide"><h3>([^<]*)</h3>', html)
+    assert wide == ["Checks", "Waivers"]
+    assert html.count('class="card-group"') == 5
+
+
+def test_the_section_does_not_link_the_card_file():
+    html = build(rich_verdict())
+    assert "model_card.md" not in html
+    assert "<a " not in html
 
 
 def test_waivers_are_listed_with_their_reasons():

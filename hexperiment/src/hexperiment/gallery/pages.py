@@ -228,48 +228,70 @@ def _time_element(created_at: str) -> Markup:
 
 
 def _finding_item(finding: Finding) -> Markup:
-    name: Child = (
-        el("em", finding.ghost, class_="ghost") if finding.ghost else finding.check
-    )
-    heading: list[Child] = [name, finding.severity.value]
+    name: Child = el("em", finding.ghost) if finding.ghost else finding.check
+    what: list[Child] = [name]
     if finding.location:
-        heading += ["at", code(finding.location)]
+        what += [" at ", code(finding.location)]
+    what.append(el("span", finding.severity.value, class_="sev"))
     parts: list[Child] = [
-        el("p", spaced(*heading)),
-        el("p", prose(finding.message)),
-        el("p", spaced("Fix:", prose(finding.fix))),
+        el("p", what, class_="what"),
+        el("p", prose(finding.message), class_="msg"),
+        el("p", spaced("Fix:", prose(finding.fix)), class_="fix"),
     ]
     if finding.severity is Severity.WAIVED:
         reason = finding.waiver_reason or ""
-        parts.append(el("p", spaced("Waiver reason:", prose(reason))))
+        parts.append(el("p", spaced("Waiver reason:", prose(reason)), class_="waiver"))
     return el("li", parts, class_=f"finding finding-{finding.severity.value}")
 
 
 def _findings_list(verdict: Verdict) -> Markup:
     if not verdict.findings:
-        return el("p", "No findings.", class_="no-findings")
+        return el("p", "No findings.", class_="clear")
     ordered = sorted(verdict.findings, key=lambda f: _SEVERITY_ORDER[f.severity])
     return el("ul", [_finding_item(f) for f in ordered], class_="findings")
 
 
 def _run_item(verdict: Verdict) -> Markup:
-    uses = f"test set used {_plural(verdict.test_set_uses, 'time')}"
-    head = spaced(
+    score: list[Child]
+    if verdict.metric.value is None:
+        score = [", no score"]
+    else:
+        score = [
+            ", score ",
+            el("span", score_text(verdict.metric.value), class_="score"),
+        ]
+    head = el(
+        "p",
         status_mark(verdict.status),
-        verdict.mode.value,
-        score_text(verdict.metric.value),
-        _time_element(verdict.created_at),
-        uses,
+        f", {verdict.mode.value} check",
+        score,
+        class_="run-head",
     )
-    findings = _findings_list(verdict)
-    return el("li", el("p", head, class_="run-head"), findings, class_="run")
+    meta = el(
+        "p",
+        _time_element(verdict.created_at),
+        f", test set used {_plural(verdict.test_set_uses, 'time')}",
+        class_="run-meta",
+    )
+    return el("li", el("div", head, meta, _findings_list(verdict)), class_="run")
 
 
 def _record(runs: Sequence[Verdict]) -> Markup:
     return el(
         "section",
-        el("h2", "The record"),
-        el("ol", [_run_item(run) for run in runs], class_="record"),
+        el(
+            "div",
+            el("h2", "Every recorded run", id="record-title"),
+            el(
+                "p",
+                "Oldest first. An error stops a model; a warning is worth a look.",
+                class_="lede",
+            ),
+            el("ol", [_run_item(run) for run in runs], class_="record"),
+            class_="wrap",
+        ),
+        class_="page",
+        aria_labelledby="record-title",
     )
 
 
@@ -279,79 +301,154 @@ def _fix_section(source: AppSource) -> Markup | None:
     old_name, new_name = "haunted/train.py", "train.py"
     diff = diff_scripts(source.haunted_py, source.train_py)
     if not diff.blocks:
-        body: list[Child] = [el("p", "The two scripts are identical.")]
+        body: list[Child] = [el("p", "The two scripts are identical.", class_="lede")]
     else:
         counts = (
             f": {_plural(diff.removed, 'line')} removed, "
             f"{_plural(diff.added, 'line')} added."
         )
         body = [
-            el("p", code(old_name), " against ", code(new_name), counts),
+            el("p", code(old_name), " against ", code(new_name), counts, class_="lede"),
             diff_markup(diff, old_name=old_name, new_name=new_name),
         ]
-    return el("section", el("h2", "The fix"), body)
-
-
-def _card_section(summary: AppSummary, path: str) -> Markup:
-    approved = summary.last_approved
-    if approved is None:
-        content: Child = el("p", "No approved run yet.")
-    else:
-        href = relative_href(path, f"{summary.slug}/model_card.md")
-        content = model_card_section(approved, card_href=href)
-    return el("section", el("h2", "Model card of the last approved run"), content)
+    return el(
+        "section",
+        el("div", el("h2", "The fix", id="fix-title"), body, class_="wrap"),
+        class_="page",
+        aria_labelledby="fix-title",
+    )
 
 
 def _raw_files(summary: AppSummary, path: str) -> Markup:
     def link(name: str) -> Markup:
-        href = relative_href(path, f"{summary.slug}/{name}")
-        return el("li", el("a", name, href=href))
+        return el("a", name, href=relative_href(path, f"{summary.slug}/{name}"))
 
-    links = [link("verdict.json")]
-    if summary.last_approved is not None:
-        links.append(link("model_card.md"))
-    return el("section", el("h2", "Raw files"), el("ul", links))
+    if summary.last_approved is None:
+        links: list[Child] = [link("verdict.json"), "."]
+    else:
+        links = [link("verdict.json"), " and ", link("model_card.md"), "."]
+    return el("p", "Raw files: ", links, class_="raw")
+
+
+def _card_section(summary: AppSummary, path: str) -> Markup:
+    approved = summary.last_approved
+    content: Child
+    if approved is None:
+        content = el("p", "No approved run yet.")
+    else:
+        content = model_card_section(approved)
+    return el(
+        "section",
+        el(
+            "div",
+            el("h2", "Model card of the last approved run", id="card-title"),
+            content,
+            _raw_files(summary, path),
+            class_="wrap",
+        ),
+        class_="page",
+        aria_labelledby="card-title",
+    )
+
+
+def _case_score(which: str, run: Verdict) -> Markup:
+    return el(
+        "div",
+        el(
+            "span",
+            score_text(run.metric.value),
+            class_=f"v {_score_class(run.status)}",
+        ),
+        el("span", f"{which} run, ", status_mark(run.status), class_="k"),
+    )
 
 
 def _facts(summary: AppSummary) -> Markup:
+    facts: list[tuple[str, Child]] = [
+        ("target", code(summary.target_column)),
+        ("metric", summary.metric_name),
+        ("threshold", score_text(summary.threshold)),
+        ("recorded runs", str(len(summary.runs))),
+    ]
     return el(
-        "p",
-        "target ",
-        code(summary.target_column),
-        f", metric {summary.metric_name}, threshold {score_text(summary.threshold)}, "
-        f"{_plural(len(summary.runs), 'recorded run')}",
+        "dl",
+        [el("div", el("dt", term), el("dd", value)) for term, value in facts],
         class_="facts",
+    )
+
+
+def _case_head(summary: AppSummary, home: str, repo_url: str | None) -> Markup:
+    return el(
+        "section",
+        el(
+            "header",
+            el(
+                "div",
+                el("a", "Hexperiment", href=home, class_="wordmark"),
+                el(
+                    "nav",
+                    el("a", "All cases", href=f"{home}#cases"),
+                    _repo_link(repo_url),
+                    aria_label="Site",
+                ),
+                class_="wrap",
+            ),
+            class_="site-head",
+        ),
+        art.CORNER_MOON,
+        el(
+            "div",
+            el("h1", summary.name, id="case-title"),
+            el("p", summary.description, class_="desc")
+            if summary.description
+            else None,
+            el(
+                "div",
+                _case_score("first", summary.first),
+                el("span", class_="dash", aria_hidden="true"),
+                _case_score("last", summary.last),
+                class_="scores",
+            ),
+            _facts(summary),
+            class_="wrap",
+            id="content",
+            tabindex="-1",
+        ),
+        class_="page case-head",
+        aria_labelledby="case-title",
     )
 
 
 def case_page(summary: AppSummary, source: AppSource, repo_url: str | None) -> Markup:
     """The whole page ``<slug>/index.html`` of one app."""
     path = f"{summary.slug}/index.html"
-    body = el(
-        "div",
-        el("p", el("a", "All cases", href=relative_href(path, LANDING_PATH))),
-        el("h1", summary.name),
-        el("p", summary.description) if summary.description else None,
-        _facts(summary),
-        _record(summary.runs),
-        _fix_section(source),
-        _card_section(summary, path),
-        _raw_files(summary, path),
-        id="content",
-        tabindex="-1",
-    )
     home = relative_href(path, LANDING_PATH)
     page = [
         el(
-            "header",
-            el("a", "Hexperiment", href=home, class_="site"),
-            _repo_link(repo_url, "source"),
+            "main",
+            _case_head(summary, home, repo_url),
+            _record(summary.runs),
+            _fix_section(source),
+            _card_section(summary, path),
         ),
-        el("main", body),
         el(
-            "footer",
-            _repo_link(repo_url, "source"),
-            el("p", "Released under the MIT licence."),
+            "div",
+            art.GRAVEYARD_CASE,
+            el(
+                "footer",
+                el(
+                    "div",
+                    el("p", MOTTO, class_="motto"),
+                    el(
+                        "span",
+                        el("a", "All cases", href=f"{home}#cases"),
+                        ". Released under the MIT licence.",
+                    ),
+                    class_="wrap",
+                ),
+                class_="site-foot",
+            ),
+            class_="end",
         ),
     ]
     return page_shell(

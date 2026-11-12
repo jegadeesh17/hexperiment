@@ -262,11 +262,14 @@ def check_links_independently(files, repo_url):
                 assert "fonts.googleapis.com" not in target
             else:
                 assert not target.startswith(("/", "..\\")), (page, target)
+                file_part, _, fragment = target.partition("#")
                 resolved = posixpath.normpath(
-                    posixpath.join(posixpath.dirname(page), target)
+                    posixpath.join(posixpath.dirname(page), file_part)
                 )
                 assert not resolved.startswith(".."), (page, target)
                 assert resolved in files, (page, target)
+                if fragment:
+                    assert fragment in pages[resolved].ids, (page, target)
 
 
 @pytest.mark.parametrize(

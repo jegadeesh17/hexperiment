@@ -30,8 +30,6 @@ REDUCED_MOTION = "@media (prefers-reduced-motion: no-preference)"
 SUPPORTS_TIMELINE = "@supports (animation-timeline: view())"
 # Classes the markup carries that need no rule of their own.
 STRUCTURAL = {"context", "finding-error"}
-# Classes of the first page design, removed when the pages are rebuilt.
-OLD_PAGE_CLASSES = frozenset({"model-card", "no-findings", "site", "source"})
 
 
 @pytest.fixture(scope="module")
@@ -288,13 +286,9 @@ def test_every_class_used_by_the_pages_has_a_rule_or_is_listed(css):
             for value in re.findall(r'class="([^"]*)"', data.decode("utf-8")):
                 used.update(value.split())
     assert {"diff", "record", "status", "finding"} <= used
-    # The list must not hold classes the pages no longer use.
-    assert OLD_PAGE_CLASSES <= used
 
     def has_rule(name: str) -> bool:
         return re.search(r"\." + re.escape(name) + r"(?![\w-])", css) is not None
 
-    missing = {c for c in used - STRUCTURAL - OLD_PAGE_CLASSES if not has_rule(c)}
+    missing = {c for c in used - STRUCTURAL if not has_rule(c)}
     assert not missing
-    # Old classes get no rule until the pages are rebuilt.
-    assert not {c for c in OLD_PAGE_CLASSES if has_rule(c)}
