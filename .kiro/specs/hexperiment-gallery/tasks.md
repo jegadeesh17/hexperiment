@@ -51,7 +51,7 @@
   - Tests added: about 10. None starts a Python process.
   - Verify: `.venv/Scripts/python -m pytest hexperiment/tests/test_gallery_modelcard.py hexperiment/tests/test_architecture.py -q`, then the two full commands.
 
-- [ ] 5. The benchmark section
+- [x] 5. The benchmark section
   - Create `gallery/benchmark.py`: `BENCHMARK_FORMAT`, `parse_benchmark(text, *, source)`, `run_count`, `percent` and `benchmark_section(benchmark, ghost_names)`. `parse_benchmark` reports the first problem in the order of the 21-row table in `design.md` ("`benchmark.py`"), each message starting with `<source>: ` and the key path, including `format` other than `"hexperiment-benchmark/1"`, `complete` missing or false (the message that names `--only`), and every key the section shows. The module imports `datetime` and stays out of `PURE_FILES`; add the comment in `test_architecture.py` that says why (as in `design.md`, "Dependency rules").
   - Create `hexperiment/tests/test_gallery_benchmark.py`: a valid file built in the test as a dictionary and dumped with `json`; the table (grouping by leakage type with the `rowspan` cell, a file that interleaves two types, designed ghosts or "No check is designed for it", "rejected N of M" with the rate, `by_ghost` order, the clean row in the singular and the plural, the not-measured list, citation, three versions, date, run count); one parametrised test per row of the error table (21), each with one mutation of the valid dictionary, the expected first problem, the prefix `<source>: ` and the key path; the order of two problems (`complete` false before a bad `created_at`); bool, `3.0` and a string are not integers; `NaN` refused; a BOM accepted; extra keys (`statuses`, `by_ghost` of `clean`) ignored; hostile `mechanism`, `reason` and `source` escaped; a name that is not a catalogue ghost is not set as a ghost.
   - _Requirements: 2.5, 6.1, 6.2, 6.3, 4.1_
@@ -66,14 +66,14 @@
   - Tests added: about 30. None starts a Python process.
   - Verify: `.venv/Scripts/python -m pytest hexperiment/tests/test_gallery_pages.py hexperiment/tests/test_architecture.py -q`, then the two full commands.
 
-- [ ] 7. The landing page
+- [x] 7. The landing page
   - In `gallery/pages.py` add `landing_page` and `hero_sentence`: the hero (haunted figure with `data-value`, the generated sentence, the honest score or "No approved run yet.", the motto as the only `h1`; without a `Hero` only the motto and "No run has been rejected yet."), the cases as an unnumbered `<ul class="cases">` with the summary items of `design.md`, the three steps as the page's only `<ol>` (at most 80 words with the heading), the benchmark section only when a `Benchmark` is given, the ghost catalogue as a `<dl>` through `prose`, and the "How it was built" paragraph.
   - Extend `hexperiment/tests/test_gallery_pages.py` with the landing part: the hero for the example shapes (rejected 1.0000 and approved 0.9096), the sentence from the error findings in verdict order with the suspect lines, a hero without error findings ("The audit rejected it."), no approved run, no rejected run, exactly one `h1` and it is the motto, the figure not in a heading, the cases are a `ul` and the page has exactly one `ol`, every summary field, the word count of the steps, every catalogue entry that has a ghost name with its three texts and code spans, the benchmark section absent without `Benchmark` and present with it, the repository link absent without `--repo-url`, and the same hostile-string site test on the landing page.
   - _Requirements: 1.2, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 5.2_
   - Tests added: about 26. None starts a Python process.
   - Verify: `.venv/Scripts/python -m pytest hexperiment/tests/test_gallery_pages.py -q`, then the two full commands.
 
-- [ ] 8. Links and the site
+- [x] 8. Links and the site
   - Create `gallery/links.py` (pure): `page_links` and `broken_links`. Create `gallery/site.py` (pure): `MARKER_TEXT` and `build_site`, with the file mapping, the order of the insertions and the `RuntimeError` for a broken link, as in `design.md`.
   - Create `hexperiment/tests/test_gallery_site.py`: the file set for one app, two apps, an app with no approved run (no `model_card.md`); `build_site` twice gives equal dictionaries; two different `tmp_path` folders give equal bytes; no page contains the current year; UTF-8 without BOM and without `\r`; the independent link check of the coverage table on the three sites (its own `HTMLParser`, not `links.py`); the negative test for `broken_links` and for `build_site` raising `RuntimeError`; the balanced-tags check (stack, void tags, unique ids, one `main`, `header` and `footer` per page, one `h1`, a first focusable skip link with an existing target, `lang="en"`, distinct titles, no skipped heading level); the hostile site is parsed again here.
   - Add `links.py` and `site.py` to `PURE_FILES`.

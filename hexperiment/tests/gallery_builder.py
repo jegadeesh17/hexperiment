@@ -119,11 +119,12 @@ def make_source(
     train: str = "print('train')\n",
 ) -> AppSource:
     history = tuple(runs) if runs is not None else (make_verdict(),)
+    has_approved = any(run.status is Status.APPROVED for run in history)
     return AppSource(
         config=make_config(name, description=description, target=target),
         history=history,
         last_verdict_json=b"{}\n",
-        approved_card=None,
+        approved_card=b"# Model card\n" if has_approved else None,
         train_py=train if haunted is not None else None,
         haunted_py=haunted,
     )
