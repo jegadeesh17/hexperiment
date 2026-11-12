@@ -442,7 +442,7 @@ def status_mark(status: str) -> Markup: ...
    - `METRIC_RANGE` (a `MappingProxyType` in `pages.py`): `{"roc_auc": "0.5 is guessing and 1.0 is perfect"}`. A metric without an entry gets no range clause.
    - `GHOST_GLOSS` (a `MappingProxyType` in `pages.py`), at most eight words each: The Doppelganger "the same rows in training and test"; The Possession "a column that gives the answer away"; The Peeking Spirit "training that saw the test rows"; The Prophet "training rows from after the test period"; The Shapeshifter "results that change between identical runs". A test checks that every `ghosts.CATALOG` entry with a ghost name has a gloss of at most eight words, so a new ghost cannot ship without one. A ghost name without a gloss (not in the catalogue) is shown without one.
    - `hero_sentence(hero)` writes: `On its first run, <name> scored <score> on ROC AUC, where 0.5 is guessing and 1.0 is perfect.` (`On run <n>,` when the first rejected run is not the first run; `on <metric label>` and no range clause for a metric without an entry), then `The audit found <phrase>, <phrase> and <phrase>.`, where a phrase is the ghost name in `<em class="ghost">`, then `, <gloss>,` when it has one, then ` at <code>location</code>` and the suspect lines as before; then `With the leaks removed, its honest score is`, followed by the `honest` paragraph. The rest (no error finding, no approved run) is unchanged.
-   - `EXPLAINER` (a constant in `pages.py`, reviewed by the owner), a `<p class="explain">` directly after the `h1` motto, 61 words: "A data leak is information a model should not have had while it learned: the rows it is graded on, data from the future, or the answer itself. A leaky model is like a unit test that reads its expected value from the code it tests: it passes every time and proves nothing. Hexperiment finds the leak before anyone trusts the score." It is shown in every version of the hero, including the one without a `Hero`.
+   - `EXPLAINER` (a constant in `pages.py`, reviewed by the owner), a `<p class="explain">` directly after the `h1` motto, 70 words: "A data leak is information a model should not have had while it learned: the rows it is graded on, data from the future, or the answer itself. A leaky model is like a unit test that reads its expected value from the code it tests: it passes every time and proves nothing. Hexperiment finds the leak before anyone trusts the score, even when an AI agent wrote the code." It is shown in every version of the hero, including the one without a `Hero`.
 
    The `haunted` paragraph is real text. Its `data-value` attribute repeats the figure for the CSS pseudo-element (see "The stylesheet"). Without a `Hero` (no scored rejected run in any app) the section holds only the `h1` and the paragraph "No run has been rejected yet." (Requirement 2.6).
 
@@ -461,8 +461,8 @@ def status_mark(status: str) -> Markup: ...
 
    ```html
    <li class="run">
-     <p class="run-head"><span class="status status-rejected"><span class="mark" aria-hidden="true"></span>REJECTED</span>
-        full 1.0000 <time datetime="2026-11-11T19:50:51Z">2026-11-11 19:50:51 UTC</time> test set used 1 time</p>
+     <p class="run-head"><span class="status status-rejected"><span class="mark" aria-hidden="true"></span>REJECTED</span>, full check, score 1.0000</p>
+     <p class="run-meta"><time datetime="2026-11-11T19:50:51Z">2026-11-11 19:50:51 UTC</time>, test set used 1 time</p>
      <ul class="findings">
        <li class="finding finding-error">
          <p><em class="ghost">The Possession</em> error at <code>reservation_status</code></p>
@@ -688,14 +688,14 @@ Structure of the file: `:root` custom properties for the six colours and the spa
   content: attr(data-value) / "";      /* empty alternative text: not read by screen readers */
   position: absolute;
   inset: 0;
-  transform: translate(0.05em, 0.03em);
-  filter: blur(2px);
-  opacity: 0.3;                          /* Paper at 30%, the only use of opacity */
+  transform: translate(0.06em, -0.09em); /* rises up and right: never reads as a drop shadow */
+  filter: blur(1px);
+  opacity: 0.25;                         /* Paper at 25%, the only use of opacity */
   pointer-events: none;
 }
 @media (prefers-reduced-motion: no-preference) {
   .haunted::after { animation: drift 1.6s ease-out 0.3s both; }
-  @keyframes drift { from { transform: translate(0, 0); } to { transform: translate(0.05em, 0.03em); } }
+  @keyframes drift { from { transform: translate(0, 0); } to { transform: translate(0.06em, -0.09em); } }
 }
 ```
 

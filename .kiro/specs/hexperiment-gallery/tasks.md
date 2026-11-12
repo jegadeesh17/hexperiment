@@ -121,6 +121,15 @@
   - Tests added: about 16. None starts a Python process.
   - Verify: `.venv/Scripts/python -m pytest hexperiment/tests/test_gallery_assets.py hexperiment/tests/test_gallery_sources.py -q`, then the two full commands.
 
+- [ ] 12a. Changes from the owner's review of the first build
+  - Run header: in `gallery/pages.py` `_run_item`, write two paragraphs exactly as in the record example of `design.md` ("The case page", item 2): `<p class="run-head">` with the status mark and word, then `, full check` or `, fast check` from the mode, then `, score <value>` (or `, no score` when the run has no score); then `<p class="run-meta">` with the `<time>` element, then `, test set used N time` or `times`. In `gallery.css`, give `.run-meta` the colour Faded cyan and `font-size: 0.875rem`, and move the `margin-bottom` of `.run-head` to `.run-meta`.
+  - Haunted number: in `gallery.css`, `.haunted::after` and the `to` step of `@keyframes drift` use `translate(0.06em, -0.09em)`, `filter: blur(1px)` and `opacity: 0.25`, as in "The stylesheet and the haunted number" of `design.md`.
+  - Explainer: set `EXPLAINER` in `pages.py` to the 70-word text in `design.md` (landing page, "Plain-language version").
+  - Tests: update the tests in `test_gallery_pages.py` that pin the old run-head text; add: each run has a `run-meta` paragraph with its time and test-set uses; the mode is written as "full check" or "fast check"; a run without a score shows ", no score"; in `test_gallery_assets.py`, the `.haunted::after` offset has a negative vertical part and `run-meta` has a rule.
+  - _Requirements: 2.9, 3.2, 5.1_
+  - Tests added: about 5. None starts a Python process.
+  - Verify: `.venv/Scripts/python -m pytest hexperiment/tests/test_gallery_pages.py hexperiment/tests/test_gallery_assets.py -q`, then the two full commands.
+
 - [ ] 13. The gallery of the two example apps
   - Create `hexperiment/tests/test_gallery_examples.py`: build the gallery of `apps/hotel-cancellations` and `apps/flight-delays` with `read_app`, `build_site` and `write_site` into `tmp_path`. Read the expected values straight from `runs/*/verdict.json` with `json` and a plain sort on `created_at`, not with the code under test: the first and last status and score of each app and the ghost names of its error findings. Check that the landing page and each case page state them; that the hero is the app with the highest first rejected score and shows the last approved score of that app; that each timeline has four entries in order; that the diff appears on both case pages; that the copied `verdict.json` equals the last run's file byte for byte after `\r\n` is turned into `\n` (with the test's own `replace`, not `newlines.py`, because a Windows checkout may have CRLF); that the model card of the last approved run is shown; and that the hash of the two app folders is the same before and after (Requirement 1.6). Skip nothing: both apps are committed.
   - _Requirements: 8.2, 1.6_

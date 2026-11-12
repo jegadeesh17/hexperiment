@@ -11,7 +11,7 @@ The gallery is the public face of Hexperiment: judges and ML engineers open it f
 
 - **Material.** Cyanotype prints (the 1840s Prussian-blue photographs in which objects appear as pale ghosts) give the palette: a mid-dark Prussian blue page, pale paper-white type. It is Halloween-flavoured through its subject (ghosts, prints, spirit photography), never through pumpkins, bats, cobwebs, dripping fonts or neon.
 - **Structure.** Each app is a case: what the model claimed, which ghosts the audit found and where, how the code was fixed, and the clean verdict at the end. The history is a real sequence, so it is shown as an ordered timeline.
-- **The one bold element: the haunted number.** The score that was too good to be true (for example `1.0000`) is set very large, as a double exposure: the figure plus a faint, slightly offset, blurred second copy of itself, like a ghost in a spirit photograph. The honest score next to it is crisp, with no ghost. Everything else on every page stays quiet so that this is what people remember.
+- **The one bold element: the haunted number.** The score that was too good to be true (for example `1.0000`) is set very large, as a double exposure: the figure plus a faint second copy of itself that has drifted up and to the right, like a ghost leaving the body in a spirit photograph. It must never read as a drop shadow (a shadow falls down and to the right), so the copy rises and is only lightly blurred. The honest score next to it is crisp, with no ghost. Everything else on every page stays quiet so that this is what people remember.
 
 ## Tokens
 
@@ -109,7 +109,7 @@ target is_canceled, metric roc_auc, threshold 0.85, 4 recorded runs
 ## Components
 
 - **Status mark.** A small shape before the word: filled square in Lantern for REJECTED (4px corners), filled circle in Verdigris for APPROVED, dashed hollow circle in Faded cyan for UNVERIFIED. The word is always written out, so the mark is `aria-hidden`; colour is never the only signal. Status words are written as the verdict writes them (`REJECTED`, `APPROVED`, `UNVERIFIED`): they are values, not labels, so the no-capitals rule does not apply, and no `text-transform` is used.
-- **Haunted number.** The figure is real text. The ghost copy comes from a pseudo-element reading a `data-value` attribute, is `aria-hidden` by construction, offset by about `0.05em 0.03em`, blurred 2px, Paper at 30% opacity.
+- **Haunted number.** The figure is real text. The ghost copy comes from a pseudo-element reading a `data-value` attribute, is `aria-hidden` by construction, offset by about `0.06em` right and `0.09em` up, blurred 1px, Paper at 25% opacity.
 - **Code diff.** Plex Mono 14px on Deep print, line numbers in Faded cyan, removed lines marked with a Lantern left bar and a minus sign, added lines with a Verdigris left bar and a plus sign, so it also reads in greyscale.
 
 ## Motion
