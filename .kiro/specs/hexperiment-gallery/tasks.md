@@ -139,8 +139,8 @@
   - Tests added: about 18 (replacing the old stylesheet tests). None starts a Python process.
   - Verify: `.venv/Scripts/python -m pytest hexperiment/tests/test_gallery_assets.py -q`, then the two full commands.
 
-- [ ] 12c. The landing page
-  - In `gallery/pages.py`, rebuild the shell and the landing page as in "Shell" and "Landing page" of the redesign section; remove `FONTS_URL`, `METRIC_RANGE`, `GHOST_GLOSS`, `EXPLAINER`, `hero_sentence`, `CHECK_STEPS` and `HOW_IT_WAS_BUILT`; add `GHOST_LINE` and the fixed copy; change `MOTTO` to use U+2019. Add `canary_counts` to `gallery/summary.py`.
+- [x] 12c. The landing page
+  - In `gallery/pages.py`, rebuild the shell and the landing page as in "Shell" and "Landing page" of the redesign section; remove `FONTS_URL`, `METRIC_RANGE`, `GHOST_GLOSS`, `EXPLAINER`, `hero_sentence`, `CHECK_STEPS` and `HOW_IT_WAS_BUILT`; add `GHOST_LINE` and the fixed copy; change `MOTTO` to use U+2019. Add `canary_counts` to `gallery/summary.py`. In `gallery/links.py`, remove the import and use of `FONTS_URL`: the only external link a page may hold is now the repository link.
   - Since the shell no longer writes `<header>`, `<main>` and `<footer>`, the case page writes them itself in this task, around its current content: its current header, then `<main>` holding its current sections, with `id="content"` and `tabindex="-1"` on the element that holds its `h1`, then its current footer. The new case-page markup is the next task.
   - Tests: in `test_gallery_pages.py`, remove the tests of the removed names and add the landing-page and shell tests of "Tests" in the redesign section; add the `canary_counts` tests to `test_gallery_summary.py`; add the `http` and `fonts.googleapis.com` check to `test_gallery_site.py`. Remove from `OLD_PAGE_CLASSES` in `test_gallery_assets.py` every class the landing page no longer uses.
   - _Requirements: 2.1 to 2.11, 5.2_

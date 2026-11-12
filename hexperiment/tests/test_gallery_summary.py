@@ -1,3 +1,4 @@
+import dataclasses
 import math
 import re
 
@@ -17,6 +18,7 @@ from hexperiment.errors import HexInputError
 from hexperiment.gallery.summary import (
     RESERVED_SLUGS,
     assign_slugs,
+    canary_counts,
     choose_hero,
     ghosts_found,
     score_text,
@@ -308,3 +310,54 @@ def test_the_hero_is_a_member_and_no_other_candidate_has_a_larger_key(pairs):
     chosen = summaries.index(hero.app)
     assert chosen in candidates
     assert all(key(i) <= key(chosen) for i in candidates)
+
+
+# canary_counts
+
+
+def with_evidence(check="canary", **evidence):
+    finding = make_finding(check=check, ghost=None)
+    return dataclasses.replace(finding, evidence=evidence)
+
+
+def counts_of(*findings):
+    return canary_counts(make_verdict(Status.REJECTED, findings=list(findings)))
+
+
+def test_canary_counts_with_both_counts():
+    finding = with_evidence(rows_changed=95309, train_rows=95457)
+    assert counts_of(finding) == (95309, 95457)
+
+
+def test_canary_counts_without_findings():
+    assert counts_of() is None
+
+
+@pytest.mark.parametrize("evidence", [{"rows_changed": 3}, {"train_rows": 3}, {}])
+def test_canary_counts_with_a_missing_key(evidence):
+    assert counts_of(with_evidence(**evidence)) is None
+
+
+@pytest.mark.parametrize("bad", [True, 3.0, "3", None, [3]])
+def test_canary_counts_refuses_values_that_are_not_int(bad):
+    assert counts_of(with_evidence(rows_changed=bad, train_rows=10)) is None
+    assert counts_of(with_evidence(rows_changed=3, train_rows=bad)) is None
+
+
+@pytest.mark.parametrize("evidence", [(0, 10), (3, 0), (-1, 10)])
+def test_canary_counts_refuses_zero_and_negative(evidence):
+    changed, total = evidence
+    finding = with_evidence(rows_changed=changed, train_rows=total)
+    assert counts_of(finding) is None
+
+
+def test_canary_counts_ignores_other_checks():
+    other = with_evidence(check="proxy", rows_changed=3, train_rows=10)
+    assert counts_of(other) is None
+
+
+def test_canary_counts_first_matching_finding_wins():
+    incomplete = with_evidence(rows_changed=1)
+    first = with_evidence(rows_changed=2, train_rows=20)
+    second = with_evidence(rows_changed=3, train_rows=30)
+    assert counts_of(incomplete, first, second) == (2, 20)

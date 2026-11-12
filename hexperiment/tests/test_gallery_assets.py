@@ -31,17 +31,7 @@ SUPPORTS_TIMELINE = "@supports (animation-timeline: view())"
 # Classes the markup carries that need no rule of their own.
 STRUCTURAL = {"context", "finding-error"}
 # Classes of the first page design, removed when the pages are rebuilt.
-OLD_PAGE_CLASSES = frozenset(
-    {
-        "explain",
-        "haunted",
-        "honest",
-        "model-card",
-        "no-findings",
-        "site",
-        "source",
-    }
-)
+OLD_PAGE_CLASSES = frozenset({"model-card", "no-findings", "site", "source"})
 
 
 @pytest.fixture(scope="module")

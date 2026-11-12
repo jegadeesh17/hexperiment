@@ -13,53 +13,133 @@ from collections.abc import Sequence
 from types import MappingProxyType
 from urllib.parse import urlsplit
 
+from hexperiment.gallery import art
 from hexperiment.gallery.benchmark import benchmark_section
 from hexperiment.gallery.difftext import diff_markup, diff_scripts
 from hexperiment.gallery.markup import Child, Markup, code, el, prose, spaced
 from hexperiment.gallery.modelcard import model_card_section
 from hexperiment.gallery.records import AppSource, Benchmark
-from hexperiment.gallery.summary import AppSummary, Hero, score_text, suspect_lines
+from hexperiment.gallery.summary import AppSummary, Hero, canary_counts, score_text
 from hexperiment.ghosts import CATALOG
 from hexperiment.models import Finding, Severity, Status, Verdict
-
-FONTS_URL = (
-    "https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,200;0,400;0,600;1,400"
-    "&family=IBM+Plex+Mono:wght@400;500&display=swap"
-)
 
 LANDING_PATH = "index.html"
 STYLESHEET_PATH = "assets/gallery.css"
 LANDING_TITLE = "Hexperiment: audited model runs"
-MOTTO = "If your model looks too good to be true, it's haunted."
-CHECK_STEPS = (
-    "Train normally and keep what the model learned.",
-    "Train again with the test rows scrambled at load time.",
-    "Compare the two. In a script without leakage nothing the model learned "
-    "depends on the test rows, so nothing moves.",
-)
-# Reviewed by the owner: every claim must be true of the repository when published.
-HOW_IT_WAS_BUILT = (
-    "Hexperiment was written against Kiro specs. A hook runs the fast check each "
-    "time a training script is saved, and a workflow repeats fix, retrain and the "
-    "full check until the verdict is APPROVED. The kit ships as a Kiro power."
-)
-METRIC_RANGE = MappingProxyType({"roc_auc": "0.5 is guessing and 1.0 is perfect"})
-GHOST_GLOSS = MappingProxyType(
+MOTTO = "If your model looks too good to be true, it\u2019s haunted."
+GHOST_LINE = MappingProxyType(
     {
-        "The Doppelganger": "the same rows in training and test",
-        "The Possession": "a column that gives the answer away",
-        "The Peeking Spirit": "training that saw the test rows",
-        "The Prophet": "training rows from after the test period",
-        "The Shapeshifter": "results that change between identical runs",
+        "The Doppelganger": "The same rows sit in training and test.",
+        "The Possession": (
+            "One column gives the answer away, like a status filled in after "
+            "the booking ends."
+        ),
+        "The Peeking Spirit": "Training saw the test rows. The canary test catches it.",
+        "The Prophet": "Training uses rows from after the test period.",
+        "The Shapeshifter": (
+            "Identical runs give different results, so nothing can be verified."
+        ),
     }
 )
-EXPLAINER = (
-    "A data leak is information a model should not have had while it learned: "
-    "the rows it is graded on, data from the future, or the answer itself. "
-    "A leaky model is like a unit test that reads its expected value from the "
-    "code it tests: it passes every time and proves nothing. Hexperiment finds "
-    "the leak before anyone trusts the score."
+# Fixed copy, word for word from the reference page (mockups/landing.html).
+_DEFINITION_HEAD = "Hexperiment is a Kiro power that catches data leaks in "
+_DEFINITION_TAIL = (
+    " test answers that sneak into training and fake a high score. "
+    "Kiro\u2019s agent then fixes them."
 )
+_LEAK_TITLE = "A leak makes a broken model look perfect."
+_LEAK_LEDE = (
+    "A model learns from training rows, then gets graded on test rows it has "
+    "never seen. A data leak lets information from the test rows slip into "
+    "training. The model has seen the answers, so it aces the test and fails on "
+    "real data.",
+    "It\u2019s like a unit test that reads its expected value from the code it "
+    "tests: it always passes and proves nothing. When an AI agent writes the "
+    "training code, a leak is easy to miss. Nothing crashes. The score just "
+    "goes up.",
+)
+_HOW_TITLE = "It scrambles the answers and watches what moves."
+_HOW_LEDE = (
+    "Hexperiment runs your training script twice. The second time, it scrambles "
+    "only the test rows. Honest code never uses the test rows to train, so "
+    "nothing in training should change. This is the canary test."
+)
+_HOW_STEPS = (
+    ("Train normally", "Hexperiment records exactly what training produced."),
+    (
+        "Scramble the test rows, train again",
+        "Same script, same seed. Only the test rows are shuffled.",
+    ),
+    ("Compare", "If any training row changed, the test rows leaked into training."),
+)
+_ROWS_KEYS = (
+    "8 training rows, 2 test rows",
+    "the test rows are scrambled",
+    "orange rows changed: a leak",
+)
+_GHOSTS_LEDE = (
+    "Each check names the leak it found, so a failed run reads like a story. A "
+    "model is approved only when a full run passes every check and reaches its "
+    "target score."
+)
+_CASES_LEDE = (
+    "Every number here comes from a recorded run. Open a case file to see each "
+    "run and every finding."
+)
+_CASES_NOTE = (
+    "The honest score is lower. That is the point: it is the score the model "
+    "will really get once it meets new data."
+)
+_KIRO_TITLE = "It lives inside Kiro."
+_KIRO_LEDE = (
+    "Hexperiment installs as a Kiro power. Kiro\u2019s agent gets the rules, "
+    "the tools, and a loop that does not stop until the leak is gone."
+)
+_KIRO_ENTRIES = (
+    (
+        "Steering",
+        "Before it writes training code, the agent reads the rules: split first, "
+        "no columns from the future, always end with an audit.",
+    ),
+    (
+        "Save hook",
+        "Saving a training script runs a fast check and clears the old verdict, "
+        "so an old approval stops counting once the code changes.",
+    ),
+    (
+        "MCP tools",
+        "The agent can list apps, run the audit, read the verdict and its "
+        "history, and ask what a ghost means.",
+    ),
+    (
+        "Guardrails",
+        "The agent cannot edit the verdict, the model card, the thresholds or "
+        "the data. It has to fix the cause.",
+    ),
+)
+_LOOP_TITLE = "Then it fixes the leak and checks again."
+_LOOP_COMMAND = "/workflow run exorcise"
+_LOOP_LEDE = (
+    " hands an app to the ghost-hunter agent and repeats until the full audit "
+    "approves it."
+)
+_LOOP_STEPS = (
+    (
+        "Edit",
+        "The ghost hunter changes the training code to remove the cause of each "
+        "finding.",
+    ),
+    ("Audit", "The full audit runs again, canary test included."),
+    (
+        "Repeat",
+        "Still rejected? It reads the new findings and tries again, up to five times.",
+    ),
+    (
+        "Hand back",
+        "Approved, or out of tries: it stops and shows you the latest verdict.",
+    ),
+)
+_END_LEDE = "Open a case file to see every recorded run"
 _COUNT_WORDS = (
     "No",
     "One",
@@ -101,33 +181,31 @@ def status_mark(status: Status | str) -> Markup:
     )
 
 
-def _repo_link(repo_url: str | None) -> Markup | None:
+def _repo_link(repo_url: str | None, class_: str | None = None) -> Markup | None:
     if repo_url is None:
         return None
-    return el("a", repo_link_label(repo_url), href=repo_url, class_="source")
+    return el("a", repo_link_label(repo_url), href=repo_url, class_=class_)
 
 
-def page_shell(*, title: str, body: Markup, path: str, repo_url: str | None) -> Markup:
-    """The document around ``body`` for the page that will be stored at ``path``."""
+def page_shell(*, title: str, body: Child, path: str, repo_url: str | None) -> Markup:
+    """The document around ``body`` for the page that will be stored at ``path``.
+
+    The shell writes the head, the skip link and the sprite; each page writes its
+    own ``header``, ``main`` and ``footer``. ``repo_url`` is kept for symmetry with
+    the pages.
+    """
     head = el(
         "head",
         el("meta", charset="utf-8"),
         el("meta", name="viewport", content="width=device-width, initial-scale=1"),
         el("title", title),
-        el("link", rel="stylesheet", href=FONTS_URL),
         el("link", rel="stylesheet", href=relative_href(path, STYLESHEET_PATH)),
     )
-    home = relative_href(path, LANDING_PATH)
     page = el(
         "body",
-        el("a", "Skip to main content", href="#main", class_="skip"),
-        el(
-            "header",
-            el("a", "Hexperiment", href=home, class_="site"),
-            _repo_link(repo_url),
-        ),
-        el("main", body, id="main", tabindex="-1"),
-        el("footer", _repo_link(repo_url), el("p", "Released under the MIT licence.")),
+        el("a", "Skip to content", href="#content", class_="skip"),
+        art.SPRITE,
+        body,
     )
     return el("html", head, page, lang="en")
 
@@ -259,36 +337,29 @@ def case_page(summary: AppSummary, source: AppSource, repo_url: str | None) -> M
         _fix_section(source),
         _card_section(summary, path),
         _raw_files(summary, path),
+        id="content",
+        tabindex="-1",
     )
+    home = relative_href(path, LANDING_PATH)
+    page = [
+        el(
+            "header",
+            el("a", "Hexperiment", href=home, class_="site"),
+            _repo_link(repo_url, "source"),
+        ),
+        el("main", body),
+        el(
+            "footer",
+            _repo_link(repo_url, "source"),
+            el("p", "Released under the MIT licence."),
+        ),
+    ]
     return page_shell(
-        title=f"Hexperiment: {summary.name}", body=body, path=path, repo_url=repo_url
+        title=f"Hexperiment: {summary.name}", body=page, path=path, repo_url=repo_url
     )
 
 
 # landing page
-
-
-def _metric_label(name: str) -> str:
-    return "ROC AUC" if name == "roc_auc" else name
-
-
-def _finding_phrase(finding: Finding) -> Markup:
-    name: Child = (
-        el("em", finding.ghost, class_="ghost") if finding.ghost else finding.check
-    )
-    parts: list[Child] = [name]
-    gloss = GHOST_GLOSS.get(finding.ghost or "")
-    if gloss:
-        parts.append(f", {gloss}," if finding.location else f", {gloss}")
-    if finding.location:
-        parts += [" at ", code(finding.location)]
-    lines = suspect_lines(finding)
-    if lines:
-        shown: list[Child] = []
-        for index, line in enumerate(lines):
-            shown += [", " if index else "", code(line)]
-        parts += [" (suspect lines ", shown, ")"]
-    return el("span", parts)
 
 
 def _joined(phrases: Sequence[Child]) -> list[Child]:
@@ -301,116 +372,355 @@ def _joined(phrases: Sequence[Child]) -> list[Child]:
     return joined
 
 
-def hero_sentence(hero: Hero) -> Markup:
-    """The paragraph under the haunted number, written from the rejected run."""
-    rejected = hero.rejected
-    score = score_text(rejected.metric.value)
-    label = _metric_label(rejected.metric.name)
-    runs = list(hero.app.runs)
-    number = runs.index(rejected) + 1 if rejected in runs else 1
-    when = "On its first run," if number == 1 else f"On run {number},"
-    range_clause = METRIC_RANGE.get(rejected.metric.name)
-    tail = f", where {range_clause}. " if range_clause else ". "
-    parts: list[Child] = [f"{when} {hero.app.name} scored {score} on {label}{tail}"]
-    errors = [f for f in rejected.findings if f.severity is Severity.ERROR]
-    if errors:
-        phrases = [_finding_phrase(f) for f in errors]
-        parts += ["The audit found ", _joined(phrases), ". "]
-    else:
-        parts.append("The audit rejected it. ")
-    parts.append(
-        "With the leaks removed, its honest score is"
-        if hero.approved
-        else "No approved run yet."
+def _count_word(count: int) -> str:
+    return _COUNT_WORDS[count] if count < len(_COUNT_WORDS) else str(count)
+
+
+def _screen(
+    section_id: str,
+    title_id: str,
+    *content: Child,
+    cls: str = "page",
+    wrap: str = "wrap",
+) -> Markup:
+    """One screen: a ``section`` with its content in ``div.wrap``."""
+    return el(
+        "section",
+        el("div", content, class_=wrap),
+        class_=cls,
+        id=section_id,
+        aria_labelledby=title_id,
     )
-    return el("p", parts, class_="lede")
 
 
-def _hero_section(hero: Hero | None) -> Markup:
-    motto = el("h1", MOTTO, id="motto")
-    explain = el("p", EXPLAINER, class_="explain")
+def _case_href(hero: Hero | None) -> str:
     if hero is None:
-        body: list[Child] = [
-            el("p", "No run has been rejected yet."),
-            motto,
-            explain,
-        ]
-    else:
-        figure = score_text(hero.rejected.metric.value)
-        body = [
-            el("p", figure, class_="haunted", data_value=figure),
-            hero_sentence(hero),
-        ]
-        if hero.approved is not None:
-            body.append(
-                el("p", score_text(hero.approved.metric.value), class_="honest")
+        return "#cases"
+    return relative_href(LANDING_PATH, f"{hero.app.slug}/index.html")
+
+
+def _trail(hero: Hero | None) -> Markup:
+    if hero is None:
+        return el("p", "No run has been rejected yet.", class_="l")
+    rejected = hero.rejected
+    number = list(hero.app.runs).index(rejected) + 1
+    when = "its first run" if number == 1 else f"run {number}"
+    items: list[Markup] = [
+        el(
+            "li",
+            el(
+                "span",
+                score_text(rejected.metric.value),
+                art.GHOST_RISE,
+                class_="n o",
+            ),
+            el("p", f"the score {hero.app.name} claimed on {when}", class_="l"),
+        )
+    ]
+    counts = canary_counts(rejected)
+    if counts is not None:
+        changed, total = counts
+        items.append(
+            el(
+                "li",
+                el("span", f"{changed:,}", class_="n"),
+                el(
+                    "p",
+                    f"of {total:,} training rows changed when we scrambled only "
+                    "the test rows",
+                    class_="l",
+                ),
             )
-        body += [motto, explain]
-    return el("section", body, class_="hero", aria_labelledby="motto")
+        )
+    if hero.approved is not None:
+        items.append(
+            el(
+                "li",
+                el("span", score_text(hero.approved.metric.value), class_="n g"),
+                el(
+                    "p",
+                    "the honest score once the leaks were removed",
+                    class_="l",
+                ),
+            )
+        )
+    else:
+        items.append(el("li", el("p", "No approved run yet.", class_="l")))
+    trail: list[Child] = []
+    for index, item in enumerate(items):
+        if index:
+            trail.append(el("li", class_="dash", aria_hidden="true"))
+        trail.append(item)
+    return el("ol", trail, class_="trail")
+
+
+def _hero_section(hero: Hero | None, repo_url: str | None) -> Markup:
+    definition = el(
+        "p",
+        el(
+            "strong",
+            _DEFINITION_HEAD,
+            el("span", "machine-learning", class_="nowrap"),
+            " code:",
+        ),
+        _DEFINITION_TAIL,
+        class_="def",
+    )
+    return el(
+        "header",
+        art.LANDSCAPE,
+        el(
+            "div",
+            el(
+                "div",
+                el("a", "Hexperiment", href="#top", class_="wordmark"),
+                el(
+                    "nav",
+                    el("a", "How it works", href="#how"),
+                    _repo_link(repo_url),
+                    aria_label="Site",
+                ),
+                class_="site-head",
+            ),
+            class_="wrap hero-nav",
+        ),
+        el(
+            "div",
+            el(
+                "div",
+                el("h1", "Is your model too good to be\u00a0true?", id="question"),
+                definition,
+                el("a", "Open the case file", href=_case_href(hero), class_="cta"),
+                class_="hero-copy",
+            ),
+            class_="wrap hero-main",
+            id="content",
+            tabindex="-1",
+        ),
+        el("div", _trail(hero), class_="wrap hero-trail"),
+        class_="page hero",
+        id="top",
+        aria_labelledby="question",
+    )
+
+
+def _problem_screen() -> Markup:
+    return el(
+        "section",
+        el(
+            "div",
+            el(
+                "div",
+                el("h2", _LEAK_TITLE, id="leak-title"),
+                [el("p", text, class_="lede") for text in _LEAK_LEDE],
+            ),
+            art.LEAK_FIGURE,
+            class_="wrap two",
+        ),
+        class_="page",
+        id="leak",
+        aria_labelledby="leak-title",
+    )
+
+
+def _canary_screen(hero: Hero | None) -> Markup:
+    third = _HOW_STEPS[2][1]
+    counts = canary_counts(hero.rejected) if hero is not None else None
+    if hero is not None and counts is not None:
+        third += f" In {hero.app.name}, {counts[0]:,} of {counts[1]:,} changed."
+    texts = (_HOW_STEPS[0][1], _HOW_STEPS[1][1], third)
+    rows = (art.ROWS_TRAIN, art.ROWS_SCRAMBLED, art.ROWS_CHANGED)
+    steps = [
+        el(
+            "li",
+            el("h3", _HOW_STEPS[index][0]),
+            el("p", texts[index]),
+            rows[index],
+            el("p", _ROWS_KEYS[index], class_="rows-key"),
+        )
+        for index in range(3)
+    ]
+    return _screen(
+        "how",
+        "how-title",
+        el("h2", _HOW_TITLE, id="how-title"),
+        el("p", _HOW_LEDE, class_="lede"),
+        el("ol", steps, class_="steps"),
+    )
+
+
+def _ghosts_screen() -> Markup:
+    names = [e.ghost for e in CATALOG if e.ghost is not None]
+    entries = [
+        el("div", el("dt", name), el("dd", GHOST_LINE[name]), class_="ghost-entry")
+        for name in names
+    ]
+    return el(
+        "section",
+        el(
+            "div",
+            el("h2", f"{_count_word(len(names))} ghosts it hunts.", id="ghosts-title"),
+            el("p", _GHOSTS_LEDE, class_="lede"),
+            el("dl", entries, class_="ghosts"),
+            class_="wrap",
+        ),
+        art.PEEK,
+        class_="page",
+        id="ghosts",
+        aria_labelledby="ghosts-title",
+    )
+
+
+def _was_fixed(summary: AppSummary) -> bool:
+    """A rejected run is followed later in the history by an approved run."""
+    statuses = [run.status for run in summary.runs]
+    return any(
+        status is Status.REJECTED and Status.APPROVED in statuses[index + 1 :]
+        for index, status in enumerate(statuses)
+    )
+
+
+def _score_class(status: Status) -> str:
+    return {Status.REJECTED: "o", Status.APPROVED: "g"}.get(status, "u")
+
+
+def _score_block(which: str, run: Verdict) -> Markup:
+    return el(
+        "div",
+        el(
+            "span",
+            score_text(run.metric.value),
+            class_=f"v {_score_class(run.status)}",
+        ),
+        el("span", f"{which} run, {run.status.value.lower()}", class_="k"),
+    )
+
+
+def _found(summary: AppSummary) -> Markup:
+    runs = f"{_plural(len(summary.runs), 'recorded run')}."
+    if not summary.ghosts:
+        return el("p", f"No ghost found. {runs}", class_="found")
+    names = [el("em", name) for name in summary.ghosts]
+    return el("p", "Found ", _joined(names), f". {runs}", class_="found")
 
 
 def _case_item(summary: AppSummary) -> Markup:
-    ghosts: Child = "No ghost found"
-    if summary.ghosts:
-        names: list[Child] = []
-        for index, name in enumerate(summary.ghosts):
-            names += [", " if index else "", el("em", name, class_="ghost")]
-        ghosts = names
     href = relative_href(LANDING_PATH, f"{summary.slug}/index.html")
     return el(
         "li",
-        el("h3", summary.name),
-        el("p", summary.description) if summary.description else None,
-        el("p", spaced(status_mark(summary.first.status), "on its first run")),
-        el("p", ghosts),
         el(
-            "p",
-            f"from {score_text(summary.first.metric.value)} to "
-            f"{score_text(summary.last.metric.value)}",
+            "div",
+            el("h3", summary.name),
+            el("p", summary.description, class_="desc")
+            if summary.description
+            else None,
+            _found(summary),
         ),
-        el("p", spaced("Last run:", status_mark(summary.last.status))),
-        el("p", _plural(len(summary.runs), "recorded run")),
-        el("p", el("a", "Read the case", href=href)),
+        el(
+            "div",
+            _score_block("first", summary.first),
+            el("span", "\u2192", class_="to", aria_hidden="true"),
+            _score_block("last", summary.last),
+            class_="pair",
+        ),
+        el(
+            "a",
+            "Open the case file",
+            href=href,
+            aria_label=f"Open the {summary.name} case file",
+        ),
         class_="case",
     )
 
 
-def _count_heading(count: int) -> str:
-    word = _COUNT_WORDS[count] if count < len(_COUNT_WORDS) else str(count)
-    return f"{word} case" if count == 1 else f"{word} cases"
+def _shown_score(run: Verdict | None) -> float | None:
+    if run is None or run.metric.value is None:
+        return None
+    return float(score_text(run.metric.value))
 
 
-def _cases_section(summaries: Sequence[AppSummary]) -> Markup:
-    return el(
-        "section",
-        el("h2", _count_heading(len(summaries))),
-        el("ul", [_case_item(s) for s in summaries], class_="cases"),
-    )
+def _honest_is_lower(summary: AppSummary) -> bool:
+    first = _shown_score(summary.first_rejected)
+    last = _shown_score(summary.last_approved)
+    return first is not None and last is not None and last < first
 
 
-def _steps_section() -> Markup:
-    return el(
-        "section",
-        el("h2", "How the check works"),
-        el("ol", [el("li", step) for step in CHECK_STEPS], class_="steps"),
-    )
-
-
-def _ghosts_section() -> Markup:
-    entries: list[Child] = []
-    for entry in CATALOG:
-        if entry.ghost is None:
-            continue
-        entries.append(el("dt", el("em", entry.ghost, class_="ghost")))
-        entries.append(
-            el(
-                "dd",
-                el("p", prose(entry.meaning)),
-                el("p", spaced("Why it matters:", prose(entry.why_it_matters))),
-                el("p", spaced("How to fix it:", prose(entry.how_to_fix))),
-            )
+def _cases_screen(summaries: Sequence[AppSummary]) -> Markup:
+    count = len(summaries)
+    if all(_was_fixed(s) for s in summaries):
+        title = (
+            "One haunted app, caught and fixed."
+            if count == 1
+            else f"{_count_word(count)} haunted apps, caught and fixed."
         )
-    return el("section", el("h2", "The ghosts"), el("dl", entries))
+    else:
+        title = "One case." if count == 1 else f"{_count_word(count)} cases."
+    note = (
+        el("p", _CASES_NOTE, class_="note")
+        if all(_honest_is_lower(s) for s in summaries)
+        else None
+    )
+    return _screen(
+        "cases",
+        "cases-title",
+        el("h2", title, id="cases-title"),
+        el("p", _CASES_LEDE, class_="lede"),
+        el("ul", [_case_item(s) for s in summaries], class_="cases"),
+        note,
+    )
+
+
+def _kiro_screen() -> Markup:
+    entries = [
+        el("div", el("dt", term), el("dd", text)) for term, text in _KIRO_ENTRIES
+    ]
+    return _screen(
+        "kiro",
+        "kiro-title",
+        el("h2", _KIRO_TITLE, id="kiro-title"),
+        el("p", _KIRO_LEDE, class_="lede"),
+        el("dl", entries, class_="kiro"),
+    )
+
+
+def _loop_screen() -> Markup:
+    steps = [el("li", el("h3", head), el("p", text)) for head, text in _LOOP_STEPS]
+    return _screen(
+        "loop",
+        "loop-title",
+        el("h2", _LOOP_TITLE, id="loop-title"),
+        el("p", code(_LOOP_COMMAND), _LOOP_LEDE, class_="lede"),
+        el("ol", steps, class_="steps loop-steps"),
+    )
+
+
+def _end_screen(hero: Hero | None, repo_url: str | None) -> Markup:
+    lede = f"{_END_LEDE}, or read the source." if repo_url else f"{_END_LEDE}."
+    links = el(
+        "div",
+        el("a", "Open the case file", href=_case_href(hero), class_="cta"),
+        _repo_link(repo_url),
+        class_="links",
+    )
+    return el(
+        "section",
+        el(
+            "div",
+            el("h2", MOTTO, id="end-title"),
+            el("p", lede, class_="lede"),
+            links,
+            class_="wrap",
+        ),
+        art.GRAVEYARD_LANDING,
+        el(
+            "footer",
+            el("div", "Released under the MIT licence.", class_="wrap"),
+            class_="site-foot",
+        ),
+        class_="page end",
+        id="end",
+        aria_labelledby="end-title",
+    )
 
 
 def landing_page(
@@ -421,15 +731,29 @@ def landing_page(
 ) -> Markup:
     """The whole page ``index.html``."""
     ghost_names = frozenset(e.ghost for e in CATALOG if e.ghost is not None)
-    body = el(
-        "div",
-        _hero_section(hero),
-        _cases_section(summaries),
-        _steps_section(),
-        benchmark_section(benchmark, ghost_names) if benchmark is not None else None,
-        _ghosts_section(),
-        el("section", el("h2", "How it was built"), el("p", HOW_IT_WAS_BUILT)),
+    benchmark_screen = (
+        _screen(
+            "benchmark-page",
+            "benchmark",
+            benchmark_section(benchmark, ghost_names),
+        )
+        if benchmark is not None
+        else None
     )
+    body = [
+        _hero_section(hero, repo_url),
+        el(
+            "main",
+            _problem_screen(),
+            _canary_screen(hero),
+            _ghosts_screen(),
+            _cases_screen(summaries),
+            benchmark_screen,
+            _kiro_screen(),
+            _loop_screen(),
+            _end_screen(hero, repo_url),
+        ),
+    ]
     return page_shell(
         title=LANDING_TITLE, body=body, path=LANDING_PATH, repo_url=repo_url
     )

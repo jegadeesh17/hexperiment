@@ -16,7 +16,6 @@ from gallery_builder import (
 from hexperiment.errors import HexInputError
 from hexperiment.gallery.links import broken_links, page_links
 from hexperiment.gallery.markup import ART_TAGS, TAGS
-from hexperiment.gallery.pages import FONTS_URL
 from hexperiment.gallery.records import (
     Benchmark,
     BenchmarkMechanism,
@@ -259,7 +258,8 @@ def check_links_independently(files, repo_url):
             if target.startswith("#"):
                 assert target[1:] in parsed.ids, (page, target)
             elif target.startswith("http"):
-                assert target == FONTS_URL or (repo_url and target.startswith(repo_url))
+                assert repo_url and target.startswith(repo_url), (page, target)
+                assert "fonts.googleapis.com" not in target
             else:
                 assert not target.startswith(("/", "..\\")), (page, target)
                 resolved = posixpath.normpath(
@@ -309,16 +309,35 @@ def test_broken_links_reports_a_missing_target_and_an_unknown_external_address()
     assert "#nowhere" in problems[2]
 
 
-def test_broken_links_accepts_the_fonts_the_repo_address_and_fragments():
+def test_broken_links_accepts_the_repo_address_and_fragments():
     files = {
         "a/index.html": (
-            f'<link href="{FONTS_URL}"><a href="{REPO}/tree/main">r</a>'
+            f'<a href="{REPO}/tree/main">r</a>'
             '<a href="../b.html#top">b</a><a href="#here" id="here">h</a>'
         ).encode(),
         "b.html": b'<h1 id="top">b</h1>',
     }
     assert broken_links(files, REPO) == ()
     assert len(broken_links(files, "https://other.example")) == 1
+
+
+def test_broken_links_refuses_the_google_fonts_address():
+    url = "https://fonts.googleapis.com/css2?family=Archivo"
+    files = {"index.html": f'<link href="{url}">'.encode()}
+    assert len(broken_links(files, REPO)) == 1
+
+
+def test_no_page_links_to_another_origin_but_the_repository_and_no_fonts_host():
+    for name, repo in (("two apps", REPO), ("no approved run", None)):
+        for path, content in sites()[name].items():
+            if not path.endswith(".html"):
+                continue
+            text = content.decode("utf-8")
+            assert "fonts.googleapis.com" not in text, path
+            assert "fonts.gstatic.com" not in text, path
+            for _, target in page_links(text):
+                if target.startswith("http"):
+                    assert repo and target.startswith(repo), (path, target)
 
 
 def test_broken_links_refuses_to_leave_the_site_and_a_missing_fragment():
@@ -400,8 +419,8 @@ def test_pages_are_well_formed_and_accessible(name):
         body = [i for i, (tag, _) in enumerate(page.starts) if tag == "body"][0]
         first = page.starts[body + 1]
         assert first[0] == "a"
-        assert first[1]["href"] == "#main"
-        assert "main" in page.ids
+        assert first[1]["href"] == "#content"
+        assert "content" in page.ids
         assert page.headings[0] == 1
         for before, after in zip(page.headings, page.headings[1:], strict=False):
             assert after <= before + 1, path
@@ -409,9 +428,10 @@ def test_pages_are_well_formed_and_accessible(name):
     assert len(titles) == len(set(titles))
 
 
-def test_the_landing_page_has_one_ordered_list_and_the_cases_are_unordered():
+def test_the_landing_page_lists_its_steps_in_ols_and_the_cases_in_a_ul():
     page = structures(sites()["two apps"])["index.html"]
-    assert page.count("ol") == 1
+    assert page.count("ol") == 3  # the trail, the canary steps, the loop steps
+    assert page.count("ul") == 1
 
 
 # the hostile site
@@ -470,4 +490,5 @@ def test_the_hostile_text_appears_as_text_on_both_page_kinds():
         text = files[path].decode("utf-8")
         assert "&lt;script&gt;alert(1)&lt;/script&gt;" in text, path
         assert "\x00" not in text
-        assert "\ufffd" in text
+        if path != "index.html":  # the landing page no longer shows finding text
+            assert "\ufffd" in text

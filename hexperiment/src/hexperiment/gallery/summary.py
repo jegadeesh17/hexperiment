@@ -95,6 +95,25 @@ def suspect_lines(finding: Finding) -> tuple[str, ...]:
     return tuple(item for item in tail.split(", ") if item)
 
 
+def _count(value: object) -> int | None:
+    """A positive ``int`` (not a ``bool``), else ``None``."""
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
+
+
+def canary_counts(verdict: Verdict) -> tuple[int, int] | None:
+    """``(rows_changed, train_rows)`` of the first canary finding that has both."""
+    for finding in verdict.findings:
+        if finding.check != "canary":
+            continue
+        changed = _count(finding.evidence.get("rows_changed"))
+        total = _count(finding.evidence.get("train_rows"))
+        if changed is not None and total is not None:
+            return changed, total
+    return None
+
+
 @dataclass(frozen=True, slots=True)
 class AppSummary:
     slug: str

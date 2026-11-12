@@ -10,8 +10,6 @@ import posixpath
 from collections.abc import Mapping
 from html.parser import HTMLParser
 
-from hexperiment.gallery.pages import FONTS_URL
-
 _URL_ATTRIBUTES = frozenset({"href", "src"})
 
 
@@ -56,11 +54,9 @@ def _problem(
 ) -> str | None:
     """Why the link ``value`` on ``page`` is broken, or ``None`` when it is fine."""
     if _is_external(value):
-        if value == FONTS_URL or (repo_url and value.startswith(repo_url)):
+        if repo_url and value.startswith(repo_url):
             return None
-        return (
-            "is an external address that is neither the fonts stylesheet nor --repo-url"
-        )
+        return "is an external address that is not --repo-url"
     path, _, fragment = value.partition("#")
     if not path:
         if fragment and fragment in ids_by_page[page]:
