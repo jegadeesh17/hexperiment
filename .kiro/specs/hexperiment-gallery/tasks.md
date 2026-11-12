@@ -132,7 +132,7 @@
   - Tests added: about 14. None starts a Python process.
   - Verify: `.venv/Scripts/python -m pytest hexperiment/tests/test_gallery_art.py hexperiment/tests/test_gallery_markup.py hexperiment/tests/test_gallery_sources.py hexperiment/tests/test_gallery_site.py hexperiment/tests/test_gallery_command.py -q`, then the two full commands.
 
-- [ ] 12b. The stylesheet
+- [x] 12b. The stylesheet
   - Rewrite `gallery/assets/gallery.css` as in "Stylesheet" of the redesign section: the two `@font-face` rules, the CSS of both reference pages merged, and the extra rules listed there.
   - Rewrite `hexperiment/tests/test_gallery_assets.py` for the rules of "Stylesheet" and the assets test of "Tests" in the redesign section. The pages still use some classes of the first design until the next two tasks: list exactly those in a frozenset `OLD_PAGE_CLASSES` in the test, with the comment "Classes of the first page design, removed when the pages are rebuilt.", and let the class check skip them. Do not add rules for them to the stylesheet.
   - _Requirements: 4.2, 5.1, 5.2, 5.4, 5.5_
