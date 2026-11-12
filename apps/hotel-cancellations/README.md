@@ -24,7 +24,7 @@ From the repository root, with the root virtual environment:
 
 The target is `is_canceled`. The metric is ROC AUC with a threshold of 0.85. The split is a 20% test set chosen by a hash of the row, with a fixed seed (`hex.toml`).
 
-**Run time.** One full run of the honest script (`hexperiment run`, which runs `train.py` normally and once more with the test rows scrambled, so two executions) took 20.7 s on 2026-11-12. A second run took 24.0 s and gave the same verdict and AUC. The machine was an AMD Ryzen 7 3750H laptop (4 cores, 8 threads) on Windows 11 with the High Performance power plan, CPU only, with pandas 3.1.1, and nothing else was running. The limit in `hex.toml` is `timeout_seconds = 120`. The haunted script needs a third execution (the control run, started when the canary finds a difference) and took 28.5 s.
+**Run time.** One full run of the honest script (`hexperiment run`, which runs `train.py` normally and once more with the test rows scrambled, so two executions) took 22.2 s on 2026-11-12. A second run took 20.7 s and gave the same verdict and AUC. The machine was an AMD Ryzen 7 3750H laptop (4 cores, 8 threads) on Windows 11 with the Balanced power plan, CPU only, with pandas 3.1.1, in everyday use: the Kiro IDE (with both hexperiment MCP servers running), Chrome and VS Code were open. The limit in `hex.toml` is `timeout_seconds = 120`. The haunted script needs a third execution (the control run, started when the canary finds a difference) and took 26.8 s.
 
 ## The haunted script
 
@@ -53,13 +53,13 @@ Other columns that are recorded after the outcome, such as `reservation_status_d
 
 ## Results
 
-Measured on 2026-11-12 on an AMD Ryzen 7 3750H laptop (4 cores, 8 threads), Windows 11, High Performance power plan, in full mode (`hexperiment run` through `apps/verify.py` in a scratch copy of the app).
+Measured on 2026-11-12 on an AMD Ryzen 7 3750H laptop (4 cores, 8 threads), Windows 11, Balanced power plan, with the Kiro IDE, Chrome and VS Code open, in full mode (`hexperiment run` through `apps/verify.py` in a scratch copy of the app).
 
 | Script | Verdict | AUC | Threshold | Findings | Executions | Wall time |
 |---|---|---|---|---|---|---|
-| `haunted/train.py` | `REJECTED` (exit 1) | 1.0000 | 0.85 | The Possession on `reservation_status`; The Peeking Spirit. Warnings: `split_order`, `metric` | 3 | 28.5 s |
-| Haunted with only `reservation_status` removed | `REJECTED` (exit 1) | 0.9101 | 0.85 | The Peeking Spirit. No The Possession. Warning: `split_order` | 3 | 29.1 s |
-| `train.py` (honest) | `APPROVED` (exit 0) | 0.9096 | 0.85 | none | 2 | 20.7 s |
+| `haunted/train.py` | `REJECTED` (exit 1) | 1.0000 | 0.85 | The Possession on `reservation_status`; The Peeking Spirit. Warnings: `split_order`, `metric` | 3 | 26.8 s |
+| Haunted with only `reservation_status` removed | `REJECTED` (exit 1) | 0.9101 | 0.85 | The Peeking Spirit. No The Possession. Warning: `split_order` | 3 | 34.1 s |
+| `train.py` (honest) | `APPROVED` (exit 0) | 0.9096 | 0.85 | none | 2 | 22.2 s |
 
 The second row is not a file in the repository. `apps/verify.py` builds it from the haunted script by removing the list item marked `# LEAK: The Possession`. It is the state an agent reaches after fixing the first finding.
 

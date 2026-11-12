@@ -25,7 +25,7 @@ From the repository root, with the root virtual environment:
 
 The target is `late`. The metric is ROC AUC with a threshold of 0.60. `hex.toml` sets `time_column = "time_hour"`, so the latest 20% of the flights form the test set: 261,877 training rows and 65,469 test rows.
 
-**Run time.** One full run of the honest script (`hexperiment run`, which runs `train.py` normally and once more with the test rows scrambled, so two executions) took 23.9 s on 2026-11-12. A second run took 26.3 s and gave the same verdict and AUC. The machine was an AMD Ryzen 7 3750H laptop (4 cores, 8 threads) on Windows 11 with the High Performance power plan, CPU only, with pandas 3.1.1, and nothing else was running. The limit in `hex.toml` is `timeout_seconds = 120`. The run with the split fixed and the leak kept needs a third execution (the control run, started when the canary finds a difference) and took 34.1 s.
+**Run time.** One full run of the honest script (`hexperiment run`, which runs `train.py` normally and once more with the test rows scrambled, so two executions) took 21.1 s on 2026-11-12. A second run took 22.3 s and gave the same verdict and AUC. The machine was an AMD Ryzen 7 3750H laptop (4 cores, 8 threads) on Windows 11 with the Balanced power plan, CPU only, with pandas 3.1.1, in everyday use: the Kiro IDE (with both hexperiment MCP servers running), Chrome and VS Code were open. The limit in `hex.toml` is `timeout_seconds = 120`. The run with the split fixed and the leak kept needs a third execution (the control run, started when the canary finds a difference) and took 31.1 s.
 
 ## The haunted script
 
@@ -54,13 +54,13 @@ The haunted script splits with `train_test_split` and its default test share of 
 
 ## Results
 
-Measured on 2026-11-12 on an AMD Ryzen 7 3750H laptop (4 cores, 8 threads), Windows 11, High Performance power plan, in full mode (`hexperiment run` through `apps/verify.py` in a scratch copy of the app).
+Measured on 2026-11-12 on an AMD Ryzen 7 3750H laptop (4 cores, 8 threads), Windows 11, Balanced power plan, with the Kiro IDE, Chrome and VS Code open, in full mode (`hexperiment run` through `apps/verify.py` in a scratch copy of the app).
 
 | Script | Verdict | AUC | Threshold | Findings | Executions | Wall time |
 |---|---|---|---|---|---|---|
-| `haunted/train.py` | `REJECTED` (exit 1) | 0.7971 | 0.60 | The Prophet on `time_hour`. Warnings: `split_order`, `canary` (not applied), `metric` | 2 | 23.8 s |
-| Haunted with only the split fixed | `REJECTED` (exit 1) | 0.7605 | 0.60 | The Peeking Spirit. No The Prophet. Warnings: `split_order`, `metric` | 3 | 34.1 s |
-| `train.py` (honest) | `APPROVED` (exit 0) | 0.6193 | 0.60 | none | 2 | 23.9 s |
+| `haunted/train.py` | `REJECTED` (exit 1) | 0.7971 | 0.60 | The Prophet on `time_hour`. Warnings: `split_order`, `canary` (not applied), `metric` | 2 | 24.4 s |
+| Haunted with only the split fixed | `REJECTED` (exit 1) | 0.7605 | 0.60 | The Peeking Spirit. No The Prophet. Warnings: `split_order`, `metric` | 3 | 31.1 s |
+| `train.py` (honest) | `APPROVED` (exit 0) | 0.6193 | 0.60 | none | 2 | 21.1 s |
 
 The second row is not a file in the repository. `apps/verify.py` builds it from the haunted script by replacing the line ending in `# LEAK: random split` with `train, test = hexperiment.split(df)`. It is the state an agent reaches after fixing the first finding.
 

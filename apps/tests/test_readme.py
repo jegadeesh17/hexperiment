@@ -78,7 +78,7 @@ def test_replay_steps_are_in_order(app: App, readme: str) -> None:
 
 def test_machine_is_named(readme: str) -> None:
     assert MACHINE in readme
-    assert "High Performance power plan" in readme
+    assert "Balanced power plan" in readme
 
 
 def test_ghosts_are_named(app: App, readme: str) -> None:
