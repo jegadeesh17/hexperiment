@@ -34,6 +34,12 @@ PURE_FILES = {
     "errors.py",
     "hook_event.py",
     "ghosts.py",
+    # The gallery's pure modules (each task adds the modules it creates).
+    "newlines.py",
+    "markup.py",
+    "records.py",
+    "summary.py",
+    "difftext.py",
 }
 FORBIDDEN_IN_PURE = {"os", "pathlib", "shutil", "subprocess", "tomllib", "datetime"}
 
@@ -336,6 +342,77 @@ def test_the_sdk_is_pinned_in_the_mcp_extra_and_reached_through_dev():
 def test_the_console_script_for_the_server_is_declared():
     scripts = project_table()["scripts"]
     assert scripts["hexperiment-mcp"] == "hexperiment.mcp_server:main"
+
+
+# The gallery package (hexperiment-gallery, Requirements 4.1, 4.5).
+
+GALLERY_FORBIDDEN_IMPORTS = {"pandas", "sklearn", "scipy", "mcp"}
+
+
+def gallery_modules() -> list[Path]:
+    return [p for p in package_modules() if module_id(p).startswith("gallery/")]
+
+
+def test_the_walk_finds_the_gallery_modules():
+    found = {module_id(path) for path in gallery_modules()}
+    assert {
+        "gallery/__init__.py",
+        "gallery/newlines.py",
+        "gallery/markup.py",
+        "gallery/records.py",
+    } <= found
+
+
+@pytest.mark.parametrize("path", gallery_modules(), ids=module_id)
+def test_no_gallery_module_imports_the_cli_or_a_heavy_library(path):
+    tree = parse(path)
+    assert imported_roots(tree) & GALLERY_FORBIDDEN_IMPORTS == set()
+    assert "hexperiment.cli" not in module_names(tree)
+
+
+def literal_calls_without_a_string_literal(tree: ast.AST) -> list[int]:
+    """Line numbers of calls to ``literal(...)`` whose argument is not a str literal."""
+    bad = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+        if name != "literal":
+            continue
+        argument = node.args[0] if len(node.args) == 1 and not node.keywords else None
+        if not (isinstance(argument, ast.Constant) and isinstance(argument.value, str)):
+            bad.append(node.lineno)
+    return bad
+
+
+def test_every_call_to_literal_has_a_string_literal_argument():
+    offenders = {
+        module_id(path): lines
+        for path in gallery_modules()
+        if (lines := literal_calls_without_a_string_literal(parse(path)))
+    }
+    assert offenders == {}
+
+
+def test_only_the_markup_module_builds_markup_directly():
+    builders = [
+        module_id(path)
+        for path in gallery_modules()
+        if any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "Markup"
+            for node in ast.walk(parse(path))
+        )
+    ]
+    assert builders == ["gallery/markup.py"]
+
+
+def test_the_literal_rule_catches_a_computed_argument():
+    assert literal_calls_without_a_string_literal(ast.parse("literal(x)")) == [1]
+    assert literal_calls_without_a_string_literal(ast.parse("m.literal(f'{x}')")) == [1]
+    assert literal_calls_without_a_string_literal(ast.parse("literal('<br>')")) == []
 
 
 # The helpers above must catch what they claim to catch.

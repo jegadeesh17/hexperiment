@@ -15,7 +15,7 @@
 
 ## Tasks
 
-- [ ] 1. The package, line endings and the HTML builder
+- [x] 1. The package, line endings and the HTML builder
   - Create `hexperiment/src/hexperiment/gallery/__init__.py` (a docstring, no imports).
   - Create `gallery/newlines.py` (pure): `normalize_text` and `normalize_bytes`, as in `design.md` (`\r\n` first, then `\r`; nothing else changes).
   - Create `gallery/markup.py` (pure): `Markup`, `esc`, `literal`, `el`, `prose`, `code`, `spaced`, `document`, with the tag allowlist, the attribute rules (`on*`, `style`, `srcdoc` refused; `href` and `src` relative or `http(s)`), the control-character and lone-surrogate replacement, the code spans and the layout rules of the design.
@@ -26,7 +26,7 @@
   - Tests added: about 48 (4 Hypothesis, 4 architecture). None starts a Python process.
   - Verify: `.venv/Scripts/python -m pytest hexperiment/tests/test_gallery_newlines.py hexperiment/tests/test_gallery_markup.py hexperiment/tests/test_architecture.py -q`, then `.venv/Scripts/python -m pytest hexperiment/tests -q` and `.venv/Scripts/python -m ruff check hexperiment`.
 
-- [ ] 2. Test helpers, slugs, summaries and the hero rule
+- [x] 2. Test helpers, slugs, summaries and the hero rule
   - Create `hexperiment/tests/gallery_builder.py` with `make_verdict(status, mode, value, findings, created_at, run_id, ...)` and `make_source(...)` (a `Verdict` and an `AppSource` built in memory, like `app_builder.py`). `write_app` follows in task 9.
   - Create `gallery/summary.py` (pure): `MARKER_FILENAME`, `RESERVED_SLUGS`, `slugify`, `assign_slugs`, `score_text`, `ghosts_found`, `suspect_lines`, `AppSummary`, `summarize_app`, `Hero` and `choose_hero` with the single rule of `design.md` (largest `(score, drop, -index)`; a rejected run without a score is never chosen; `None` when there is no candidate; `approved=None` when the chosen app has no approved run).
   - Create `hexperiment/tests/test_gallery_summary.py`: slug examples and every refusal message of Requirement 1.7 (empty, `assets`, a Windows device name, a repeated slug, the same folder twice), `score_text` (four decimals, `no score`), `ghosts_found` order, `suspect_lines` on the real fix text format, and the hero rows of the coverage table in `design.md` (highest score; tie to the larger drop; tie to the app given first; rounding to four decimals decides a tie; no approved run anywhere; an app without an approved run beats a lower score with one; no rejected run; a rejected run without a score is skipped). Hypothesis: the slug matches `^([a-z0-9]+(-[a-z0-9]+)*)?$` and is idempotent; for any list of apps the hero is a member and no other candidate has a larger key.
@@ -35,7 +35,7 @@
   - Tests added: about 30 (3 Hypothesis). None starts a Python process.
   - Verify: `.venv/Scripts/python -m pytest hexperiment/tests/test_gallery_summary.py hexperiment/tests/test_architecture.py -q`, then the two full commands.
 
-- [ ] 3. The script diff
+- [x] 3. The script diff
   - Create `gallery/difftext.py` (pure): `DiffLine`, `Context`, `Change`, `Gap`, `ScriptDiff`, `diff_scripts` and `diff_markup`. `diff_scripts` calls `normalize_text` on both arguments first, splits on `\n` only (never `splitlines`), uses `difflib.SequenceMatcher(None, old, new, autojunk=False)` and `get_grouped_opcodes(context)`; `diff_markup` writes the structure of `design.md` (`role="region"`, label, `tabindex="0"`, `.removed` and `.added` with real `-` and `+` signs, line numbers on both sides).
   - Create `hexperiment/tests/test_gallery_diff.py`: the cases of the coverage table (equal texts, pure insert, pure delete, unequal replace, far-apart changes with gaps and counts, line numbers on both sides, empty input, a script of more than 200 lines compared without autojunk), CRLF and lone-CR input giving the same `ScriptDiff` as LF input, a text with `\x0c` and `\u2028` not split, the markup checks (signs, one occurrence of each line, region attributes) and a hostile line `<script>alert(1)</script>` shown as text. Hypothesis: replaying context plus added lines rebuilds the new text, context plus removed lines the old text; the diff of any text against its CRLF version is empty.
   - Add `difftext.py` to `PURE_FILES`.
