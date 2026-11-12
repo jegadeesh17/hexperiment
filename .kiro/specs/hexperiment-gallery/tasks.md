@@ -43,7 +43,7 @@
   - Tests added: about 24 (2 Hypothesis). None starts a Python process.
   - Verify: `.venv/Scripts/python -m pytest hexperiment/tests/test_gallery_diff.py hexperiment/tests/test_architecture.py -q`, then the two full commands.
 
-- [ ] 4. The model card section
+- [x] 4. The model card section
   - Create `gallery/modelcard.py` (pure): `model_card_section(verdict, *, card_href)` with the contents and number formats listed in `design.md` (key and value `dl`, checks table, waivers table or "No waivers applied.", test-set uses, link to `model_card.md`; tables inside `<div class="scroll" role="region" tabindex="0" aria-label="...">`). Do not import the private helpers of `card.py`.
   - Create `hexperiment/tests/test_gallery_modelcard.py`: every value of Requirement 3.4 appears; waivers with their reasons; a verdict with and without a time column; the comparison with `card.render` (every formatted value of the section also appears in the card text); a hostile waiver reason is escaped.
   - Add `modelcard.py` to `PURE_FILES`.
@@ -58,7 +58,7 @@
   - Tests added: about 40 (1 Hypothesis: a valid dictionary with random counts within bounds always parses and renders a table with one row per mechanism). None starts a Python process.
   - Verify: `.venv/Scripts/python -m pytest hexperiment/tests/test_gallery_benchmark.py hexperiment/tests/test_architecture.py -q`, then the two full commands.
 
-- [ ] 6. The page shell and the case page
+- [x] 6. The page shell and the case page
   - Create `gallery/pages.py` (pure) with `FONTS_URL`, `relative_href`, `repo_link_label`, `status_mark`, `page_shell` and `case_page` (sections and markup of "Case page" in `design.md`: back link, `h1`, fact line, the ordered record with status mark, mode, score, UTC time, test-set uses and every finding (errors, then waived, then warnings with `finding-warning`), the fix section with `diff_scripts` and `diff_markup` or nothing, the model card section or "No approved run yet.", the raw-file links). The landing page comes in task 7.
   - Create `hexperiment/tests/test_gallery_pages.py` (the case page part): shell (`lang`, `charset` first, viewport, title, skip link first in the body, `header`, `main id="main"`, `footer`, no `preconnect`, the repository link and its label for `github.com` and for another host, absent without `--repo-url`), the status mark markup for the three statuses (word as the verdict writes it, mark `aria-hidden`), every field of a timeline entry, a run with no findings, a run without a score, a waived finding with its reason, a finding without a ghost showing its check name, "No approved run yet.", the identical-scripts sentence, `relative_href` examples, and a whole case page built from a source whose name, description, target, finding location, message, fix, waiver reason and script lines are the hostile strings of the coverage table (parsed with `html.parser`: only allowlisted start tags, no `on*` or `style` attribute, the text appears with controls replaced).
   - Add `pages.py` to `PURE_FILES`.

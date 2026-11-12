@@ -40,6 +40,8 @@ PURE_FILES = {
     "records.py",
     "summary.py",
     "difftext.py",
+    "modelcard.py",
+    "pages.py",
 }
 FORBIDDEN_IN_PURE = {"os", "pathlib", "shutil", "subprocess", "tomllib", "datetime"}
 
