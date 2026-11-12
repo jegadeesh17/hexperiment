@@ -113,7 +113,7 @@ Scope: the `hexperiment hook` and `hexperiment init` commands, the Kiro hook, wo
 1. THE tests SHALL cover: event parsing and app lookup in `hexperiment hook` (including events with no path, paths outside the workspace and non-Python files), the exit code and output of the hook command for a clean (`UNVERIFIED`), a rejected and a failed run, each MCP tool through an in-memory MCP client session, the workspace guard, `init` creating and skipping files, and the drift check between `init --kiro` and `.kiro/`.
 2. THE hook, workflow, agent and power JSON files SHALL be checked by tests for the fields their Kiro formats require.
 3. THE core package's runtime dependencies SHALL stay `pandas`, `numpy` and `scikit-learn`; the MCP SDK SHALL be pinned in the `mcp` extra.
-4. THE full test suite, including the new tests, SHALL pass with `.venv/Scripts/python -m pytest hexperiment/tests -q` in under 90 seconds, measured on the reference laptop (AMD Ryzen 7 3750H, 4 cores, 8 threads) with the High Performance power plan and no other heavy application, such as a browser or a second IDE, running, and `ruff` SHALL report no problems.
+4. THE full test suite, including the new tests, SHALL pass with `.venv/Scripts/python -m pytest hexperiment/tests -q` in under 2 minutes in everyday use: measured on the reference laptop (AMD Ryzen 7 3750H, 4 cores, 8 threads) with the Windows default Balanced power plan while the Kiro IDE (with the project trusted, so its hooks and MCP servers run), a browser and an editor are open, and `ruff` SHALL report no problems.
 
 ### Requirement 8: One run per app at a time
 
