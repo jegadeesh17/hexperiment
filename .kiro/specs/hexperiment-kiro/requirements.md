@@ -4,7 +4,7 @@
 
 `hexperiment-core` gives a training script a verdict. This spec makes that verdict part of how Kiro works on ML code, so an agent cannot hand over a haunted model as finished work:
 
-- a **hook** re-checks an app every time an agent saves its training code, and puts the result in the agent's context;
+- a **hook** re-checks an app every time an agent saves its training code; the check clears the app's verdict and is never `APPROVED`, so a saved change replaces an earlier `APPROVED` (Kiro's documentation says the hook's output is also added to the agent's context; Kiro CLI 3.2.0 and Kiro IDE 1.4.154 do not do this, see `design.md`, Open question 14);
 - a **workflow** loops an agent on an app until `hexperiment run` writes an `APPROVED` verdict, with a restricted agent that can change the training code but never the verdict, the thresholds or the waivers;
 - an **MCP server** lets any agent list apps, run audits, read verdicts and history, and ask what a ghost means;
 - a **power** packages the kit so another Kiro user can install it in one step, and `hexperiment init` writes the hook, the workflow, the agent and the steering into their project.
@@ -31,9 +31,9 @@ Scope: the `hexperiment hook` and `hexperiment init` commands, the Kiro hook, wo
 2. WHEN `hexperiment hook` runs THEN the system SHALL read the hook event from standard input, find the saved file's path in it, and locate the app as the nearest parent folder of that file that contains `hex.toml` and `train.py`, without leaving the workspace.
 3. WHEN an app is found THEN the system SHALL run that app in fast mode, exactly as `hexperiment run --fast <app>` does, and write the summary to standard output, followed by one line telling the agent to run the full check (`hexperiment run <app>`) before calling the work done.
 4. IF no app is found, the event cannot be parsed, or the saved file is not a Python file THEN the system SHALL write nothing and exit with code `0`.
-5. THE `hexperiment hook` command SHALL always exit with code `0`, so that a failing or haunted run is reported to the agent and never blocks the agent's turn; a run that fails (exit code `2` of `hexperiment run`) SHALL be reported on standard output with the failure message.
+5. THE `hexperiment hook` command SHALL always exit with code `0`, so that a failing or haunted run never blocks the agent's turn, and SHALL print its summary on standard output, which Kiro's documentation says is added to the agent's context; a run that fails (exit code `2` of `hexperiment run`) SHALL be reported on standard output with the failure message.
 6. THE hook SHALL finish within its configured timeout (`120` seconds), and a fast run SHALL never start the canary execution.
-7. A run started by the hook SHALL be recorded in the app's run history and SHALL count as a use of the test set, like any other run, because the agent sees the test metric.
+7. A run started by the hook SHALL be recorded in the app's run history and SHALL count as a use of the test set, like any other run, because the agent can read the test metric in `verdict.json`.
 8. IF another `hexperiment run` holds the app's run lock THEN the hook SHALL print that run's refusal message and the full-check notice and exit with code `0`.
 
 ### Requirement 2: Loop until approved

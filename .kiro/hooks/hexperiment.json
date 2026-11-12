@@ -3,7 +3,7 @@
   "hooks": [
     {
       "name": "hexperiment-check-on-save",
-      "description": "Runs the fast Hexperiment check on the app that owns a Python file the agent saved, and puts the result in the agent's context.",
+      "description": "Runs the fast Hexperiment check on the app that owns a Python file the agent saved. The run first clears the app's verdict, and a fast run is never APPROVED, so a saved change replaces an earlier APPROVED.",
       "trigger": "PostFileSave",
       "matcher": ".*\\.py$",
       "action": {

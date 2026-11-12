@@ -49,7 +49,7 @@ These rules apply to every training script in `apps/`. They exist because an age
 - Every run deletes the old `verdict.json` first. If the file exists, it belongs to a run that finished.
 - Every run counts as a use of the test set. Do not run the audit in a tight loop to tune against the test metric.
 
-With the hook installed, saving a Python file of an app runs the fast check and puts the result in your context. It always ends with a reminder to run the full check before you call the work done.
+With the hook installed, saving a Python file of an app runs the fast check. It clears the app's verdict and is never `APPROVED`, so an earlier `APPROVED` stops counting once you change the code. The current Kiro versions do not show you the hook's output, so after you change a training script, run `hexperiment run` yourself (or call `get_verdict`) and read the result before you call the work done.
 
 ## Reading a verdict
 

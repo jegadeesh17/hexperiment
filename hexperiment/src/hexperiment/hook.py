@@ -1,10 +1,12 @@
 """The text of ``hexperiment hook``: from a hook event to a message for the agent.
 
-Kiro starts the command after the agent saves a file and puts what it prints into
-the agent's context. This module finds the app that owns the saved file and runs
-it in fast mode; the command in ``cli`` prints the result and always exits 0
-(Requirements 1.2 to 1.7). It receives the runner as an argument and does not
-import ``cli``.
+Kiro starts the command after the agent saves a file. Its documentation says that
+what the command prints is added to the agent's context; Kiro CLI 3.2.0 and Kiro
+IDE 1.4.154 do not do this, so the lasting effect is the fast run itself, which
+clears the app's verdict and is never APPROVED. This module finds the app that
+owns the saved file and runs it in fast mode; the command in ``cli`` prints the
+result and always exits 0 (Requirements 1.2 to 1.7). It receives the runner as an
+argument and does not import ``cli``.
 """
 
 from __future__ import annotations
