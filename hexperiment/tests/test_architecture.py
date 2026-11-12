@@ -471,9 +471,7 @@ def loaded_after(code: str, names: tuple[str, ...]) -> list[str]:
 
 
 def test_importing_the_server_module_loads_neither_sklearn_nor_scipy():
-    loaded = loaded_after(
-        "import hexperiment.mcp_server.server", ("sklearn", "scipy")
-    )
+    loaded = loaded_after("import hexperiment.mcp_server.server", ("sklearn", "scipy"))
     assert loaded == []
 
 
@@ -500,3 +498,53 @@ def test_the_lazy_public_functions_resolve_by_attribute_access():
 def test_an_unknown_package_attribute_still_raises_attribute_error():
     with pytest.raises(AttributeError):
         hexperiment.no_such_name  # noqa: B018
+
+
+# The gallery command (hexperiment-gallery, Requirements 4.5, 8.3).
+
+
+def test_cli_has_no_module_level_import_of_the_gallery():
+    tree = parse(PACKAGE_DIR / "cli.py")
+    top_level = ast.Module(
+        body=[n for n in tree.body if isinstance(n, ast.Import | ast.ImportFrom)],
+        type_ignores=[],
+    )
+    assert not any(
+        name == "hexperiment.gallery" or name.startswith("hexperiment.gallery.")
+        for name in module_names(top_level)
+    )
+    # ... and the function-level import exists, so the rule is not vacuous.
+    assert any(
+        name.startswith("hexperiment.gallery.")
+        for name in imported_modules(PACKAGE_DIR / "cli.py")
+    )
+
+
+@pytest.mark.parametrize("path", gallery_modules(), ids=module_id)
+def test_no_gallery_module_calls_print(path):
+    assert not any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "print"
+        for node in ast.walk(parse(path))
+    )
+
+
+def test_building_a_gallery_loads_no_sklearn_scipy_mcp_or_anyio(tmp_path):
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    try:
+        from gallery_builder import make_verdict, write_app
+    finally:
+        sys.path.pop(0)
+    app = write_app(tmp_path, "demo", [make_verdict()])
+    out = tmp_path / "site"
+    code = (
+        "from pathlib import Path\n"
+        "from hexperiment.gallery.command import build_gallery\n"
+        f"outcome = build_gallery([Path({str(app)!r})], Path({str(out)!r}),"
+        " repo_url=None, benchmark=None)\n"
+        "assert outcome.exit_code == 0, outcome.stderr\n"
+    )
+    loaded = loaded_after(code, ("sklearn", "scipy", "mcp", "anyio"))
+    assert loaded == []
+    assert (out / "index.html").is_file()

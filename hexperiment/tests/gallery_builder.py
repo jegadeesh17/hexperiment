@@ -142,3 +142,60 @@ def rejected(value: float | None, *, ghost: str = "The Possession") -> Verdict:
 
 def approved(value: float) -> Verdict:
     return make_verdict(Status.APPROVED, value=value, run_id="20261111-195052-000002")
+
+
+HEX_TOML = """\
+[app]
+name = "{name}"
+description = "A demo app."
+
+[data]
+path = "data.csv"
+
+[target]
+column = "target"
+
+[metric]
+name = "roc_auc"
+threshold = {threshold}
+"""
+
+
+def _encode(text: str, newline: str) -> bytes:
+    return text.replace("\n", newline).encode("utf-8")
+
+
+def write_app(
+    root: Path,
+    name: str,
+    runs: Sequence[Verdict],
+    haunted: str | None = None,
+    newline: str = "\n",
+    *,
+    train: str = "x = 1\n",
+) -> Path:
+    """Write an app folder under ``root`` and return it.
+
+    Everything is written in binary mode, so ``newline="\\r\\n"`` really gives CRLF
+    files, as a Windows checkout with ``core.autocrlf=true`` does.
+    """
+    from hexperiment.card import render
+    from hexperiment.verdict import to_json
+
+    app = root / name
+    (app / "runs").mkdir(parents=True)
+    (app / "hex.toml").write_bytes(
+        _encode(HEX_TOML.format(name=name, threshold=THRESHOLD), newline)
+    )
+    (app / "train.py").write_bytes(_encode(train, newline))
+    if haunted is not None:
+        (app / "haunted").mkdir()
+        (app / "haunted" / "train.py").write_bytes(_encode(haunted, newline))
+    ordered = sorted(runs, key=lambda v: (v.created_at, v.run_id))
+    for index, verdict in enumerate(ordered):
+        folder = app / "runs" / verdict.run_id
+        folder.mkdir()
+        (folder / "verdict.json").write_bytes(_encode(to_json(verdict), newline))
+        card = render(verdict, ordered[:index], description="A demo app.")
+        (folder / "model_card.md").write_bytes(_encode(card, newline))
+    return app

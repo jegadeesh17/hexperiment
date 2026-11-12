@@ -76,7 +76,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="write the hook, workflow, ghost hunter agent and steering file into "
         "./.kiro (existing files are kept)",
     )
+    _add_gallery_parser(commands)
     return parser
+
+
+def _add_gallery_parser(commands: argparse._SubParsersAction) -> None:
+    gallery = commands.add_parser(
+        "gallery", help="build a static website from the recorded runs of apps"
+    )
+    gallery.add_argument(
+        "app_dirs",
+        nargs="+",
+        metavar="APP_DIR",
+        help="app folders with hex.toml, train.py and runs/",
+    )
+    gallery.add_argument(
+        "--out", required=True, metavar="OUT_DIR", help="folder to write the site into"
+    )
+    gallery.add_argument(
+        "--repo-url", metavar="URL", help="link to the source, shown on every page"
+    )
+    gallery.add_argument(
+        "--benchmark", metavar="FILE", help="benchmark results file (JSON)"
+    )
 
 
 def exit_code_for(status: Status) -> int:
@@ -95,9 +117,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _hook_command()
     if args.command == "init":
         return _init_command(args.app_dir, kiro=args.kiro)
+    if args.command == "gallery":
+        return _gallery_command(args)
     outcome = run_app(Path(args.app_dir), full=args.full)
-    # Requirement 16.5: the verdict is written, so a failure to print it must not
-    # change the exit code.
+    return _emit(outcome)
+
+
+def _emit(outcome: RunOutcome) -> int:
+    """Print the text of an outcome and return its exit code.
+
+    Requirement 16.5: the verdict is written, so a failure to print it must not
+    change the exit code.
+    """
     if outcome.stdout:
         with contextlib.suppress(Exception):
             print_text(outcome.stdout)
@@ -105,6 +136,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         with contextlib.suppress(Exception):
             print_text(outcome.stderr, sys.stderr)
     return outcome.exit_code
+
+
+def _gallery_command(args: argparse.Namespace) -> int:
+    """``hexperiment gallery``: the import is here so other commands never load it."""
+    from hexperiment.gallery.command import build_gallery
+
+    outcome = build_gallery(
+        [Path(p) for p in args.app_dirs],
+        Path(args.out),
+        repo_url=args.repo_url,
+        benchmark=None if args.benchmark is None else Path(args.benchmark),
+    )
+    return _emit(outcome)
 
 
 def run_app(
