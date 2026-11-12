@@ -6,7 +6,7 @@
 - Run all commands from the repository root. Every task ends with the same two full commands, `.venv/Scripts/python -m pytest hexperiment/tests -q` and `.venv/Scripts/python -m ruff check hexperiment`; the "Verify" line of a task names the focused test files to run first.
 - Tests live next to the module they cover (`tests/test_gallery_<module>.py`) and are written in the same task as the module. Where `design.md` lists a Hypothesis property for a module, the task adds it.
 - Signatures, algorithms, the markup of every page and the test lists are in `design.md`. This plan names what to build and where, not how.
-- The order is: pure modules first (tasks 1 to 8), then the reader, the writer and the command (tasks 9 to 11), then the stylesheet (12), then the tests on the example apps and the workflow (13 and 14), then the final check (15). The owner tasks are 16 and 17; the last one is the owner's check in a browser.
+- The order is: pure modules first (tasks 1 to 8), then the reader, the writer and the command (tasks 9 to 11), then the stylesheet (12), then the redesign approved by the owner (12a to 12d: fonts and art, the new stylesheet, the landing page, the case page), then the tests on the example apps and the workflow (13 and 14), then the final check (15). The owner tasks are 16 and 17; the last one is the owner's check in a browser.
 - The core rules still hold: pure modules stay pure, `tests/test_architecture.py` stays green, no module-level mutable state, only `canary.py` imports `subprocess`, `hexperiment/__init__.py` exports the same seven names, and the runtime dependencies stay `pandas`, `numpy` and `scikit-learn`. Nothing under `apps/` is changed and nothing under `.github/` is written by the builder.
 - Do not edit `requirements.md`, the steering files or `design.md`. If the design is ambiguous or contradicts itself, record the question in the report at the end of the task instead of guessing.
 - Line endings: every reader of an app file goes through `newlines.py` first (design, "`newlines.py`"). A test that writes files for the gallery writes them in binary mode, so Windows cannot change the line endings the test asked for.
@@ -121,14 +121,38 @@
   - Tests added: about 16. None starts a Python process.
   - Verify: `.venv/Scripts/python -m pytest hexperiment/tests/test_gallery_assets.py hexperiment/tests/test_gallery_sources.py -q`, then the two full commands.
 
-- [ ] 12a. Changes from the owner's review of the first build
-  - Run header: in `gallery/pages.py` `_run_item`, write two paragraphs exactly as in the record example of `design.md` ("The case page", item 2): `<p class="run-head">` with the status mark and word, then `, full check` or `, fast check` from the mode, then `, score <value>` (or `, no score` when the run has no score); then `<p class="run-meta">` with the `<time>` element, then `, test set used N time` or `times`. In `gallery.css`, give `.run-meta` the colour Faded cyan and `font-size: 0.875rem`, and move the `margin-bottom` of `.run-head` to `.run-meta`.
-  - Haunted number: in `gallery.css`, `.haunted::after` and the `to` step of `@keyframes drift` use `translate(0.06em, -0.09em)`, `filter: blur(1px)` and `opacity: 0.25`, as in "The stylesheet and the haunted number" of `design.md`.
-  - Explainer: set `EXPLAINER` in `pages.py` to the 70-word text in `design.md` (landing page, "Plain-language version").
-  - Tests: update the tests in `test_gallery_pages.py` that pin the old run-head text; add: each run has a `run-meta` paragraph with its time and test-set uses; the mode is written as "full check" or "fast check"; a run without a score shows ", no score"; in `test_gallery_assets.py`, the `.haunted::after` offset has a negative vertical part and `run-meta` has a rule.
-  - _Requirements: 2.9, 3.2, 5.1_
-  - Tests added: about 5. None starts a Python process.
-  - Verify: `.venv/Scripts/python -m pytest hexperiment/tests/test_gallery_pages.py hexperiment/tests/test_gallery_assets.py -q`, then the two full commands.
+- [ ] 12a. Fonts and art
+  - Read "Redesign of the pages" in `design.md` first; it supersedes the older sections it names. The reference pages are `.kiro/specs/hexperiment-gallery/mockups/landing.html` and `case.html`.
+  - In `hexperiment/pyproject.toml`, set `"hexperiment.gallery" = ["assets/*.css", "assets/fonts/*"]`. The font files are already in `gallery/assets/fonts/`; do not change them.
+  - Add `read_fonts()` to `gallery/sources.py`, the `fonts` field to `GalleryInputs` in `gallery/records.py`, the font files to `build_site` in `gallery/site.py` and `fonts=read_fonts()` to `_build` in `gallery/command.py`, as in "Fonts plumbing".
+  - Create `gallery/art.py` with the constants of the table in "`art.py`", copied from the reference pages character for character, and add `"art.py"` to `PURE_FILES` in `hexperiment/tests/test_architecture.py`.
+  - In `gallery/markup.py`, add `ART_TAGS` and add `strong` to `TAGS`.
+  - Tests: create `hexperiment/tests/test_gallery_art.py`; extend `test_gallery_markup.py`, `test_gallery_sources.py`, `test_gallery_site.py` and `test_gallery_command.py`; and add `assets/fonts/*` to the package-data test in `test_gallery_assets.py`. All as listed in "Tests" of the redesign section, except the rules that belong to the later tasks: the stylesheet rules (12b), and the `test_gallery_site.py` check for `http` links and `fonts.googleapis.com` (12c, because the pages link Google Fonts until then).
+  - _Requirements: 1.1, 4.2_
+  - Tests added: about 14. None starts a Python process.
+  - Verify: `.venv/Scripts/python -m pytest hexperiment/tests/test_gallery_art.py hexperiment/tests/test_gallery_markup.py hexperiment/tests/test_gallery_sources.py hexperiment/tests/test_gallery_site.py hexperiment/tests/test_gallery_command.py -q`, then the two full commands.
+
+- [ ] 12b. The stylesheet
+  - Rewrite `gallery/assets/gallery.css` as in "Stylesheet" of the redesign section: the two `@font-face` rules, the CSS of both reference pages merged, and the extra rules listed there.
+  - Rewrite `hexperiment/tests/test_gallery_assets.py` for the rules of "Stylesheet" and the assets test of "Tests" in the redesign section. The pages still use some classes of the first design until the next two tasks: list exactly those in a frozenset `OLD_PAGE_CLASSES` in the test, with the comment "Classes of the first page design, removed when the pages are rebuilt.", and let the class check skip them. Do not add rules for them to the stylesheet.
+  - _Requirements: 4.2, 5.1, 5.2, 5.4, 5.5_
+  - Tests added: about 18 (replacing the old stylesheet tests). None starts a Python process.
+  - Verify: `.venv/Scripts/python -m pytest hexperiment/tests/test_gallery_assets.py -q`, then the two full commands.
+
+- [ ] 12c. The landing page
+  - In `gallery/pages.py`, rebuild the shell and the landing page as in "Shell" and "Landing page" of the redesign section; remove `FONTS_URL`, `METRIC_RANGE`, `GHOST_GLOSS`, `EXPLAINER`, `hero_sentence`, `CHECK_STEPS` and `HOW_IT_WAS_BUILT`; add `GHOST_LINE` and the fixed copy; change `MOTTO` to use U+2019. Add `canary_counts` to `gallery/summary.py`.
+  - Since the shell no longer writes `<header>`, `<main>` and `<footer>`, the case page writes them itself in this task, around its current content: its current header, then `<main>` holding its current sections, with `id="content"` and `tabindex="-1"` on the element that holds its `h1`, then its current footer. The new case-page markup is the next task.
+  - Tests: in `test_gallery_pages.py`, remove the tests of the removed names and add the landing-page and shell tests of "Tests" in the redesign section; add the `canary_counts` tests to `test_gallery_summary.py`; add the `http` and `fonts.googleapis.com` check to `test_gallery_site.py`. Remove from `OLD_PAGE_CLASSES` in `test_gallery_assets.py` every class the landing page no longer uses.
+  - _Requirements: 2.1 to 2.11, 5.2_
+  - Tests added: about 30. None starts a Python process.
+  - Verify: `.venv/Scripts/python -m pytest hexperiment/tests/test_gallery_pages.py hexperiment/tests/test_gallery_summary.py hexperiment/tests/test_gallery_site.py hexperiment/tests/test_gallery_assets.py -q`, then the two full commands.
+
+- [ ] 12d. The case page
+  - In `gallery/pages.py`, rebuild the case page as in "Case page" of the redesign section (head with scores and facts, record with run head, run meta and findings, the fix, the model card with the raw-files line, the end block). In `gallery/modelcard.py`, regroup the section as described there, without changing its content.
+  - Tests: add the case-page tests of "Tests" in the redesign section to `test_gallery_pages.py` and update the ones that pin the old case markup; update `test_gallery_modelcard.py`. Delete `OLD_PAGE_CLASSES` and its use from `test_gallery_assets.py`: every class of the built site must now have a rule.
+  - _Requirements: 3.1 to 3.7, 5.2_
+  - Tests added: about 16. None starts a Python process.
+  - Verify: `.venv/Scripts/python -m pytest hexperiment/tests/test_gallery_pages.py hexperiment/tests/test_gallery_modelcard.py hexperiment/tests/test_gallery_assets.py hexperiment/tests/test_gallery_site.py -q`, then the two full commands.
 
 - [ ] 13. The gallery of the two example apps
   - Create `hexperiment/tests/test_gallery_examples.py`: build the gallery of `apps/hotel-cancellations` and `apps/flight-delays` with `read_app`, `build_site` and `write_site` into `tmp_path`. Read the expected values straight from `runs/*/verdict.json` with `json` and a plain sort on `created_at`, not with the code under test: the first and last status and score of each app and the ghost names of its error findings. Check that the landing page and each case page state them; that the hero is the app with the highest first rejected score and shows the last approved score of that app; that each timeline has four entries in order; that the diff appears on both case pages; that the copied `verdict.json` equals the last run's file byte for byte after `\r\n` is turned into `\n` (with the test's own `replace`, not `newlines.py`, because a Windows checkout may have CRLF); that the model card of the last approved run is shown; and that the hash of the two app folders is the same before and after (Requirement 1.6). Skip nothing: both apps are committed.
@@ -146,7 +170,7 @@
 - [ ] 15. Final verification
   - Run the whole suite with `.venv/Scripts/python -m pytest hexperiment/tests -q --durations=10` and confirm it passes in under 2 minutes in everyday use (the definition of `hexperiment-kiro`, Requirement 7.4). Report the time and the ten slowest tests. Do not lower Hypothesis settings or add a separate stage.
   - Run `.venv/Scripts/python -m ruff check hexperiment` and confirm it reports no problems.
-  - Build the real gallery once by hand: `.venv/Scripts/hexperiment gallery apps/hotel-cancellations apps/flight-delays --out <a temporary folder outside the repository> --repo-url https://github.com/example/example`; confirm exit code 0, that standard output is the path of `index.html`, that the folder holds `index.html`, `assets/gallery.css`, `.hexperiment-gallery` and one folder per app, and delete the temporary folder. Confirm that `hexperiment gallery --help` prints usage, that the runtime dependencies are still `pandas`, `numpy` and `scikit-learn`, and that `git status` shows no change under `apps/`.
+  - Build the real gallery once by hand: `.venv/Scripts/hexperiment gallery apps/hotel-cancellations apps/flight-delays --out <a temporary folder outside the repository> --repo-url https://github.com/example/example`; confirm exit code 0, that standard output is the path of `index.html`, that the folder holds `index.html`, `assets/gallery.css`, the four files of `assets/fonts/`, `.hexperiment-gallery` and one folder per app, and delete the temporary folder. Confirm that `hexperiment gallery --help` prints usage, that the runtime dependencies are still `pandas`, `numpy` and `scikit-learn`, and that `git status` shows no change under `apps/`.
   - Report anything the tests cannot show (layout, colour, motion) as owner checks for task 17.
   - _Requirements: 4.5, 8.3, 8.4_
   - Tests added: none.
@@ -161,12 +185,11 @@
   - _Requirements: 7.1, 7.2, 7.3_
 
 - [ ] 17. **Owner:** check the built gallery in a browser
-  - The builder cannot do this: the tests prove that the rules exist, not how the pages look. Build the gallery (`hexperiment gallery apps/hotel-cancellations apps/flight-delays --out site`) and open `site/index.html`, then both case pages, in a desktop browser with its developer tools. Do each check below on the landing page and on a case page.
-  - At **360px wide**: no horizontal scroll of the page; the diff and the tables scroll inside their own box and the box can be reached with the keyboard; the haunted number does not overflow; the two cases are stacked.
-  - At **768px wide**: the two cases sit side by side with one vertical rule; gutters are 32px.
-  - At **1024px wide**: the diff is side by side (removed left, added right), unified below; the record rail and status marks look as in the steering file.
-  - **Reduced motion off:** the ghost copy of the haunted number drifts to its offset once, in about 1.6 seconds, after load, and nothing else moves. **Reduced motion on** (the operating system setting, or the browser's rendering emulation): the ghost is already at its offset and nothing moves.
-  - **Stylesheet disabled** (the browser's "No style" view, or removing the `<link>`): every page reads in order; the figure, the sentence, the motto, the cases, the record with its run numbers, the findings, the diff lines with their `-` and `+` signs and the model card are all present as text.
-  - Also check: Tab shows a visible 2px Paper focus outline and the skip link appears first; the fonts load (and the pages read correctly with the fallbacks if you block `fonts.googleapis.com`); the status word is always written next to its mark.
+  - The builder cannot do this: the tests prove that the rules exist, not how the pages look. Build the gallery (`hexperiment gallery apps/hotel-cancellations apps/flight-delays --out site`) and open `site/index.html`, then both case pages, in a desktop browser. Compare them with the reference pages in `.kiro/specs/hexperiment-gallery/mockups/`.
+  - At **1366×657, 1440×900 and 1831×843**: every screen of the landing page fits the window with nothing cut off; the moon and tree stay clear of the text; there is no band or seam between the first and second screen; scrolling settles gently on each screen.
+  - **Motion on:** the ghost rises out of the claimed score and bobs twice, and is still within 5 seconds; while scrolling, each screen fades in, the leak ghost slips through, the rows turn orange, and each screen at rest shows its final state. **Reduced motion on** (the operating system setting, or the browser's rendering emulation): nothing moves and every screen shows its final state.
+  - **At 360px wide:** no horizontal page scroll; the diff and the tables scroll inside their own box and can be reached with the keyboard.
+  - **Stylesheet disabled:** every page reads in order: the question, the definition, the numbers with their labels, every screen's text, the cases, the record with its run numbers, the findings, the diff lines with their `-` and `+` signs and the model card.
+  - Also check: Tab first shows the skip link, then a visible 3px lime focus outline on each link; the fonts load from `assets/fonts/` (the network panel shows no request to another site); status words are always written next to their marks.
   - Report any defect to the builder as a change to the stylesheet or the pages; do not edit the generated files by hand.
-  - _Requirements: 5.1, 5.2, 5.3, 5.4_
+  - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5_

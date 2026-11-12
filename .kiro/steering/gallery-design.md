@@ -5,123 +5,98 @@ fileMatchPattern: "hexperiment/src/hexperiment/gallery/**"
 
 # Gallery design direction
 
-The gallery is the public face of Hexperiment: judges and ML engineers open it from a link, often on a phone, and decide in a few seconds whether the kit is real. It must look like evidence, not like a Halloween party page.
+The gallery is the public face of Hexperiment. Hackathon judges and developers open it from a link on a desktop screen and decide within one screen whether the kit is real. Most of them do not work in machine learning. The page has to tell them what Hexperiment is, show the numbers that prove it, and then walk them through the problem, the method, the proof and the Kiro integration, one screen at a time.
 
-## Concept: the cyanotype case file
+The reference pages `.kiro/specs/hexperiment-gallery/mockups/landing.html` and `mockups/case.html` are the approved design. They are normative for structure, class names, art and CSS. This file says why they look the way they do, so that later changes stay in the same world.
 
-- **Material.** Cyanotype prints (the 1840s Prussian-blue photographs in which objects appear as pale ghosts) give the palette: a mid-dark Prussian blue page, pale paper-white type. It is Halloween-flavoured through its subject (ghosts, prints, spirit photography), never through pumpkins, bats, cobwebs, dripping fonts or neon.
-- **Structure.** Each app is a case: what the model claimed, which ghosts the audit found and where, how the code was fixed, and the clean verdict at the end. The history is a real sequence, so it is shown as an ordered timeline.
-- **The one bold element: the haunted number.** The score that was too good to be true (for example `1.0000`) is set very large, as a double exposure: the figure plus a faint second copy of itself that has drifted up and to the right, like a ghost leaving the body in a spirit photograph. It must never read as a drop shadow (a shadow falls down and to the right), so the copy rises and is only lightly blurred. The honest score next to it is crisp, with no ghost. Everything else on every page stays quiet so that this is what people remember.
+## Concept: a moonlit night
+
+- **World.** One continuous night sky in deep purple. The first screen is a landscape: a pale moon, a bare tree, a far hill, a few bats. The ground of that landscape has the exact colour of the page, so the first screen flows into the rest with no seam. Halloween comes from the night, the ghost and the silhouettes, never from pumpkins, cobwebs, dripping letters, neon or puns.
+- **Story.** The first screen asks a question ("Is your model too good to be true?"), says in one sentence what Hexperiment is, and shows up to three real numbers from a recorded run: the score a leaky model claimed, how many training rows changed when only the test rows were scrambled, and the honest score. Each later screen answers one question a judge has: what is the problem, how does the check work, what does it find, does it work on real apps, how does it use Kiro, what does it do about a leak.
+- **The one bold element: the rising ghost.** A small ghost rises once out of the claimed score on the first screen. It is the only motion that starts on its own, and it ends within five seconds.
 
 ## Tokens
 
 ### Colour
 
-| Name | Hex | Use |
+| Token | Hex | Use |
 |---|---|---|
-| Prussian | `#17406D` | page background |
-| Deep print | `#123359` | raised areas: code diff, tables, the timeline rail |
-| Paper | `#F1F6F9` | body text, headings, the haunted number |
-| Faded cyan | `#A9C4D8` | secondary text, rules, captions |
-| Lantern | `#F4B04F` | REJECTED, removed diff lines, ghost names |
-| Verdigris | `#8FE0C4` | APPROVED, added diff lines |
+| `--sky` | `#23153A` | Page background on every page and every screen, and the near ground of the landscape. |
+| `--night` | `#0B0612` | Silhouettes and the darkest ground. |
+| `--well` | `#1A0F2A` | The code diff background on the case page. |
+| `--bone` | `#EDE6F5` | Headings, text that must stand out, the moon and the ghost. |
+| `--soft` | `#D2C8E1` | Body text. |
+| `--muted` | `#BDB2CF` | Secondary text: labels, keys, step numbers, meta lines. |
+| `--dash` | `#7A6893` | Decorative dashes and dashed outlines only, never text. |
+| `--rows` | `#8A5CCB` | Training rows in the drawings, never text. |
+| `--orange` | `#FF8A1F` | A leak: the claimed score, REJECTED, ghost names in findings, leaked rows. |
+| `--orange-soft` | `#FFC08A` | Removed lines in the diff. |
+| `--lime` | `#A6FF4D` | An honest result: the honest score, APPROVED, the call-to-action, keyboard focus. |
+| `--lime-soft` | `#C9FF94` | Added lines in the diff. |
+| `--rule` | `rgba(237, 230, 245, 0.16)` | Hairline rules between items. |
 
-- All six meet WCAG 2.2 AA on Prussian and on Deep print (paper about 9.7:1, faded cyan about 5.8:1, lantern about 5.6:1, verdigris about 6.8:1). Do not add colours; use opacity of Paper for the ghost copy only.
-- No gradients, no glows, no drop shadows. Depth comes from Deep print areas and 1px Faded cyan rules.
-- UNVERIFIED has no colour of its own: it is Faded cyan with a dashed outline, because it is "not checked yet", not a third kind of result.
+- Orange always means "leak or rejected" and lime always means "honest or approved". Do not use them for anything else.
+- The SVG drawings use their own shades of the same night (the sky gradient `#150B24` to `#2D1A48`, the far hill `#2A1843`, the back bats `#4E3769`, the stones `#3A2852`, the fence `#160D24`, the moon craters `#DCD2E8`, the ghost's eyes `#170D27`). Those colours live only in the SVG markup, never in the stylesheet.
+- Every text colour meets WCAG 2.2 AA on `--sky` and on `--well`. No gradients in the stylesheet, no glows, no box or text shadows.
 
 ### Type
 
-- **Spectral** (Google Fonts, weights 200, 400, 600 and italic 400) for everything that is not code. Its name is a happy accident; it was chosen because it is a screen serif with clear figures. Fallback: `Georgia, "Times New Roman", serif`.
-- **IBM Plex Mono** (400, 500) only for code: the diff (including its line numbers), file paths, column names and commands. Never for labels, scores, counts or metadata. Fallback: `ui-monospace, Consolas, monospace`.
-- Load both from Google Fonts with `display=swap`; the pages must read correctly with the fallbacks.
-- Scale (px, on a 16px root): 14, 16, 18 (body), 21, 26, 34, 48, and the hero figure at `clamp(5rem, 18vw, 12rem)`. Body 18px with line height 1.6; headings line height 1.15. Measure at most 68 characters for prose.
-- Figures: `font-variant-numeric: tabular-nums lining-nums` wherever scores, counts and times appear, so columns of numbers align.
-- Headings are sentence case, weight 400 (h1 weight 200 at 48px). Ghost names are set in Spectral italic 400 in Lantern; they are names, like species.
+- **Special Elite** (a typewriter face, Apache License 2.0) for headings, the large numbers and the wordmark. It gives the case-file voice. Fallback: `"Courier New", serif`.
+- **Archivo** (variable weight 100 to 900, SIL Open Font License 1.1) for body text, labels and links. Fallback: `system-ui, sans-serif`.
+- The system monospace (`ui-monospace, "Cascadia Mono", Consolas, monospace`) only for code: the diff, file paths, column names, run ids and commands.
+- Both fonts are self-hosted: the latin `woff2` files and their licences ship in `gallery/assets/fonts/` and are copied to `assets/fonts/` in the site. `@font-face` uses `font-display: swap`. The pages make no request to another origin.
+- Sizes scale with the height of the screen as well as its width (`clamp(min, min(vw, vh), max)`), so a page never looks zoomed on a short laptop screen. The first-screen question is the largest text.
+- Figures use `font-variant-numeric: tabular-nums lining-nums` wherever scores, counts and times appear.
+- Headings are sentence case. Status words are written as the verdict writes them (`REJECTED`, `APPROVED`, `UNVERIFIED`): they are values, so no `text-transform` is used anywhere.
+- Apostrophes in page copy are typographic (U+2019).
 
-### Layout and spacing
+### Layout
 
-- One column, max width 72rem, left-aligned text; 16px side gutter on phones, 32px from 768px. Spacing steps: 4, 8, 16, 24, 40, 64, 104px.
-- Corners: 0 for rules and tables, 4px only for the diff block and status marks. No cards with shadows.
-- Works from 360px wide with no horizontal page scroll; the diff and wide tables scroll inside their own box.
+- **Page-wise.** Every section is one screen (`.page`, `min-height: 100svh`) with its content centred vertically. On a screen at least 861px wide and 600px tall, scrolling snaps gently to each screen (`scroll-snap-type: y proximity`). Below that, the pages simply follow each other.
+- Content width up to about 72rem, with the gutter `clamp(16px, 5vw, 64px)` and the page padding `clamp(56px, 9vh, 96px)`. Text is left-aligned; prose is at most about 68 characters wide.
+- No cards, no boxes with shadows, no rounded panels. Groups are separated by space and one hairline rule.
+- Every page fits one screen at 1366×657, 1440×900 and 1831×843 with no content cut off. From 360px wide there is no horizontal page scroll; the diff and wide tables scroll inside their own region.
 
-## Pages
+## Art
 
-### Landing page (`index.html`)
+All art is inline SVG, written once as string constants in `gallery/art.py`:
 
-```
-Hexperiment                                         Source on GitHub
------------------------------------------------------------------------
-        1.0000      <- haunted number, double exposure, very large
-  This hotel-cancellation model scored a perfect ROC AUC. The audit
-  found a column recorded after the outcome and a scaler that had seen
-  the test rows. Its honest score is
-        0.9096      <- crisp, about a third of the size, Verdigris rule
-  If your model looks too good to be true, it's haunted.
------------------------------------------------------------------------
- Two cases                 | 
- hotel-cancellations       | flight-delays
- REJECTED on its first run | REJECTED on its first run
- The Possession, The       | The Prophet
- Peeking Spirit            |
- from 1.0000 to 0.9096     | from 0.7971 to 0.6193
- 4 recorded runs           | 4 recorded runs
- Read the case             | Read the case
------------------------------------------------------------------------
- How the check works   (three numbered steps: a real sequence)
- 1 Train normally   2 Train again with the test rows scrambled   3 Compare
------------------------------------------------------------------------
- Benchmark table (only when results are given)
------------------------------------------------------------------------
- The ghosts: definition list of the catalogue (name, what it is, fix)
------------------------------------------------------------------------
- How it was built (Kiro specs, hooks, workflow, power) | MIT licence
-```
+- the **sprite**: the symbols `bat`, `ghost`, `tree` and `stone`, defined once per page and drawn with `<use>`;
+- the **landscape** of the first screen (sky, moon, far hill, tree, near ground, two layers of bats), anchored to the bottom right (`xMaxYMax slice`) so the moon and tree stay clear of the text at every width;
+- the **leak figure** of the problem screen: training rows, the split, test rows, and a ghost slipping through;
+- the **rows** of the canary steps: eight training rows and two test rows as small bars;
+- the **peeking ghost** at the edge of the ghost screen;
+- the **corner moon** of the case page;
+- the **graveyard** at the foot of the last screen of both pages: fence, tree, stones, a small ghost.
 
-- The hero uses the app whose first REJECTED score is the highest (the most too-good-to-be-true number), with that app's last APPROVED score as the honest one; the sentence under it is written from that run's findings.
-- The two cases sit side by side from 768px, divided by a single vertical Faded cyan rule, and stack below that. They are not cards, and not a sequence: an unnumbered list.
-- The motto is the page's only `h1`, set after the hero figure and its sentence; the figure itself is not a heading.
-
-### Case page (`<app>/index.html`)
-
-```
-All cases
-hotel-cancellations
-Predict whether a hotel booking will be cancelled.
-target is_canceled, metric roc_auc, threshold 0.85, 4 recorded runs
------------------------------------------------------------------------
- The record (ordered timeline, rail on the left)
- 1 | REJECTED   full   1.0000   The Possession on reservation_status
-   |                            The Peeking Spirit, suspect train.py:100
- 2 | UNVERIFIED fast   0.9090
- 3 | APPROVED   full   0.9090
- 4 | APPROVED   full   0.9096
------------------------------------------------------------------------
- The fix: haunted/train.py against train.py (side by side from 1024px,
- unified below; removed lines Lantern, added lines Verdigris)
------------------------------------------------------------------------
- Model card of the last approved run (rendered from the verdict)
- Raw files: verdict.json, model_card.md
-```
-
-- Each timeline entry shows status (word plus mark), mode, score, the date and time in UTC, and every finding: ghost name or check name, location, and the fix hint. Warnings are listed under errors in Faded cyan.
-
-## Components
-
-- **Status mark.** A small shape before the word: filled square in Lantern for REJECTED (4px corners), filled circle in Verdigris for APPROVED, dashed hollow circle in Faded cyan for UNVERIFIED. The word is always written out, so the mark is `aria-hidden`; colour is never the only signal. Status words are written as the verdict writes them (`REJECTED`, `APPROVED`, `UNVERIFIED`): they are values, not labels, so the no-capitals rule does not apply, and no `text-transform` is used.
-- **Haunted number.** The figure is real text. The ghost copy comes from a pseudo-element reading a `data-value` attribute, is `aria-hidden` by construction, offset by about `0.06em` right and `0.09em` up, blurred 1px, Paper at 25% opacity.
-- **Code diff.** Plex Mono 14px on Deep print, line numbers in Faded cyan, removed lines marked with a Lantern left bar and a minus sign, added lines with a Verdigris left bar and a plus sign, so it also reads in greyscale.
+Every drawing is decorative (`aria-hidden="true"`) except the leak figure, which has `role="img"` and an `aria-label` that says what it shows. The pages read completely without the art.
 
 ## Motion
 
-Exactly one orchestrated moment: on the landing page, the ghost copy of the haunted number drifts from on top of the figure to its offset over about 1.6 s, once, after load. Nothing else animates; no hover transitions beyond a colour change and underline on links. With `prefers-reduced-motion: reduce` the ghost is shown at its offset with no movement.
+- **On load (the only motion that starts by itself):** the ghost rises out of the claimed score (1.4 s, after 0.9 s), then bobs twice (1.3 s each). Everything ends 4.9 s after load (WCAG 2.2.2: nothing moves on its own for more than 5 seconds).
+- **Linked to scrolling** (inside `@supports (animation-timeline: view())`): the content of each page fades in as the page arrives and out as it leaves; on the problem screen the ghost slips through the split and three training rows turn orange; on the canary screen the test rows rattle and the changed training rows turn orange; the ghost on the ghost screen peeks in. Each of these finishes before its page is fully in view, so a page at rest always shows its final state.
+- Browsers without scroll-linked animation show the final state. With `prefers-reduced-motion: reduce`, nothing moves and smooth scrolling is off.
+- No bats fly. No motion on hover beyond a colour change. No `transition`.
+
+## Components
+
+- **Number trail** (first screen): up to three large numbers joined by short dashed lines, each with a one-line label under it. Claimed score in orange, rows changed in bone, honest score in lime.
+- **Status mark:** a small shape before the status word. REJECTED: a filled orange square. APPROVED: a filled lime circle. UNVERIFIED: a hollow dashed circle in `--dash`, word in `--muted`, because it means "not checked yet", not a third kind of result. The word is always written; the mark is `aria-hidden`.
+- **Score pair** (cases screen and case page head): first score, a dash or arrow, last score, each with a small label that names the run and its status in words, so colour is never the only signal. A score is orange when its run was rejected, lime when approved and muted when unverified.
+- **Finding:** what (the ghost name in orange italics, or the check name) and where (in code), a small severity pill, the message, then the fix. Warnings are set quieter than errors.
+- **Call-to-action:** at most one lime button-like link per screen ("Open the case file"). Other links are underlined text.
+- **Focus:** a 3px lime outline with a 3px offset on every link; on the lime call-to-action the outline is bone.
 
 ## Copy
 
-- Plain, specific sentences from the reader's side: "Read the case", "Source on GitHub", "Raw files". No puns in headings beyond the ghost names themselves.
-- Not allowed: all-caps labels, small labels above headings, meta strings joined with middle dots, an arrow appended to link text, one word in a heading set apart in another colour or style, exclamation marks.
-- Numbers keep four decimals for scores, as in the verdicts.
+- Plain, specific sentences from the reader's side, for developers who do not work in machine learning. Say what a thing does, not how clever it is.
+- Every number on a page comes from a recorded run or from the benchmark file. Fixed copy may describe how Hexperiment works; it never states a result.
+- Not allowed: all-caps labels, small labels above headings, meta strings joined with middle dots, an arrow appended to link text, one word of a heading set apart in another colour or style, exclamation marks, puns beyond the ghost names.
+- Not allowed in any copy: "incentive to cheat", "proves an AI cheated", "certified honest", invented figures, fines or customer names.
+- Scores keep four decimals, as in the verdicts. Row counts use thousands separators.
 
 ## Quality floor
 
-Visible keyboard focus (2px Paper outline, 2px offset), skip link to the main content, landmarks (`header`, `main`, `footer`), `lang="en"`, a distinct `<title>` per page, an `aria-label` for every non-text mark that carries meaning (a decorative mark next to a word that says the same is `aria-hidden`), and readable pages with CSS disabled. The pages have no JavaScript.
+- WCAG 2.2 AA: contrast, visible focus, a skip link, landmarks, `lang="en"`, one `h1` per page, a distinct title per page, status never by colour alone.
+- Static HTML and CSS only. No script, no `style` attribute, no request to another origin.
+- Readable with the stylesheet off: every page reads in order as plain text.

@@ -399,6 +399,8 @@ Satisfies: 4.1, 4.2, 2.4 (code spans).
 
 ### `pages.py` (pure): the pages
 
+> Superseded in part by "Redesign of the pages" below, which lists the parts it replaces.
+
 ```python
 FONTS_URL = (
     "https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,200;0,400;0,600;1,400"
@@ -658,6 +660,8 @@ Satisfies: 1.4, 1.5.
 
 ### The stylesheet and the haunted number
 
+> Superseded by "Stylesheet" in "Redesign of the pages" below. Kept as the record of the first design.
+
 `gallery/assets/gallery.css` is written by hand against the tokens of the steering file. It needs this entry in `pyproject.toml`, next to the existing one:
 
 ```toml
@@ -778,6 +782,148 @@ jobs:
 - **Hidden files.** The marker file is a dot-file; the Pages artifact step may leave it out. It is not needed on the host.
 
 Satisfies: 7.1, 7.2, 7.3.
+
+## Redesign of the pages (2026-11-12)
+
+The owner rejected the first look (the cyanotype case file) and approved a new one after a design review: the moonlit night of `.kiro/steering/gallery-design.md`. This section is the design for it. It supersedes, in "`pages.py`", `FONTS_URL` and the font link of the shell, the landing page, the head and record markup of the case page, `METRIC_RANGE`, `GHOST_GLOSS`, `EXPLAINER`, `hero_sentence`, `CHECK_STEPS` and `HOW_IT_WAS_BUILT`; and all of "The stylesheet and the haunted number". Everything else (records, sources, the summary rules, markup, difftext, the model card's content, benchmark, links, site, writer, command) stays as designed above, with the changes listed here.
+
+### The reference pages are normative
+
+`.kiro/specs/hexperiment-gallery/mockups/landing.html` and `mockups/case.html` are the approved pages. The built pages follow them for element structure, class names, ARIA attributes, SVG art and CSS. Their text is example data from the two committed apps: the builder writes every data part from the verdicts as below, never the numbers of the reference. Where the built page must differ from the reference, the list "Departures from the reference" says so; anything else that differs is a defect.
+
+### Decisions
+
+| Decision | Choice | Reason |
+|---|---|---|
+| Fonts | Self-hosted latin `woff2` of Special Elite and Archivo, with their licences, in `gallery/assets/fonts/`, copied to `assets/fonts/` in the site. | No request to another origin (Requirement 4.2); the owner approved downloading them. Both licences (Apache 2.0, SIL OFL 1.1) allow redistribution with the licence file. |
+| Font bytes | `sources.read_fonts()` reads them; `GalleryInputs.fonts` carries them into the pure `build_site`. | Same pattern as the stylesheet: the pure part stays free of file access. |
+| Art | Inline SVG as `literal("""...""")` constants in a new pure module `art.py`. | `literal()` only accepts string literals (architecture test), so app data can never reach the art. No `img` tag and no image files. |
+| SVG tags | A second set `markup.ART_TAGS`. `el()` still refuses them; only `art.py` constants contain them. The site test allows `TAGS | ART_TAGS`. | The allowlist keeps protecting everything built from data. |
+| Bold text | Add `strong` to `markup.TAGS` (inline). The reference's `<b>` becomes `<strong>`. | Semantic emphasis for the definition's first clause. |
+| Scroll-linked motion | CSS scroll-driven animations inside `@supports (animation-timeline: view())`, no script. | Requirement 4.2 forbids scripts; unsupported browsers show the end state (Requirement 5.5). |
+| Order of work | Fonts and art, then the stylesheet, then the landing page, then the case page. | Each step ends with the whole suite green. The stylesheet test's class check needs a short-lived list of old classes (see the tasks). |
+| Screenshot of Kiro | Not in the gallery. | `img` stays out of the allowlist; the video shows Kiro. |
+
+### Departures from the reference
+
+1. **Fonts.** No Google Fonts `<link>`. The head holds `<meta charset="utf-8">`, the viewport meta, `<title>`, and `<link rel="stylesheet" href="<relative>assets/gallery.css">` only.
+2. **Skip link.** The first child of `<body>` on both pages is `<a class="skip" href="#content">Skip to content</a>`. Its target, with `id="content"` and `tabindex="-1"`, is the element that holds the page's `h1`: on the landing page `<div class="wrap hero-main">`, on the case page the `<div class="wrap">` of the head section. The case page's `<main>` has no `id` and no `tabindex`. The skip link is off-screen until focused; `[tabindex="-1"]:focus { outline: none; }`.
+3. **Ids of the landing screens.** The `section` ids are `leak`, `how`, `ghosts`, `cases`, `benchmark-page`, `kiro`, `loop` and `end`, and their `h2` ids are `leak-title`, `how-title`, `ghosts-title`, `cases-title`, `kiro-title`, `loop-title` and `end-title` (the benchmark `h2` keeps `id="benchmark"` from `benchmark_section`). The first screen is `<header class="page hero" id="top" aria-labelledby="question">` and its `h1` has `id="question"`. No CSS uses these ids.
+4. **Links.** Every `href="#"` of the reference becomes a real link: see the screens below. The repository link appears only with `--repo-url`, labelled by `repo_link_label`.
+5. **Benchmark screen.** Only with `--benchmark`: `<section class="page" id="benchmark-page" aria-labelledby="benchmark"><div class="wrap">` + `benchmark_section(...)` unchanged + `</div></section>`. The reference's placeholder heading and paragraph are not built.
+6. **Model card.** Built by `modelcard.py` with its current content, regrouped (see "Case page").
+7. **Diff.** Built by `difftext.py` unchanged. The stylesheet shows it unified at every width: inside `.change`, `.removed` sits above `.added`.
+8. **Apostrophes.** Page copy uses U+2019, as the reference does. `MOTTO` becomes "If your model looks too good to be true, it’s haunted."
+
+### `art.py` (pure, new)
+
+Each constant is `NAME = literal("""...""")`, copied character for character from the reference. Imports: `literal` from `markup`, nothing else.
+
+| Constant | Source in the reference |
+|---|---|
+| `SPRITE` | `<svg class="sprite" width="0" height="0" aria-hidden="true">` with the symbols `bat`, `ghost`, `tree`, `stone` (identical in both references). |
+| `LANDSCAPE` | `landing.html`: the `<svg class="scene" ...>` of the first screen. |
+| `GHOST_RISE` | `landing.html`: the `<span class="ghost-wrap" aria-hidden="true">...</span>` inside the claimed score. |
+| `LEAK_FIGURE` | `landing.html`: the `<div class="figure">...</div>` of the problem screen (`role="img"` and its `aria-label`). |
+| `ROWS_TRAIN`, `ROWS_SCRAMBLED`, `ROWS_CHANGED` | `landing.html`: the three `<div class="rows" aria-hidden="true">...</div>` of the canary steps, in order. |
+| `PEEK` | `landing.html`: the `<svg class="peek" ...>` of the ghost screen. |
+| `GRAVEYARD_LANDING` | `landing.html`: the `<svg class="graveyard" ...>` of the end screen (with two bats). |
+| `CORNER_MOON` | `case.html`: the `<svg class="corner" ...>` of the head. |
+| `GRAVEYARD_CASE` | `case.html`: the `<svg class="graveyard" ...>` (no bats). |
+
+`markup.ART_TAGS = frozenset("svg defs symbol use g path rect circle ellipse line lineargradient stop pattern text i".split())`: the lower-case names `html.parser` reports for the tags in `art.py`.
+
+### Fonts plumbing
+
+- Package data: `gallery/assets/fonts/` holds `special-elite-latin.woff2`, `archivo-latin.woff2`, `LICENSE-SpecialElite.txt` and `OFL-Archivo.txt` (already committed). `pyproject.toml`: `"hexperiment.gallery" = ["assets/*.css", "assets/fonts/*"]`.
+- `sources.read_fonts() -> tuple[tuple[str, bytes], ...]`: every file of `assets/fonts/` (through `importlib.resources`), sorted by file name, as `(file name, bytes)`. `.woff2` bytes are returned as they are; `.txt` bytes go through `normalize_bytes`. A missing folder, or a folder without a `.woff2` file, raises `HexInputError` with the same message shape as a missing stylesheet ("the fonts are missing from the install (...)", "Reinstall the package: pip install --force-reinstall hexperiment.").
+- `records.GalleryInputs` gets `fonts: tuple[tuple[str, bytes], ...] = ()` as its last field, so existing test helpers keep working.
+- `site.build_site` writes each font as `assets/fonts/<file name>`. `command._build` passes `fonts=read_fonts()`.
+- `gallery.css` starts with two `@font-face` rules: `font-family: "Special Elite"; src: url("fonts/special-elite-latin.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap;` and `font-family: "Archivo"; src: url("fonts/archivo-latin.woff2") format("woff2"); font-weight: 100 900; font-style: normal; font-display: swap;`. The URLs are relative to `assets/gallery.css`.
+
+### Shell (`page_shell`)
+
+As before (`lang="en"`, the head of departure 1, distinct titles), with: the skip link of departure 2, then `art.SPRITE`, then the page body given by the caller. The shell no longer writes its own `<header>`, `<main>` or `<footer>`: each page writes them, because the reference places them differently on the two pages. `FONTS_URL` is removed.
+
+### Landing page
+
+Body, in this order (copy is fixed unless it names data):
+
+1. **First screen** `<header class="page hero" id="top" aria-labelledby="question">`:
+   - `art.LANDSCAPE`.
+   - `<div class="wrap hero-nav"><div class="site-head"><a class="wordmark" href="#top">Hexperiment</a><nav aria-label="Site"><a href="#how">How it works</a>[repo link]</nav></div></div>`.
+   - `<div class="wrap hero-main" id="content" tabindex="-1"><div class="hero-copy">` + `<h1 id="question">Is your model too good to be&nbsp;true?</h1>` (a U+00A0 between "be" and "true?") + `<p class="def"><strong>Hexperiment is a Kiro power that catches data leaks in <span class="nowrap">machine-learning</span> code:</strong> test answers that sneak into training and fake a high score. Kiro’s agent then fixes them.</p>` + `<a class="cta" href="<hero case page>">Open the case file</a>` + `</div></div>`. Without a hero app the call-to-action links to `#cases`.
+   - `<div class="wrap hero-trail">` + the trail + `</div>`. With a hero app, `<ol class="trail">` with, joined by `<li class="dash" aria-hidden="true"></li>`:
+     - `<li><span class="n o">{score}{art.GHOST_RISE}</span><p class="l">the score {app} claimed on its first run</p></li>` (`on run {n}` when the first rejected run is run n > 1 of the history);
+     - only with canary counts: `<li><span class="n">{rows_changed:,}</span><p class="l">of {train_rows:,} training rows changed when we scrambled only the test rows</p></li>`;
+     - with an approved run: `<li><span class="n g">{score}</span><p class="l">the honest score once the leaks were removed</p></li>`; without: `<li><p class="l">No approved run yet.</p></li>`.
+
+     Without a hero app: `<p class="l">No run has been rejected yet.</p>` in place of the `ol`. Scores are `score_text`; counts use Python's `f"{n:,}"`.
+2. `<main>`, holding the screens 3 to 9 (the end screen included).
+3. **Problem** `<section class="page" id="leak" aria-labelledby="leak-title"><div class="wrap two">`: a `div` with `<h2 id="leak-title">A leak makes a broken model look perfect.</h2>` and the two `p.lede` of the reference, word for word; then `art.LEAK_FIGURE`.
+4. **Canary** `<section class="page" id="how" aria-labelledby="how-title"><div class="wrap">`: the `h2` and `p.lede` of the reference, then `<ol class="steps">` with the three `li` of the reference (each: `h3`, `p`, the rows constant, `p.rows-key`). Step 3's `p` is "If any training row changed, the test rows leaked into training." followed, only with canary counts, by " In {app}, {rows_changed:,} of {train_rows:,} changed."
+5. **Ghosts** `<section class="page" id="ghosts" aria-labelledby="ghosts-title">`: `<div class="wrap">` with `<h2 id="ghosts-title">{Count} ghosts it hunts.</h2>` (count of catalogue entries with a ghost name, in words through `_COUNT_WORDS`), the `p.lede` of the reference, and `<dl class="ghosts">` with one `<div class="ghost-entry"><dt>{name}</dt><dd>{GHOST_LINE[name]}</dd></div>` per catalogue entry with a ghost name, in catalogue order; then `art.PEEK` after the `div.wrap`. `GHOST_LINE` is a `MappingProxyType` in `pages.py` with the five sentences of the reference, looked up as `GHOST_LINE[name]`. The test that every catalogue ghost has a line keeps a new ghost without one from shipping.
+6. **Cases** `<section class="page" id="cases" aria-labelledby="cases-title"><div class="wrap">`:
+   - `<h2 id="cases-title">` with "{Count} haunted apps, caught and fixed." when every app has a `REJECTED` run followed later in its history by an `APPROVED` run, else "{Count} cases." (one app: "One haunted app, caught and fixed." / "One case.").
+   - `<p class="lede">Every number here comes from a recorded run. Open a case file to see each run and every finding.</p>`
+   - `<ul class="cases">`, one `<li class="case">` per app in the order given: `<div><h3>{name}</h3><p class="desc">{description}</p><p class="found">{found}</p></div>` (no `p.desc` when the description is empty), where `found` is "Found <em>A</em>, <em>B</em> and <em>C</em>. {N} recorded runs." or "No ghost found. {N} recorded runs." ("1 recorded run"); then `<div class="pair">` with two score blocks joined by `<span class="to" aria-hidden="true">→</span>`, each `<div><span class="v {o|g|u}">{score or "no score"}</span><span class="k">{first|last} run, {status in lower case}</span></div>` (`o` rejected, `g` approved, `u` unverified); then `<a href="{slug}/index.html" aria-label="Open the {name} case file">Open the case file</a>`.
+   - `<p class="note">The honest score is lower. That is the point: it is the score the model will really get once it meets new data.</p>`, only when every app has a scored first rejected run and a scored last approved run whose shown score (`score_text`) is lower.
+7. **Benchmark**, only with `--benchmark`: departure 5.
+8. **Kiro** `<section class="page" id="kiro" aria-labelledby="kiro-title"><div class="wrap">`: the `h2`, `p.lede` and `dl.kiro` of the reference, word for word.
+9. **Loop** `<section class="page" id="loop" aria-labelledby="loop-title"><div class="wrap">`: the `h2`, `p.lede` (with `<code>/workflow run exorcise</code>`) and `ol.steps.loop-steps` of the reference, word for word.
+10. **End** `<section class="page end" id="end" aria-labelledby="end-title">`: `<div class="wrap"><h2 id="end-title">{MOTTO}</h2><p class="lede">Open a case file to see every recorded run, or read the source.</p><div class="links"><a class="cta" href="...">Open the case file</a>[repo link]</div></div>` (without `--repo-url` the lede is "Open a case file to see every recorded run."; the call-to-action is the one of the first screen), then `art.GRAVEYARD_LANDING`, then `<footer class="site-foot"><div class="wrap">Released under the MIT licence.</div></footer>`. Then `</main>`.
+
+The fixed copy (the problem paragraphs, the canary lede and steps, the ghost lede, `GHOST_LINE`, the Kiro and loop texts) are constants in `pages.py`, copied from the reference. `_COUNT_WORDS`, `_joined`, `status_mark`, `relative_href` and `repo_link_label` are reused.
+
+`summary.canary_counts(verdict: Verdict) -> tuple[int, int] | None` (pure, new): the `(rows_changed, train_rows)` of the first finding of the verdict whose `check` is `canary` and whose evidence holds both keys as `int` (not `bool`) with `rows_changed > 0` and `train_rows > 0`; `None` otherwise. The trail and step 3 use it on the hero's first rejected run.
+
+### Case page
+
+Body:
+
+1. `<main>`.
+2. **Head** `<section class="page case-head" aria-labelledby="case-title">`:
+   - `<header class="site-head"><div class="wrap"><a class="wordmark" href="../index.html">Hexperiment</a><nav aria-label="Site"><a href="../index.html#cases">All cases</a>[repo link]</nav></div></header>`.
+   - `art.CORNER_MOON`.
+   - `<div class="wrap" id="content" tabindex="-1">`: `<h1 id="case-title">{name}</h1>`, `<p class="desc">{description}</p>` (left out when empty), `<div class="scores">` with the first and last run as `<div><span class="v {o|g|u}">{score or "no score"}</span><span class="k">{first|last} run, {status_mark(status)}</span></div>` joined by `<span class="dash" aria-hidden="true"></span>`, and `<dl class="facts">` with `target` (in `code`), `metric`, `threshold` (`score_text`) and `recorded runs`, each as `<div><dt>..</dt><dd>..</dd></div>`.
+3. **Record** `<section class="page" aria-labelledby="record-title"><div class="wrap">`: `<h2 id="record-title">Every recorded run</h2>`, `<p class="lede">Oldest first. An error stops a model; a warning is worth a look.</p>`, `<ol class="record">` with one `<li class="run"><div>...</div></li>` per run in history order:
+   - `<p class="run-head">{status_mark}, {full|fast} check, score <span class="score">{score}</span></p>`, or `, no score` without a score;
+   - `<p class="run-meta">{time element}, test set used {n} time|times</p>`;
+   - `<ul class="findings">` (errors, then waived, then warnings, as before), each `<li class="finding finding-{error|waived|warning}">` with `<p class="what">{<em>ghost</em> or check name} at <code>{location}</code><span class="sev">{error|waived|warning}</span></p>`, `<p class="msg">{prose(message)}</p>`, `<p class="fix">Fix: {prose(fix)}</p>`, and for a waived finding `<p class="waiver">Waiver reason: {prose(reason)}</p>`; or `<p class="clear">No findings.</p>`.
+4. **The fix**, only with a haunted script: `<section class="page" aria-labelledby="fix-title"><div class="wrap">` + `<h2 id="fix-title">The fix</h2>` + `<p class="lede">` with the existing sentence + the diff from `difftext.py`.
+5. **Model card** `<section class="page" aria-labelledby="card-title"><div class="wrap">`: `<h2 id="card-title">Model card of the last approved run</h2>`, then the model card section, or `<p>No approved run yet.</p>`; then `<p class="raw">Raw files: <a href="verdict.json">verdict.json</a> and <a href="model_card.md">model_card.md</a>.</p>` (only `verdict.json` without an approved run: "Raw files: <a>verdict.json</a>."). This replaces the old "Raw files" heading and list.
+6. `</main>`, then `<div class="end">` + `art.GRAVEYARD_CASE` + `<footer class="site-foot"><div class="wrap"><p class="motto">{MOTTO}</p><span><a href="../index.html#cases">All cases</a>. Released under the MIT licence.</span></div></footer>` + `</div>`.
+
+`modelcard.py`: the content and order stay; the wrapper becomes `<div class="card">` (was `model-card`) and each `h3` with the content that follows it is wrapped in `<div class="card-group">`; the groups holding a table (Checks, Waivers) get `class="card-group wide"`. The final paragraph linking `model_card.md` is removed from the section, because the raw-files line of the case page links it.
+
+### Stylesheet
+
+`gallery/assets/gallery.css` is rewritten: the two `@font-face` rules, then the reference CSS of `landing.html` and `case.html` merged into one file (shared rules once; rules that the two pages define differently scoped under `.hero`, `.case-head` or the screen's class so neither page changes), then the rules the references do not show:
+
+- `.skip` (off-screen until `:focus`, then shown top left on `--night` with `--bone` text) and `[tabindex="-1"]:focus { outline: none; }`;
+- `strong` in `.def` (the reference's `.def b` rule);
+- `.v.u` and `.n.u` in `--muted`; `.status-unverified` word in `--muted` with a hollow `1px dashed var(--dash)` circle mark;
+- `.finding-waived` like a warning, and `p.waiver`;
+- the diff as `difftext.py` builds it: `.diff` on `--well`, `overflow-x: auto`, `.line`, `.no`, `.sign`, `.gap` as in the reference, `.line-removed` text in `--orange-soft`, `.line-added` text in `--lime-soft`, `.context`, `.change`, `.removed`, `.added` as plain blocks (unified at every width);
+- the model card: `.card` as a grid of `.card-group` (auto-fit columns of at least 14rem), `.card-group.wide` spanning all columns, `h3` in `--muted`, `dl` as two columns;
+- `.scroll` (`overflow-x: auto`) and tables (`th` and `td` with hairline `--rule` borders, tabular figures), which also styles the benchmark table;
+- `p.raw` and `p.clear` in `--muted`.
+
+Rules for the whole file (the tests check them): the hex colours are exactly the twelve tokens of the steering file (`#23153A #0B0612 #1A0F2A #EDE6F5 #D2C8E1 #BDB2CF #7A6893 #8A5CCB #FF8A1F #FFC08A #A6FF4D #C9FF94`), and the only other colour is `rgba(237, 230, 245, 0.16)`; no `gradient`, `box-shadow`, `text-shadow`, `transition`, `@import` or `text-transform`; `url(` only as `url("fonts/<file>")` naming a file of `assets/fonts/`; every `animation` declaration and `scroll-behavior: smooth` sits inside `@media (prefers-reduced-motion: no-preference)`; every `animation-timeline` and `view-timeline` sits inside `@supports (animation-timeline: view())`; the two on-load animations end by 5 seconds (`.ghost-wrap`: 1.4 s after 0.9 s; `.ghost-rise`: 2 × 1.3 s after 2.3 s) and no `animation` outside the `@supports` block uses `infinite`; `scroll-snap-type` sits inside `@media (min-width: 861px) and (min-height: 600px)`; `:focus-visible` has `outline: 3px solid var(--lime)` and `outline-offset: 3px`.
+
+### Tests
+
+- `test_gallery_art.py` (new): every constant of `art.py` parses with `html.parser` with balanced tags; uses only `ART_TAGS` and `TAGS`; has no `on*` attribute, no `style` attribute and no `<script`; every `href` is one of `#bat`, `#ghost`, `#tree`, `#stone`; every `url(` is `url(#sky)` or `url(#fence)`; every `svg` has `aria-hidden="true"` except the one in `LEAK_FIGURE`, which has `role="img"` and a non-empty `aria-label`; `SPRITE` defines exactly the four symbols.
+- `test_gallery_markup.py`: `el("svg")` and `el("i")` are refused; `strong` is allowed; `ART_TAGS` and `TAGS` do not overlap.
+- `test_gallery_sources.py`: `read_fonts` returns the four files sorted by name; the `woff2` bytes start with `b"wOF2"`; the `.txt` bytes have no `\r`; a missing fonts folder raises `HexInputError` (patch the package location as the stylesheet test does).
+- `test_gallery_site.py`: the allowlist test uses `TAGS | ART_TAGS`; the fonts given in `GalleryInputs` are written under `assets/fonts/` byte for byte; no page has an `href` or `src` starting with `http` other than the repository link, and none names `fonts.googleapis.com`.
+- `test_gallery_command.py`: a real build writes `assets/fonts/special-elite-latin.woff2` and `assets/fonts/archivo-latin.woff2`.
+- `test_gallery_assets.py` (rewritten): the package-data patterns (`assets/*.css`, `assets/fonts/*`) and the four font files; every rule of "Stylesheet" above; the contrast of `--bone`, `--soft`, `--muted`, `--orange`, `--orange-soft`, `--lime` and `--lime-soft` on `--sky` and on `--well` is at least 4.5 (WCAG formula from the hex values); every class used by a built site has a rule (or is listed as structural in the test).
+- `test_gallery_summary.py`: `canary_counts` for evidence with both counts; missing key; `bool` or `float` or string value; zero `rows_changed`; a non-canary finding with the same keys; the first matching finding wins.
+- `test_gallery_pages.py`: the tests of the old hero sentence, explainer, glosses, check steps and how-it-was-built text are removed. New tests, one per rule of "Landing page" and "Case page" above: screen order and ids; one `h1` per page with the right text; the definition; the call-to-action target with and without a hero app; the trail with three numbers, with two (no canary counts), with "No approved run yet.", "on run 2", and the no-hero text; thousands separators; step 3 with and without counts; one ghost entry per catalogue ghost with its line, and every catalogue ghost has a `GHOST_LINE` entry (and no extra keys); both case headings and the one-app forms; the note shown and hidden; the found text with ghosts, without, and "1 recorded run"; the score classes `o`, `g`, `u` and "no score"; the case link's `aria-label`; the benchmark screen only with a benchmark; the repository link only with a URL (navigation and end screen); the skip link is the first element of `body` and its target exists; the case head scores and facts; the run head with "full check", "fast check" and ", no score"; the run meta with "1 time" and "2 times"; the finding paragraphs, the waived finding with its reason; "No findings."; the raw-files line with and without an approved run; the model card groups; a hostile app name is escaped in the `h3`, the trail label, step 3 and the `aria-label`.
+- `test_gallery_modelcard.py`: the groups and the `wide` class; the section no longer links `model_card.md`.
+
+Satisfies: 1.1, 2.1 to 2.11, 3.1 to 3.7, 4.2, 5.1 to 5.5.
 
 ## Data Flow
 

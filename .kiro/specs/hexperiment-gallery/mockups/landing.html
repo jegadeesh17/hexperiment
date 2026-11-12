@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hexperiment</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Special+Elite&family=Archivo:wght@400;600;700&display=swap">
+<style>
+:root {
+  --sky: #23153A; --night: #0B0612;
+  --rule: rgba(237, 230, 245, 0.16);
+  --bone: #EDE6F5; --muted: #BDB2CF; --soft: #D2C8E1;
+  --lime: #A6FF4D; --orange: #FF8A1F; --rows: #8A5CCB; --dash: #7A6893;
+  --type: "Special Elite", "Courier New", serif;
+  --text: "Archivo", system-ui, sans-serif;
+  --code: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --gutter: clamp(16px, 5vw, 64px);
+  --page-pad: clamp(56px, 9vh, 96px);
+}
+* { box-sizing: border-box; }
+.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+html { background: var(--sky); }
+body { margin: 0; color: var(--bone); font: 17px/1.6 var(--text); background: var(--sky); }
+a { color: inherit; text-underline-offset: 0.25em; }
+a:focus-visible { outline: 3px solid var(--lime); outline-offset: 3px; border-radius: 3px; }
+.cta:focus-visible { outline-color: var(--bone); }
+.nowrap { white-space: nowrap; }
+code { font-family: var(--code); font-size: 0.9em; color: var(--soft); }
+.wrap { width: 100%; max-width: 1200px; margin: 0 auto; padding: 0 var(--gutter); }
+
+/* every section is one screen */
+.page { position: relative; overflow: hidden; min-height: 100vh; min-height: 100svh; display: flex; flex-direction: column; justify-content: center; padding: var(--page-pad) 0; }
+@media (min-width: 861px) and (min-height: 600px) {
+  html { scroll-snap-type: y proximity; }
+  .page { scroll-snap-align: start; }
+}
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+
+h1, h2 { font-family: var(--type); font-weight: 400; letter-spacing: -0.01em; margin: 0; }
+h1 { font-size: clamp(40px, min(5.6vw, 9vh), 76px); line-height: 1.04; }
+h2 { font-size: clamp(30px, min(3.6vw, 6.4vh), 50px); line-height: 1.1; max-width: 20em; margin-bottom: 18px; }
+h3 { font-size: 19px; line-height: 1.3; margin: 0; }
+.lede { font-size: clamp(16px, 2.3vh, 19px); color: var(--muted); max-width: 36em; margin: 0; }
+.lede + .lede { margin-top: 14px; }
+.o { color: var(--orange); } .g { color: var(--lime); }
+
+/* page 1: hero */
+.hero { justify-content: space-between; padding: 0; background: none; }
+.scene { position: absolute; inset: 0; width: 100%; height: 100%; display: block; z-index: 0; }
+.hero .wrap { position: relative; z-index: 1; }
+.site-head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding-top: clamp(18px, 3.5vh, 30px); }
+.wordmark { font-family: var(--type); font-size: 22px; text-decoration: none; }
+.site-head nav { display: flex; gap: 26px; font-size: 15px; color: var(--muted); white-space: nowrap; }
+.hero-copy { max-width: 600px; }
+.def { font-size: clamp(16px, 2.3vh, 19px); color: var(--muted); max-width: 32em; margin: clamp(14px, 2.6vh, 24px) 0 0; }
+.def b { color: var(--bone); font-weight: 600; }
+.cta { display: inline-block; margin-top: clamp(16px, 3vh, 28px); padding: 12px 22px; border-radius: 6px; background: var(--lime); color: var(--night); font-weight: 700; text-decoration: none; }
+.trail { margin: 0; padding: 0 0 clamp(28px, 6vh, 60px); list-style: none; display: flex; align-items: flex-start; gap: 28px; }
+.trail .n { position: relative; display: inline-block; font-family: var(--type); font-size: clamp(38px, min(4.4vw, 7.4vh), 60px); line-height: 1; }
+.trail .l { margin: 8px 0 0; max-width: 18em; font-size: 16px; line-height: 1.45; color: var(--soft); text-wrap: balance; }
+.trail .dash { flex: 0 0 56px; margin-top: 0.55em; font-size: clamp(38px, min(4.4vw, 7.4vh), 60px); border-top: 1px dashed var(--dash); }
+.ghost-wrap { position: absolute; width: 0.62em; right: -0.5em; top: -0.82em; }
+.ghost-rise { display: block; width: 100%; transform: rotate(18deg); }
+
+/* page 2: the problem */
+.two { display: grid; grid-template-columns: 1.05fr 1fr; gap: 64px; align-items: center; }
+.figure svg { width: 100%; max-height: 52vh; height: auto; display: block; }
+
+/* page 3: canary steps */
+.steps { list-style: none; margin: clamp(28px, 6vh, 56px) 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 48px; counter-reset: s; }
+.steps li { counter-increment: s; display: flex; flex-direction: column; }
+.steps .rows { margin-top: auto; padding-top: 20px; }
+.steps li::before { content: counter(s); display: block; font-family: var(--type); font-size: 40px; line-height: 1; color: var(--muted); margin-bottom: 12px; }
+.steps p { margin: 8px 0 0; color: var(--muted); }
+.rows { display: flex; gap: 5px; margin-top: 0; }
+.rows i { width: 16px; height: 30px; border-radius: 3px; background: var(--rows); }
+.rows i.t { background: transparent; outline: 1px solid var(--soft); outline-offset: -1px; }
+.rows i.t1 { margin-left: 14px; }
+.rows i.s { background: transparent; outline: 1px dashed var(--orange); outline-offset: -1px; }
+.rows i.m { background: var(--orange); }
+.rows-key { margin: 8px 0 0; font-size: 14px; color: var(--muted); }
+
+/* page 4: the ghosts */
+.ghosts { margin: clamp(24px, 5vh, 44px) 0 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 56px; max-width: 900px; }
+.ghost-entry { padding: 14px 0; border-top: 1px solid var(--rule); }
+.ghost-entry dt { font-family: var(--type); font-size: 21px; color: var(--bone); }
+.ghost-entry dd { margin: 4px 0 0; color: var(--soft); }
+.peek { position: absolute; right: -36px; bottom: 10%; width: clamp(140px, 17vw, 250px); transform: rotate(-14deg); opacity: 0.92; }
+
+/* page 5: proof */
+.cases { list-style: none; margin: clamp(24px, 5vh, 44px) 0 0; padding: 0; }
+.case { display: grid; grid-template-columns: 1.2fr 1fr auto; gap: 40px; align-items: center; padding: clamp(18px, 3.4vh, 30px) 0; border-top: 1px solid var(--rule); }
+.case:last-child { border-bottom: 1px solid var(--rule); }
+.case h3 { font-family: var(--type); font-weight: 400; font-size: 26px; }
+.case .desc { margin: 4px 0 0; color: var(--muted); }
+.case .found { margin: 8px 0 0; font-size: 15px; color: var(--soft); }
+.case .found em { font-style: normal; color: var(--orange); }
+.pair { display: grid; grid-template-columns: 9rem 1.5rem 9rem; align-items: end; }
+.pair .v { font-family: var(--type); font-size: clamp(32px, 5.4vh, 44px); line-height: 1; }
+.pair .k { display: block; margin-top: 8px; font-size: 14px; color: var(--muted); }
+.pair .to { margin-bottom: 34px; text-align: center; color: var(--dash); }
+.note { margin: 20px 0 0; color: var(--muted); max-width: 40em; }
+.placeholder { margin-top: clamp(18px, 3.6vh, 32px); padding: 22px; border: 1px dashed var(--dash); border-radius: 8px; color: var(--muted); }
+
+/* page 6: Kiro */
+.kiro { margin: clamp(24px, 5vh, 44px) 0 0; display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 64px; }
+.kiro div { padding: clamp(14px, 2.6vh, 22px) 0; border-top: 1px solid var(--rule); }
+.kiro dt { font-weight: 600; font-size: 19px; }
+.kiro dd { margin: 6px 0 0; color: var(--soft); }
+
+/* page 7: the loop */
+.loop-steps { grid-template-columns: repeat(4, 1fr); }
+
+/* page 8: the end */
+.end { justify-content: flex-start; padding-bottom: 0; }
+.end .wrap { margin-top: auto; margin-bottom: auto; }
+.end h2 { font-size: clamp(34px, min(4.6vw, 8vh), 64px); max-width: 15em; }
+.end .links { display: flex; gap: 28px; align-items: center; margin-top: 28px; }
+.end .cta { margin-top: 0; }
+.graveyard { display: block; width: 100%; height: clamp(120px, 22vh, 220px); }
+.site-foot { background: var(--night); }
+.site-foot .wrap { padding-top: 6px; padding-bottom: 20px; color: var(--muted); font-size: 15px; }
+
+
+/* motion: one load moment on page 1, scroll-linked motion elsewhere; all off for reduced motion */
+@media (prefers-reduced-motion: no-preference) {
+  .ghost-wrap { animation: rise 1.4s cubic-bezier(0.16, 1, 0.3, 1) 0.9s both; }
+  .ghost-rise { animation: bob 1.3s ease-in-out 2.3s 2 alternate; }
+}
+@keyframes rise { from { opacity: 0; translate: 0 0.5em; } to { opacity: 1; translate: 0 0; } }
+@keyframes bob { to { translate: 0 -0.12em; } }
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    main .page > .wrap { animation: page-fade linear both; animation-timeline: view(); animation-range: cover 0% cover 100%; }
+    .figure { view-timeline: --leak; }
+    .leak-ghost { transform-box: fill-box; animation: cross linear both; animation-timeline: --leak; animation-range: entry 0% entry 70%; }
+    .leak { animation: leak linear both; animation-timeline: --leak; }
+    .leak.l1 { animation-range: entry 30% entry 75%; }
+    .leak.l2 { animation-range: entry 40% entry 85%; }
+    .leak.l3 { animation-range: entry 50% entry 95%; }
+    .steps { view-timeline: --steps; }
+    .steps li:nth-child(2) .rows i.s { animation: rattle linear both; animation-timeline: --steps; animation-range: entry 10% entry 80%; }
+    .steps li:nth-child(2) .rows i.s + i.s { animation-name: rattle-b; }
+    .steps li:nth-child(3) .rows i.m { animation: flip linear both; animation-timeline: --steps; }
+    .steps li:nth-child(3) .rows i.m:nth-child(1) { animation-range: entry 20% entry 50%; }
+    .steps li:nth-child(3) .rows i.m:nth-child(2) { animation-range: entry 30% entry 60%; }
+    .steps li:nth-child(3) .rows i.m:nth-child(4) { animation-range: entry 40% entry 70%; }
+    .steps li:nth-child(3) .rows i.m:nth-child(5) { animation-range: entry 50% entry 80%; }
+    .steps li:nth-child(3) .rows i.m:nth-child(6) { animation-range: entry 60% entry 90%; }
+    .steps li:nth-child(3) .rows i.m:nth-child(8) { animation-range: entry 70% entry 100%; }
+    .peek { animation: peek linear both; animation-timeline: view(); animation-range: entry 0% entry 100%; }
+  }
+}
+@keyframes page-fade { 0% { opacity: 0; } 30% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes cross { from { translate: 80px -14px; } to { translate: 0 0; } }
+@keyframes leak { from { fill: #8A5CCB; } to { fill: #FF8A1F; } }
+@keyframes rattle { 0%, 100% { translate: 0 0; } 25% { translate: 0 -7px; } 50% { translate: 21px 0; } 75% { translate: 0 7px; } }
+@keyframes rattle-b { 0%, 100% { translate: 0 0; } 25% { translate: 0 7px; } 50% { translate: -21px 0; } 75% { translate: 0 -7px; } }
+@keyframes flip { from { background: var(--rows); } to { background: var(--orange); } }
+@keyframes peek { from { translate: 180px 0; rotate: 10deg; } to { translate: 0 0; rotate: 0deg; } }
+
+@media (max-width: 860px) {
+  .two, .loop-steps, .kiro, .ghosts { grid-template-columns: 1fr; gap: 32px; }
+  .kiro, .ghosts { gap: 0; }
+  .steps { grid-template-columns: 1fr; gap: 36px; }
+  .case { grid-template-columns: 1fr; gap: 16px; }
+  .peek { display: none; }
+}
+@media (max-width: 700px) {
+  .hero { justify-content: flex-start; background: var(--sky); }
+  .scene { position: relative; height: 240px; z-index: 0; order: 1; }
+  .hero-nav { order: 0; } .hero-main { order: 2; } .hero-trail { order: 3; }
+  .hero-copy, .trail { padding-top: 8px; }
+  .trail { flex-direction: column; gap: 26px; padding-top: 40px; }
+  .trail .dash { display: none; }
+  .site-head { flex-wrap: wrap; }
+  .site-head nav { gap: 16px; font-size: 14px; }
+  .end .links { flex-wrap: wrap; }
+}
+</style>
+</head>
+<body>
+<svg class="sprite" width="0" height="0" aria-hidden="true">
+  <defs>
+    <symbol id="bat" viewBox="0 0 64 30"><path d="M32 12 L29.6 6.5 L28.4 10.6 C23 4.5 12 3 1 8.5 C7 10 9.5 14 9.5 18.5 C13.5 15.5 18 15.8 20.5 19.5 C23.5 16.5 27.5 17.5 29.5 22 L32 25.5 L34.5 22 C36.5 17.5 40.5 16.5 43.5 19.5 C46 15.8 50.5 15.5 54.5 18.5 C54.5 14 57 10 63 8.5 C52 3 41 4.5 35.6 10.6 L34.4 6.5 Z"/></symbol>
+    <symbol id="ghost" viewBox="0 0 100 120"><path fill="#EDE6F5" d="M50 4 C24 4 12 24 12 50 L12 104 C18 98 24 98 30 106 C36 114 42 114 50 104 C58 114 64 114 70 106 C76 98 82 98 88 104 L88 50 C88 24 76 4 50 4 Z"/><ellipse cx="38" cy="46" rx="6" ry="9" fill="#170D27"/><ellipse cx="62" cy="46" rx="6" ry="9" fill="#170D27"/><ellipse cx="50" cy="70" rx="5" ry="7" fill="#170D27"/></symbol>
+    <symbol id="tree" viewBox="0 0 300 400" overflow="visible">
+      <path fill="#0B0612" d="M100 400 C108 340 110 300 104 250 C100 215 106 185 100 160 L112 158 C120 190 118 220 126 252 C134 300 132 345 144 400 Z"/>
+      <g fill="none" stroke="#0B0612" stroke-linecap="round">
+        <path stroke-width="9" d="M112 245 C150 220 170 200 210 190"/>
+        <path stroke-width="5" d="M170 205 C185 180 190 165 205 150"/>
+        <path stroke-width="4" d="M195 193 C220 195 240 185 260 170"/>
+        <path stroke-width="8" d="M104 215 C80 195 60 190 30 170"/>
+        <path stroke-width="4" d="M60 188 C50 165 52 150 40 130"/>
+        <path stroke-width="3" d="M40 177 C25 175 15 165 0 160"/>
+        <path stroke-width="7" d="M106 165 C110 130 130 110 125 80"/>
+        <path stroke-width="3.5" d="M125 95 C140 80 160 75 170 55"/>
+        <path stroke-width="3.5" d="M122 110 C105 95 95 80 85 60"/>
+        <path stroke-width="2" d="M170 55 C175 45 178 40 185 35 M85 60 C82 50 76 45 70 38 M260 170 C270 165 278 160 290 158 M205 150 C210 140 220 135 228 128 M40 130 C35 120 30 115 22 110 M125 80 C123 65 128 55 124 42"/>
+      </g>
+    </symbol>
+    <symbol id="stone" viewBox="0 0 100 130"><path d="M4 130 L4 48 C4 20 26 4 50 4 C74 4 96 20 96 48 L96 130 Z"/></symbol>
+  </defs>
+</svg>
+
+<header class="page hero" id="top">
+  <svg class="scene" viewBox="0 0 1600 900" preserveAspectRatio="xMaxYMax slice" aria-hidden="true">
+    <defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#150B24"/><stop offset="1" stop-color="#2D1A48"/></linearGradient></defs>
+    <rect x="-3000" width="7600" height="900" fill="url(#sky)"/>
+    <circle cx="1110" cy="330" r="92" fill="#EDE6F5"/>
+    <circle cx="1080" cy="308" r="14" fill="#DCD2E8"/><circle cx="1136" cy="362" r="9" fill="#DCD2E8"/><circle cx="1142" cy="298" r="6" fill="#DCD2E8"/>
+    <path fill="#2A1843" d="M-3000 770 L0 770 C300 715 600 745 900 725 C1200 705 1400 735 1600 715 L1600 900 L-3000 900Z"/>
+    <use href="#tree" x="1170" y="290" width="435" height="580"/>
+    <path fill="#23153A" d="M-3000 835 L0 835 C400 805 800 828 1200 808 C1400 798 1500 812 1600 805 L1600 900 L-3000 900Z"/>
+    <g fill="#0B0612"><use href="#bat" x="1050" y="268" width="76" height="36"/><use href="#bat" x="1100" y="370" width="44" height="21"/></g>
+    <g fill="#4E3769"><use href="#bat" x="1260" y="250" width="54" height="25"/><use href="#bat" x="930" y="225" width="36" height="17"/><use href="#bat" x="1330" y="300" width="34" height="16"/><use href="#bat" x="870" y="400" width="28" height="13"/></g>
+  </svg>
+  <div class="wrap hero-nav">
+    <div class="site-head">
+      <a class="wordmark" href="#top">Hexperiment</a>
+      <nav aria-label="Site"><a href="#how">How it works</a><a href="#">Source on GitHub</a></nav>
+    </div>
+  </div>
+  <div class="wrap hero-main">
+    <div class="hero-copy">
+      <h1>Is your model too good to be&nbsp;true?</h1>
+      <p class="def"><b>Hexperiment is a Kiro power that catches data leaks in <span class="nowrap">machine-learning</span> code:</b> test answers that sneak into training and fake a high score. Kiro&rsquo;s agent then fixes them.</p>
+      <a class="cta" href="#">Open the case file</a>
+    </div>
+  </div>
+  <div class="wrap hero-trail">
+    <ol class="trail">
+      <li><span class="n o">1.0000<span class="ghost-wrap" aria-hidden="true"><svg class="ghost-rise" viewBox="0 0 100 120"><use href="#ghost"/></svg></span></span><p class="l">the score a hotel model claimed</p></li>
+      <li class="dash" aria-hidden="true"></li>
+      <li><span class="n">95,309</span><p class="l">of 95,457 training rows changed when we scrambled only the test rows</p></li>
+      <li class="dash" aria-hidden="true"></li>
+      <li><span class="n g">0.9096</span><p class="l">the honest score after Kiro&rsquo;s agent removed the leaks</p></li>
+    </ol>
+  </div>
+</header>
+
+<main>
+  <section class="page" id="p2" aria-labelledby="problem">
+    <div class="wrap two">
+      <div>
+        <h2 id="problem">A leak makes a broken model look perfect.</h2>
+        <p class="lede">A model learns from training rows, then gets graded on test rows it has never seen. A data leak lets information from the test rows slip into training. The model has seen the answers, so it aces the test and fails on real data.</p>
+        <p class="lede">It&rsquo;s like a unit test that reads its expected value from the code it tests: it always passes and proves nothing. When an AI agent writes the training code, a leak is easy to miss. Nothing crashes. The score just goes up.</p>
+      </div>
+      <div class="figure">
+        <svg viewBox="0 0 520 340" role="img" aria-label="A ghost slips from the test rows through the split into the training rows.">
+          <g fill="#8A5CCB">
+            <rect x="20" y="40" width="200" height="14" rx="3"/><rect x="20" y="64" width="200" height="14" rx="3"/>
+            <rect class="leak l1" x="20" y="88" width="200" height="14" rx="3" fill="#FF8A1F"/><rect x="20" y="112" width="200" height="14" rx="3"/>
+            <rect class="leak l2" x="20" y="136" width="200" height="14" rx="3" fill="#FF8A1F"/><rect x="20" y="160" width="200" height="14" rx="3"/>
+            <rect x="20" y="184" width="200" height="14" rx="3"/><rect class="leak l3" x="20" y="208" width="200" height="14" rx="3" fill="#FF8A1F"/>
+            <rect x="20" y="232" width="200" height="14" rx="3"/><rect x="20" y="256" width="200" height="14" rx="3"/>
+          </g>
+          <g fill="none" stroke="#D2C8E1">
+            <rect x="320.5" y="40.5" width="180" height="13" rx="3"/><rect x="320.5" y="64.5" width="180" height="13" rx="3"/>
+            <rect x="320.5" y="88.5" width="180" height="13" rx="3"/><rect x="320.5" y="112.5" width="180" height="13" rx="3"/>
+          </g>
+          <line x1="270" y1="20" x2="270" y2="280" stroke="#7A6893" stroke-dasharray="6 6"/>
+          <path d="M330 120 C320 170 300 175 285 160" fill="none" stroke="#EDE6F5" stroke-dasharray="3 6" stroke-linecap="round"/>
+          <use class="leak-ghost" href="#ghost" x="226" y="112" width="58" height="70" transform="rotate(-18 255 147)"/>
+          <g font-family="Archivo, sans-serif" font-size="16" fill="#BDB2CF">
+            <text x="20" y="306">Training rows</text>
+            <text x="320" y="306">Test rows: the answers</text>
+            <text x="270" y="12" text-anchor="middle">the split</text>
+          </g>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <section class="page" id="how" aria-labelledby="how-title">
+    <div class="wrap">
+      <h2 id="how-title">It scrambles the answers and watches what moves.</h2>
+      <p class="lede">Hexperiment runs your training script twice. The second time, it scrambles only the test rows. Honest code never uses the test rows to train, so nothing in training should change. This is the canary test.</p>
+      <ol class="steps">
+        <li>
+          <h3>Train normally</h3>
+          <p>Hexperiment records exactly what training produced.</p>
+          <div class="rows" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="t t1"></i><i class="t"></i></div>
+          <p class="rows-key">8 training rows, 2 test rows</p>
+        </li>
+        <li>
+          <h3>Scramble the test rows, train again</h3>
+          <p>Same script, same seed. Only the test rows are shuffled.</p>
+          <div class="rows" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="s t1"></i><i class="s"></i></div>
+          <p class="rows-key">the test rows are scrambled</p>
+        </li>
+        <li>
+          <h3>Compare</h3>
+          <p>If any training row changed, the test rows leaked into training. In the hotel app, 95,309 of 95,457 changed.</p>
+          <div class="rows" aria-hidden="true"><i class="m"></i><i class="m"></i><i></i><i class="m"></i><i class="m"></i><i class="m"></i><i></i><i class="m"></i><i class="s t1"></i><i class="s"></i></div>
+          <p class="rows-key">orange rows changed: a leak</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="page" id="p4" aria-labelledby="ghosts-title">
+    <div class="wrap">
+      <h2 id="ghosts-title">Five ghosts it hunts.</h2>
+      <p class="lede">Each check names the leak it found, so a failed run reads like a story. A model is approved only when a full run passes every check and reaches its target score.</p>
+      <dl class="ghosts">
+        <div class="ghost-entry"><dt>The Doppelganger</dt><dd>The same rows sit in training and test.</dd></div>
+        <div class="ghost-entry"><dt>The Possession</dt><dd>One column gives the answer away, like a status filled in after the booking ends.</dd></div>
+        <div class="ghost-entry"><dt>The Peeking Spirit</dt><dd>Training saw the test rows. The canary test catches it.</dd></div>
+        <div class="ghost-entry"><dt>The Prophet</dt><dd>Training uses rows from after the test period.</dd></div>
+        <div class="ghost-entry"><dt>The Shapeshifter</dt><dd>Identical runs give different results, so nothing can be verified.</dd></div>
+      </dl>
+    </div>
+    <svg class="peek" viewBox="0 0 100 120" aria-hidden="true"><use href="#ghost"/></svg>
+  </section>
+
+  <section class="page" id="p5" aria-labelledby="proof">
+    <div class="wrap">
+      <h2 id="proof">Two haunted apps, caught and fixed.</h2>
+      <p class="lede">Both apps train on public data. Each started with a leak. Hexperiment caught it, and Kiro&rsquo;s agent fixed it. Every number here comes from a recorded run.</p>
+      <ul class="cases">
+        <li class="case">
+          <div><h3>hotel-cancellations</h3><p class="desc">Predict whether a hotel booking will be cancelled.</p><p class="found">Found <em>The Possession</em> and <em>The Peeking Spirit</em>. 4 recorded runs.</p></div>
+          <div class="pair"><div><span class="v o">1.0000</span><span class="k">first run, rejected</span></div><span class="to" aria-hidden="true">&rarr;</span><div><span class="v g">0.9096</span><span class="k">last run, approved</span></div></div>
+          <a href="#" aria-label="Open the hotel-cancellations case file">Open the case file</a>
+        </li>
+        <li class="case">
+          <div><h3>flight-delays</h3><p class="desc">Predict whether a 2013 New York flight arrives more than 15 minutes late.</p><p class="found">Found <em>The Prophet</em>. 4 recorded runs.</p></div>
+          <div class="pair"><div><span class="v o">0.7971</span><span class="k">first run, rejected</span></div><span class="to" aria-hidden="true">&rarr;</span><div><span class="v g">0.6193</span><span class="k">last run, approved</span></div></div>
+          <a href="#" aria-label="Open the flight-delays case file">Open the case file</a>
+        </li>
+      </ul>
+      <p class="note">The honest score is lower. That is the point: it is the score the model will really get once it meets new data.</p>
+    </div>
+  </section>
+
+  <section class="page" id="p5b" aria-labelledby="bench">
+    <div class="wrap">
+      <h2 id="bench">Thirteen planted leaks, three models.</h2>
+      <!-- Reference only: this page exists only when the build is given --benchmark; its body is benchmark_section() from benchmark.py. -->
+      <p class="lede">The benchmark table goes here.</p>
+    </div>
+  </section>
+
+  <section class="page" id="p6" aria-labelledby="kiro">
+    <div class="wrap">
+      <h2 id="kiro">It lives inside Kiro.</h2>
+      <p class="lede">Hexperiment installs as a Kiro power. Kiro&rsquo;s agent gets the rules, the tools, and a loop that does not stop until the leak is gone.</p>
+      <dl class="kiro">
+        <div><dt>Steering</dt><dd>Before it writes training code, the agent reads the rules: split first, no columns from the future, always end with an audit.</dd></div>
+        <div><dt>Save hook</dt><dd>Saving a training script runs a fast check and clears the old verdict, so an old approval stops counting once the code changes.</dd></div>
+        <div><dt>MCP tools</dt><dd>The agent can list apps, run the audit, read the verdict and its history, and ask what a ghost means.</dd></div>
+        <div><dt>Guardrails</dt><dd>The agent cannot edit the verdict, the model card, the thresholds or the data. It has to fix the cause.</dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <section class="page" id="p7" aria-labelledby="loop">
+    <div class="wrap">
+      <h2 id="loop">Then it fixes the leak and checks again.</h2>
+      <p class="lede"><code>/workflow run exorcise</code> hands an app to the ghost-hunter agent and repeats until the full audit approves it.</p>
+      <ol class="steps loop-steps">
+        <li><h3>Edit</h3><p>The ghost hunter changes the training code to remove the cause of each finding.</p></li>
+        <li><h3>Audit</h3><p>The full audit runs again, canary test included.</p></li>
+        <li><h3>Repeat</h3><p>Still rejected? It reads the new findings and tries again, up to five times.</p></li>
+        <li><h3>Hand back</h3><p>Approved, or out of tries: it stops and shows you the latest verdict.</p></li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="page end" id="p8" aria-labelledby="end">
+    <div class="wrap">
+      <h2 id="end">If your model looks too good to be true, it&rsquo;s haunted.</h2>
+      <p class="lede">Open a case file to see every recorded run, or read the source.</p>
+      <div class="links"><a class="cta" href="#">Open the case file</a><a href="#">Source on GitHub</a></div>
+    </div>
+    <svg class="graveyard" viewBox="0 0 1600 200" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
+      <defs><pattern id="fence" width="30" height="80" patternUnits="userSpaceOnUse"><path d="M11 80 L11 14 L15 4 L19 14 L19 80 Z" fill="#160D24"/></pattern></defs>
+      <rect x="0" y="110" width="1600" height="80" fill="url(#fence)"/>
+      <rect x="0" y="126" width="1600" height="5" fill="#160D24"/><rect x="0" y="156" width="1600" height="5" fill="#160D24"/>
+      <use href="#tree" x="1280" y="-20" width="165" height="220"/>
+      <g fill="#3A2852"><use href="#stone" x="210" y="120" width="54" height="70"/><use href="#stone" x="300" y="140" width="40" height="52"/><use href="#stone" x="1050" y="128" width="50" height="64"/></g>
+      <use href="#ghost" x="246" y="96" width="34" height="41" transform="rotate(14 263 116)" opacity=".9"/>
+      <g fill="#4E3769"><use href="#bat" x="700" y="40" width="40" height="19"/><use href="#bat" x="760" y="70" width="28" height="13"/></g>
+      <path fill="#0B0612" d="M0 175 C300 165 600 172 900 166 C1200 160 1400 170 1600 164 L1600 200 L0 200Z"/>
+    </svg>
+    <footer class="site-foot"><div class="wrap">Released under the MIT licence.</div></footer>
+  </section>
+</main>
+</body>
+</html>

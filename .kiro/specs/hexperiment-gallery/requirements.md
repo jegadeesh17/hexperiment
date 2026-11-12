@@ -24,7 +24,7 @@ Scope: the `hexperiment gallery` command and its package module, the Pages workf
 
 #### Acceptance Criteria
 
-1. THE command `hexperiment gallery APP_DIR [APP_DIR ...] --out OUT_DIR` SHALL write a static site into `OUT_DIR`: `index.html`, one folder per app (its case folder, Requirement 1.7) with an `index.html`, the folder `assets/` with the stylesheet (and no script), and, per app, copies of the last run's `verdict.json` and the last approved run's `model_card.md`. It SHALL print the path of `index.html` and exit with code `0`.
+1. THE command `hexperiment gallery APP_DIR [APP_DIR ...] --out OUT_DIR` SHALL write a static site into `OUT_DIR`: `index.html`, one folder per app (its case folder, Requirement 1.7) with an `index.html`, the folder `assets/` with the stylesheet and, in `assets/fonts/`, the two font files with their licence files (and no script), and, per app, copies of the last run's `verdict.json` and the last approved run's `model_card.md`. It SHALL print the path of `index.html` and exit with code `0`.
 2. THE options `--repo-url URL` (a link shown on every page) and `--benchmark FILE` (a benchmark results file) SHALL be optional. A page SHALL NOT show the benchmark section or the repository link when the option is not given.
 3. IF an `APP_DIR` is not an app folder, has no recorded run, or two apps have the same name THEN the command SHALL write nothing, print one message on standard error that names the problem and the fix, and exit with code `2`.
 4. IF `OUT_DIR` exists and is not empty and does not contain the marker file THEN the command SHALL refuse with exit code `2` and write nothing. IF it contains the marker file THEN the command SHALL replace its contents. THE command SHALL NOT delete or write anything outside `OUT_DIR` other than its own temporary folders of Requirement 1.5, and SHALL refuse an `OUT_DIR` that is inside one of the app folders or contains one, is a file or a link, or whose parent folder does not exist.
@@ -35,19 +35,26 @@ Scope: the `hexperiment gallery` command and its package module, the Pages workf
 
 ### Requirement 2: The landing page
 
-**User Story:** As a judge or an ML engineer arriving from a link, I want to see within seconds what Hexperiment caught and why it matters, so that I decide to read on.
+**User Story:** As a hackathon judge or a developer arriving from a link, I want to understand on the first screen what Hexperiment is and see real numbers that prove it, then read one screen each on the problem, the method, the proof and the Kiro integration, so that I can judge it in a few minutes.
+
+This requirement was rewritten after the owner's design review on 2026-11-12. The first version (a motto as the heading, a hero sentence and the full ghost catalogue) is replaced.
 
 #### Acceptance Criteria
 
-1. THE landing page SHALL open with the haunted number as described in the design direction: the score of the first `REJECTED` run of the app whose first rejected score is the highest (ties go to the larger drop to its last approved score, then to the app given first), next to that app's last approved score, with one sentence written from the findings of that run (ghost names and their locations) and the motto "If your model looks too good to be true, it's haunted."
-2. THE landing page SHALL show one summary per app: its name and description, the status and score of its first run, the ghosts found across its history (named on any finding of any run, warnings and waived findings included), the score and status of its last run, the number of recorded runs, and a link to its case page.
-3. THE landing page SHALL explain the canary check in three ordered steps (train normally; train again with the test rows scrambled; compare what the model learned) in at most 80 words in total.
-4. THE landing page SHALL list every entry of `hexperiment.ghosts.CATALOG` that has a ghost name, with that name, what it means, why it matters and how to fix it, using the catalogue's own texts. Text between backticks in these texts and in finding texts SHALL be shown as code.
-5. WHEN `--benchmark` is given THEN the landing page SHALL show the benchmark table of Requirement 6.
-6. IF no app has an approved run THEN the hero SHALL show the app chosen by the rule of Requirement 2.1 with the sentence "No approved run yet." and no honest score. IF no app has a rejected run with a score THEN the hero SHALL show no number, only the motto and the sentence "No run has been rejected yet." A rejected run without a score (it stopped on an input error) SHALL NOT be chosen.
-7. THE motto SHALL be the landing page's only `h1`; the haunted number is a figure, not a heading.
-8. THE hero sentence SHALL be readable by a developer who does not work in machine learning: it SHALL say what the metric's range means (for ROC AUC: 0.5 is guessing and 1.0 is perfect), follow each ghost name with a plain description of at most eight words (for example "The Possession, a column that gives the answer away"), and introduce the honest score as the score with the leaks removed.
-9. RIGHT after the motto, THE landing page SHALL explain in at most 70 words, for a developer who does not work in machine learning, what a data leak is and why a leaky score proves nothing. The text is fixed copy.
+1. THE landing page SHALL be a sequence of screens, each at least the height of the window, in this order: the first screen; the problem; the canary check; the ghosts; the cases; the benchmark (only with `--benchmark`); Kiro; the fix loop; the end.
+2. THE first screen SHALL show the site name; a navigation with a link to the canary screen and, only with `--repo-url`, the repository link; the question "Is your model too good to be true?" as the page's only `h1`; the definition "Hexperiment is a Kiro power that catches data leaks in machine-learning code: test answers that sneak into training and fake a high score. Kiro’s agent then fixes them."; and the call-to-action "Open the case file", which links to the case page of the hero app, or to the cases screen when there is no hero app.
+3. THE hero app SHALL be the app whose first `REJECTED` run with a score has the highest score (ties go to the larger drop to its last approved score, then to the app given first). A rejected run without a score (it stopped on an input error) SHALL NOT be chosen. THE first screen SHALL show a trail of numbers of the hero app, in this order:
+   1. the score of that first rejected run, labelled "the score <app> claimed on its first run", or "on run <n>" when it is not the app's first run;
+   2. only when that run has a finding of the check `canary` whose evidence holds the whole numbers `rows_changed` (greater than zero) and `train_rows`: `rows_changed` with thousands separators, labelled "of <train_rows> training rows changed when we scrambled only the test rows" (`train_rows` also with thousands separators);
+   3. the score of the hero app's last `APPROVED` run, labelled "the honest score once the leaks were removed".
+4. IF the hero app has no approved run THEN the trail SHALL end with the text "No approved run yet." in place of the honest score. IF no app has a rejected run with a score THEN the first screen SHALL show no number, only the text "No run has been rejected yet."
+5. THE problem screen SHALL explain in fixed copy, for a developer who does not work in machine learning, what a data leak is and why a leaky score proves nothing, next to a drawing of a ghost slipping from the test rows into the training rows. The drawing SHALL have a text alternative.
+6. THE canary screen SHALL explain the canary check in three ordered steps: train normally; scramble only the test rows and train again; compare. The third step SHALL state the hero app's rows changed and training rows (as in Requirement 2.3) when the trail shows them, and SHALL leave that sentence out otherwise.
+7. THE ghost screen SHALL list every entry of `hexperiment.ghosts.CATALOG` that has a ghost name, in catalogue order, with its name and one plain sentence of what it means. Its heading SHALL give their number in words.
+8. THE cases screen SHALL show one item per app, in the order given: its name and description; the ghosts found across its history (named on any finding of any run, warnings and waived findings included), or "No ghost found."; the number of recorded runs; the score and status of its first run and of its last run; and the link "Open the case file" to its case page, with an accessible name that includes the app's name. Its heading SHALL be "<Count> haunted apps, caught and fixed." only when every app has a `REJECTED` run followed later by an `APPROVED` run, and "<Count> cases." otherwise (the count in words; "One haunted app, caught and fixed." and "One case." for one app). A note SHALL say that the honest score is lower, and why, only when every app has a scored first rejected run and a scored last approved run whose score is lower.
+9. WHEN `--benchmark` is given THEN the landing page SHALL show the benchmark table of Requirement 6 on its own screen.
+10. THE Kiro screen SHALL describe in fixed copy the four parts of the Kiro power (the steering rules, the save hook, the MCP tools and the guardrails), and the fix-loop screen SHALL describe in four ordered steps what `/workflow run exorcise` does. Every claim SHALL be true of the repository on the day it is published.
+11. THE end screen SHALL show the motto "If your model looks too good to be true, it’s haunted." as an `h2`, the call-to-action of Requirement 2.2, the repository link (only with `--repo-url`) and the footer "Released under the MIT licence."
 
 ### Requirement 3: The case page
 
@@ -60,6 +67,8 @@ Scope: the `hexperiment gallery` command and its package module, the Pages workf
 3. WHEN the app has a haunted script THEN the case page SHALL show a line diff of the haunted script against `train.py`, with line numbers, removed and added lines marked by both colour and a `-` or `+` sign. WHEN it has none THEN the section SHALL be left out.
 4. WHEN the app has an approved run THEN the case page SHALL show the model card of the last approved run, built from that run's verdict (status, metric and threshold, split, data summary, checks and their outcomes, waivers) and link the copied `model_card.md`. WHEN it has none THEN the page SHALL say "No approved run yet."
 5. THE case page SHALL link the copied `verdict.json` of the last run.
+6. THE case page SHALL show, next to its name, the score and status of the app's first run and of its last run, as on the cases screen of the landing page.
+7. Text between backticks in finding texts SHALL be shown as code.
 
 ### Requirement 4: Safe and portable output
 
@@ -68,7 +77,7 @@ Scope: the `hexperiment gallery` command and its package module, the Pages workf
 #### Acceptance Criteria
 
 1. THE command SHALL escape every text that comes from an app (names, descriptions, column names, locations, messages, fix hints, script lines) for HTML, so that a value such as `<script>alert(1)</script>` appears as text.
-2. THE pages SHALL contain no script, no inline event handlers, no `style` attributes and no `javascript:` or `data:` URLs. The only external reference in the pages SHALL be the Google Fonts stylesheet (which loads its own font files), with no `preconnect` hint, and every page SHALL stay readable with the system font fallbacks and without any stylesheet.
+2. THE pages SHALL contain no script, no inline event handlers, no `style` attributes and no `javascript:` or `data:` URLs, and SHALL make no request to another origin: the fonts ship in the site under `assets/fonts/` (changed on 2026-11-12; the first version loaded them from Google Fonts). Every page SHALL stay readable with the system font fallbacks and without any stylesheet. Inline SVG drawings SHALL come only from constant markup in the package, never from app data.
 3. EVERY link between pages and to assets SHALL be relative, so the site works when served from a sub-path such as `https://user.github.io/repo/`, and every link SHALL point to a file the build wrote (or to `--repo-url`).
 4. THE output SHALL be deterministic: building twice from the same inputs SHALL give byte-identical files, whatever the folder the apps are in and whatever the line endings of the input files (a `train.py` with CRLF line endings, as Git writes it on Windows, SHALL give the same pages and the same diff as the same file with LF). Pages SHALL contain no build time; the only times shown are the runs' own times. Output files SHALL be UTF-8 without a byte order mark, with LF line endings.
 5. THE package SHALL keep its runtime dependencies (`pandas`, `numpy`, `scikit-learn`): the gallery SHALL use only the Python standard library and the package's own modules. No gallery module SHALL import pandas, scikit-learn, scipy or `mcp` itself, and building a gallery SHALL NOT load scikit-learn, scipy or `mcp` (pandas is loaded by the core modules the gallery reads, such as `runs`).
@@ -79,10 +88,11 @@ Scope: the `hexperiment gallery` command and its package module, the Pages workf
 
 #### Acceptance Criteria
 
-1. THE pages SHALL follow `.kiro/steering/gallery-design.md`: its colours, typefaces, type scale, layouts, components, motion and copy rules.
-2. THE pages SHALL meet WCAG 2.2 AA: text contrast, a visible keyboard focus, a skip link, landmarks, `lang="en"`, a distinct title per page, and status never shown by colour alone.
-3. THE pages SHALL have no horizontal page scroll from 360px wide; the code diff and wide tables SHALL scroll inside their own area.
-4. WHEN the visitor prefers reduced motion THEN the page SHALL show no animation.
+1. THE pages SHALL follow `.kiro/steering/gallery-design.md` and the reference pages `.kiro/specs/hexperiment-gallery/mockups/landing.html` and `mockups/case.html`: colours, typefaces, sizes, layout, art, motion and copy rules.
+2. THE pages SHALL meet WCAG 2.2 AA: text contrast, a visible keyboard focus, a skip link, landmarks, `lang="en"`, one `h1` and a distinct title per page, and status never shown by colour alone.
+3. THE pages SHALL have no horizontal page scroll from 360px wide; the code diff and wide tables SHALL scroll inside their own area. On desktop windows of 1366×657, 1440×900 and 1831×843, every screen of the landing page SHALL fit the window with no content cut off.
+4. WHEN the visitor prefers reduced motion THEN nothing SHALL move and scrolling SHALL NOT be smooth.
+5. No motion that starts by itself SHALL last longer than 5 seconds after load (WCAG 2.2.2). Motion linked to scrolling SHALL reach its end state before its screen is fully in view, and a browser without scroll-linked animation SHALL show the end state.
 
 ### Requirement 6: Benchmark results file
 
@@ -110,7 +120,7 @@ Scope: the `hexperiment gallery` command and its package module, the Pages workf
 
 #### Acceptance Criteria
 
-1. THE tests SHALL cover: each page builder on verdicts built in the test; escaping of a hostile app name, column name, finding text and script line; the hero choice (Requirement 2.1) and the no-approved-run case; the diff markup; the benchmark table and every format error of the benchmark file; the command's exit codes and messages for each refusal of Requirement 1; that a refused or failed build leaves an existing gallery unchanged; determinism; that every relative link of every page resolves to a written file; and that every page parses as HTML with balanced tags (with `html.parser`).
+1. THE tests SHALL cover: each page builder on verdicts built in the test; escaping of a hostile app name, column name, finding text and script line; the hero choice (Requirement 2.3) and the cases of Requirement 2.4; the diff markup; the benchmark table and every format error of the benchmark file; the command's exit codes and messages for each refusal of Requirement 1; that a refused or failed build leaves an existing gallery unchanged; determinism; that every relative link of every page resolves to a written file; and that every page parses as HTML with balanced tags (with `html.parser`).
 2. THE tests SHALL build the gallery of the two committed example apps and check that it states their real first and last statuses, scores and ghost names.
 3. THE tests SHALL check Requirement 4.5 (no gallery module imports `pandas`, `sklearn`, `scipy` or `mcp`; building a gallery loads none of `sklearn`, `scipy`, `mcp`), that the runtime dependencies are unchanged, and that `.github/workflows/pages.yml` meets Requirement 7 (the test reads it as text and does not skip).
 4. THE full test suite SHALL pass with `.venv/Scripts/python -m pytest hexperiment/tests -q` in under 2 minutes in everyday use (as defined in `hexperiment-kiro`, Requirement 7.4), and `ruff` SHALL report no problems.
