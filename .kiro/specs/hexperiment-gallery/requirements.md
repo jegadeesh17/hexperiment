@@ -46,6 +46,8 @@ Scope: the `hexperiment gallery` command and its package module, the Pages workf
 5. WHEN `--benchmark` is given THEN the landing page SHALL show the benchmark table of Requirement 6.
 6. IF no app has an approved run THEN the hero SHALL show the app chosen by the rule of Requirement 2.1 with the sentence "No approved run yet." and no honest score. IF no app has a rejected run with a score THEN the hero SHALL show no number, only the motto and the sentence "No run has been rejected yet." A rejected run without a score (it stopped on an input error) SHALL NOT be chosen.
 7. THE motto SHALL be the landing page's only `h1`; the haunted number is a figure, not a heading.
+8. THE hero sentence SHALL be readable by a developer who does not work in machine learning: it SHALL say what the metric's range means (for ROC AUC: 0.5 is guessing and 1.0 is perfect), follow each ghost name with a plain description of at most eight words (for example "The Possession, a column that gives the answer away"), and introduce the honest score as the score with the leaks removed.
+9. RIGHT after the motto, THE landing page SHALL explain in at most 70 words, for a developer who does not work in machine learning, what a data leak is and why a leaky score proves nothing. The text is fixed copy.
 
 ### Requirement 3: The case page
 
