@@ -160,7 +160,7 @@
   - Tests added: about 8. None starts a Python process.
   - Verify: `.venv/Scripts/python -m pytest hexperiment/tests/test_gallery_examples.py -q`, then the two full commands.
 
-- [ ] 14. The Pages workflow test
+- [x] 14. The Pages workflow test
   - Create `hexperiment/tests/test_pages_workflow.py`. It reads the committed `.github/workflows/pages.yml` as text (no YAML dependency) and does **not** skip: a missing file is a failure whose message names the path. It checks everything listed for it in "Other tests" of `design.md`: the 40-character SHAs with a version comment on every `uses:`; `persist-credentials: false` after `actions/checkout`; the top-level `permissions` block holding only `contents: read`; no `permissions` key in the `build` job; the `deploy` job with `needs: build`, an `if:` that contains `github.event.repository.private`, and exactly `pages: write` and `id-token: write`; the folded `run: >-` command (lines joined with one space) equal to `hexperiment gallery apps/hotel-cancellations apps/flight-delays --out site --repo-url "$REPO_URL"`, plus ` --benchmark hexperiment/benchmark/results.json` when that file exists in the repository; `pip install` without `-e`; no `secrets.`; the triggers `push` on `main` and `workflow_dispatch` and no `pull_request_target`. The block-splitting helpers live in the test file; negative tests feed them a copy of the text with one defect each (a tag instead of a SHA, `-e`, a write permission in `build`, a missing `if`, a missing `persist-credentials`).
   - Do not edit `.github/workflows/pages.yml`. If the test finds a defect in it, report the defect; the fix is an owner step (task 16).
   - _Requirements: 7.1, 7.2, 7.3, 8.3_
