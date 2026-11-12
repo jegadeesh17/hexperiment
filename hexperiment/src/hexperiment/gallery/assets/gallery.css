@@ -1,4 +1,6 @@
-/* Placeholder: task 12 replaces this with the full stylesheet. */
+/* Hexperiment gallery: the cyanotype case file.
+   Six colours, two type families, one bold element (the haunted number). */
+
 :root {
   --prussian: #17406D;
   --deep-print: #123359;
@@ -6,4 +8,509 @@
   --faded-cyan: #A9C4D8;
   --lantern: #F4B04F;
   --verdigris: #8FE0C4;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 16px;
+  --space-4: 24px;
+  --space-5: 40px;
+  --space-6: 64px;
+  --space-7: 104px;
+
+  --gutter: 16px;
+  --serif: Spectral, Georgia, "Times New Roman", serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+
+/* base */
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--prussian);
+  color: var(--paper);
+  font-family: var(--serif);
+  font-size: 1.125rem;
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+a {
+  color: var(--paper);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+a:hover {
+  color: var(--faded-cyan);
+}
+
+:focus-visible {
+  outline: 2px solid var(--paper);
+  outline-offset: 2px;
+}
+
+main:focus {
+  outline: none;
+}
+
+.skip {
+  position: absolute;
+  left: -10000px;
+  top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--deep-print);
+  color: var(--paper);
+}
+
+.skip:focus {
+  left: var(--gutter);
+  z-index: 1;
+}
+
+code,
+.no {
+  font-family: var(--mono);
+  font-size: 0.875em;
+  font-weight: 400;
+}
+
+time,
+.facts,
+.run-head,
+.cases,
+.model-card,
+table {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+/* layout: one column */
+
+header,
+main,
+footer {
+  width: 100%;
+  max-width: 72rem;
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+
+header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  padding-block: var(--space-3);
+  border-bottom: 1px solid var(--faded-cyan);
+}
+
+header .site {
+  font-size: 1.3125rem;
+  text-decoration: none;
+}
+
+header .source,
+footer .source {
+  color: var(--faded-cyan);
+}
+
+main {
+  padding-block: var(--space-5) var(--space-6);
+}
+
+main section {
+  margin-top: var(--space-6);
+}
+
+footer {
+  padding-block: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--faded-cyan);
+  color: var(--faded-cyan);
+  font-size: 1rem;
+}
+
+footer p {
+  margin: var(--space-2) 0 0;
+}
+
+/* headings and prose */
+
+h1,
+h2,
+h3 {
+  margin: 0 0 var(--space-3);
+  font-weight: 400;
+  line-height: 1.15;
+}
+
+h1 {
+  font-size: 2.125rem;
+  font-weight: 200;
+}
+
+h2 {
+  font-size: 1.625rem;
+}
+
+h3 {
+  font-size: 1.3125rem;
+}
+
+p {
+  margin: 0 0 var(--space-3);
+  max-width: 68ch;
+}
+
+.facts {
+  color: var(--faded-cyan);
+  font-size: 1rem;
+}
+
+.ghost {
+  color: var(--lantern);
+  font-style: italic;
+  font-weight: 400;
+}
+
+/* hero */
+
+.hero {
+  margin-top: 0;
+}
+
+.haunted {
+  position: relative;
+  display: inline-block;
+  margin: 0;
+  max-width: none;
+  font-size: clamp(5rem, 18vw, 12rem);
+  font-weight: 200;
+  line-height: 1;
+  font-variant-numeric: tabular-nums lining-nums;
+  color: var(--paper);
+}
+
+.haunted::after {
+  content: attr(data-value);
+  content: attr(data-value) / "";
+  position: absolute;
+  inset: 0;
+  transform: translate(0.05em, 0.03em);
+  filter: blur(2px);
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .haunted::after {
+    animation: drift 1.6s ease-out 0.3s both;
+  }
+
+  @keyframes drift {
+    from {
+      transform: translate(0, 0);
+    }
+
+    to {
+      transform: translate(0.05em, 0.03em);
+    }
+  }
+}
+
+.lede {
+  margin-top: var(--space-4);
+}
+
+.honest {
+  display: inline-block;
+  margin: 0 0 var(--space-4);
+  padding-top: var(--space-2);
+  border-top: 2px solid var(--verdigris);
+  font-size: clamp(1.75rem, 6vw, 4rem);
+  font-weight: 200;
+  line-height: 1;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.hero h1 {
+  display: block;
+  margin-top: var(--space-4);
+}
+
+.explain {
+  color: var(--faded-cyan);
+}
+
+/* cases */
+
+.cases {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.case p {
+  margin-bottom: var(--space-2);
+}
+
+.steps {
+  max-width: 68ch;
+  padding-left: var(--space-4);
+}
+
+.steps li {
+  margin-bottom: var(--space-2);
+}
+
+dl {
+  margin: 0 0 var(--space-3);
+}
+
+dt {
+  margin-top: var(--space-3);
+}
+
+dd {
+  margin: 0;
+  max-width: 68ch;
+}
+
+dd p {
+  margin-bottom: var(--space-2);
+}
+
+/* status marks */
+
+.status {
+  white-space: nowrap;
+}
+
+.mark {
+  display: inline-block;
+  width: 0.7em;
+  height: 0.7em;
+  margin-right: 0.4em;
+  vertical-align: -0.05em;
+}
+
+.status-rejected {
+  color: var(--lantern);
+}
+
+.status-rejected .mark {
+  background: var(--lantern);
+  border-radius: 4px;
+}
+
+.status-approved {
+  color: var(--verdigris);
+}
+
+.status-approved .mark {
+  background: var(--verdigris);
+  border-radius: 50%;
+}
+
+.status-unverified {
+  color: var(--faded-cyan);
+}
+
+.status-unverified .mark {
+  border: 1px dashed var(--faded-cyan);
+  border-radius: 50%;
+}
+
+/* the record */
+
+.record {
+  margin: 0;
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-5);
+  background: var(--deep-print);
+  border-left: 1px solid var(--faded-cyan);
+}
+
+.record > li::marker {
+  color: var(--faded-cyan);
+}
+
+.run {
+  padding-left: var(--space-2);
+}
+
+.run + .run {
+  margin-top: var(--space-4);
+}
+
+.run-head {
+  margin-bottom: var(--space-2);
+}
+
+.findings {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.finding {
+  margin-bottom: var(--space-3);
+}
+
+.finding p {
+  margin-bottom: var(--space-1);
+}
+
+.finding-warning {
+  color: var(--faded-cyan);
+}
+
+.no-findings {
+  color: var(--faded-cyan);
+}
+
+/* tables */
+
+.scroll {
+  overflow-x: auto;
+  margin-bottom: var(--space-3);
+  background: var(--deep-print);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 1rem;
+}
+
+th,
+td {
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--faded-cyan);
+}
+
+th {
+  font-weight: 600;
+}
+
+.model-card h3 {
+  margin-top: var(--space-4);
+  font-size: 1.125rem;
+}
+
+.model-card dt {
+  margin-top: var(--space-2);
+  color: var(--faded-cyan);
+  font-size: 1rem;
+}
+
+/* code diff */
+
+.diff {
+  overflow-x: auto;
+  background: var(--deep-print);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.diff:focus-visible {
+  outline-offset: 0;
+}
+
+.diff .line {
+  display: flex;
+  min-width: max-content;
+  border-left: 3px solid transparent;
+  white-space: pre;
+}
+
+.diff .no {
+  flex: none;
+  min-width: 4ch;
+  padding-right: var(--space-2);
+  text-align: right;
+  color: var(--faded-cyan);
+}
+
+.diff .sign {
+  flex: none;
+  width: 2ch;
+  font-family: var(--mono);
+}
+
+.diff code {
+  font-size: inherit;
+}
+
+.diff .line-removed {
+  border-left-color: var(--lantern);
+  color: var(--lantern);
+}
+
+.diff .line-added {
+  border-left-color: var(--verdigris);
+  color: var(--verdigris);
+}
+
+.diff .gap {
+  padding: var(--space-1) var(--space-3);
+  color: var(--faded-cyan);
+  font-family: var(--serif);
+  font-size: 1rem;
+  border-top: 1px solid var(--faded-cyan);
+  border-bottom: 1px solid var(--faded-cyan);
+}
+
+/* from 768px */
+
+@media (min-width: 768px) {
+  :root {
+    --gutter: 32px;
+  }
+
+  h1 {
+    font-size: 3rem;
+  }
+
+  .cases {
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+  }
+
+  .case {
+    padding-right: var(--space-5);
+  }
+
+  .case:nth-child(2n) {
+    padding-right: 0;
+    padding-left: var(--space-5);
+    border-left: 1px solid var(--faded-cyan);
+  }
+}
+
+/* from 1024px: removed and added lines side by side */
+
+@media (min-width: 1024px) {
+  .diff .change {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .diff .removed,
+  .diff .added {
+    overflow-x: auto;
+  }
 }

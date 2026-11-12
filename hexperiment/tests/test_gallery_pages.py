@@ -15,8 +15,11 @@ from gallery_builder import (
 from hexperiment.gallery.markup import TAGS, el
 from hexperiment.gallery.pages import (
     CHECK_STEPS,
+    EXPLAINER,
     FONTS_URL,
+    GHOST_GLOSS,
     LANDING_TITLE,
+    METRIC_RANGE,
     MOTTO,
     case_page,
     hero_sentence,
@@ -474,16 +477,18 @@ def test_hero_shows_the_haunted_figure_and_the_honest_score():
     assert paragraph(html, "honest") == "0.9096"
     lede = squeeze(f"<p>{paragraph(html, 'lede')}</p>")
     assert lede.startswith(
-        "hotel-cancellations scored ROC AUC 1.0000 on its first rejected run."
+        "On its first run, hotel-cancellations scored 1.0000 on ROC AUC, "
+        "where 0.5 is guessing and 1.0 is perfect."
     )
-    assert lede.endswith("Its honest score is")
+    assert lede.endswith("With the leaks removed, its honest score is")
 
 
 def test_hero_sentence_lists_error_findings_in_order_with_suspect_lines():
     lede = squeeze(f"<p>{paragraph(landing(), 'lede')}</p>")
     assert (
-        "The audit found The Possession at reservation_status and "
-        "The Peeking Spirit at train.py (suspect lines train.py:100)." in lede
+        "The audit found The Possession, a column that gives the answer away, "
+        "at reservation_status and The Peeking Spirit, training that saw the "
+        "test rows, at train.py (suspect lines train.py:100)." in lede
     )
 
 
@@ -500,7 +505,8 @@ def test_hero_sentence_joins_three_phrases_and_several_suspect_lines():
     html = landing(make_source("x", runs=[first, approved(0.8)]))
     lede = squeeze(f"<p>{paragraph(html, 'lede')}</p>")
     assert (
-        "The audit found The Possession at a, other and The Peeking Spirit at "
+        "The audit found The Possession, a column that gives the answer away, "
+        "at a, other and The Peeking Spirit, training that saw the test rows, at "
         "train.py (suspect lines train.py:3, train.py:9)." in lede
     )
 
@@ -525,7 +531,7 @@ def test_hero_without_error_findings():
     first = make_verdict(Status.REJECTED, value=0.99)
     html = landing(make_source("x", runs=[first, approved(0.8)]))
     lede = squeeze(f"<p>{paragraph(html, 'lede')}</p>")
-    assert "The audit rejected it. Its honest score is" in lede
+    assert "The audit rejected it. With the leaks removed, its honest score is" in lede
     assert "The audit found" not in lede
 
 
@@ -533,7 +539,7 @@ def test_hero_without_an_approved_run():
     html = landing(make_source("x", runs=[rejected(0.99)]))
     lede = squeeze(f"<p>{paragraph(html, 'lede')}</p>")
     assert lede.endswith("No approved run yet.")
-    assert "Its honest score" not in lede
+    assert "honest score" not in lede
     assert 'class="honest"' not in html
     assert 'class="haunted"' in html
 
@@ -564,7 +570,8 @@ def test_metric_label_other_than_roc_auc_is_the_metric_name():
     )
     summary = summarize_app("x", make_source("x", runs=[first]))
     sentence = squeeze(hero_sentence(choose_hero([summary])).html)
-    assert "scored f1 0.9900" in sentence
+    assert "scored 0.9900 on f1." in sentence
+    assert "where" not in sentence.split("The audit")[0]
 
 
 def test_the_motto_is_the_only_h1_and_the_figure_is_not_a_heading():
@@ -729,3 +736,76 @@ def test_hostile_strings_on_the_landing_page():
     assert "\ufffd" in page.text
     assert "\x00" not in page.text
     html.encode("utf-8")
+
+
+# plain language (task 11a)
+
+
+def sentence_of(source):
+    summary = summarize_app("x", source)
+    return squeeze(hero_sentence(choose_hero([summary])).html)
+
+
+def test_sentence_names_the_run_number_when_not_the_first():
+    source = make_source("x", runs=[approved(0.8), rejected(0.99), approved(0.9)])
+    assert sentence_of(source).startswith("On run 2, x scored 0.9900 on ROC AUC, ")
+
+
+def test_sentence_without_a_gloss_for_a_ghost_or_a_check():
+    first = make_verdict(
+        Status.REJECTED,
+        value=0.99,
+        findings=[
+            make_finding(ghost="The Unknown", location="col"),
+            make_finding(ghost=None, check="other", location="loc"),
+        ],
+    )
+    text = sentence_of(make_source("x", runs=[first, approved(0.8)]))
+    assert "The audit found The Unknown at col and other at loc." in text
+
+
+def test_a_gloss_without_a_location_has_no_trailing_comma():
+    first = make_verdict(
+        Status.REJECTED, value=0.99, findings=[make_finding(location="")]
+    )
+    text = sentence_of(make_source("x", runs=[first, approved(0.8)]))
+    assert (
+        "The audit found The Possession, a column that gives the answer away. " in text
+    )
+
+
+def test_metric_range_has_roc_auc_only():
+    assert dict(METRIC_RANGE) == {"roc_auc": "0.5 is guessing and 1.0 is perfect"}
+
+
+def test_every_catalogue_ghost_has_a_short_gloss():
+    for entry in CATALOG:
+        if entry.ghost is not None:
+            assert 0 < len(GHOST_GLOSS[entry.ghost].split()) <= 8
+
+
+def test_explainer_is_short_and_follows_the_motto():
+    assert len(EXPLAINER.split()) <= 70
+    html = landing()
+    assert paragraph(html, "explain") == EXPLAINER
+    assert html.index("<h1") < html.index('class="explain"')
+
+
+def test_explainer_is_in_the_hero_without_a_hero():
+    html = landing(make_source("x", runs=[approved(0.9)]))
+    assert 'class="haunted"' not in html
+    assert paragraph(html, "explain") == EXPLAINER
+    assert html.index("<h1") < html.index('class="explain"')
+
+
+def test_hostile_ghost_name_and_location_are_escaped_in_the_sentence():
+    first = make_verdict(
+        Status.REJECTED,
+        value=0.99,
+        findings=[make_finding(ghost="<b>x</b>", location="<script>1</script>")],
+    )
+    html = landing(make_source("x", runs=[first, approved(0.8)]))
+    lede = paragraph(html, "lede")
+    assert "<script>" not in lede
+    assert "&lt;script&gt;" in lede
+    assert "<b>" not in lede

@@ -106,7 +106,7 @@
   - Tests added: about 34, of which **one starts a Python process** (the isolation test, about 2 seconds).
   - Verify: `.venv/Scripts/python -m pytest hexperiment/tests/test_gallery_command.py hexperiment/tests/test_architecture.py hexperiment/tests/test_cli.py -q`, then the two full commands.
 
-- [ ] 11a. Plain language for readers outside machine learning
+- [x] 11a. Plain language for readers outside machine learning
   - In `gallery/pages.py` add `METRIC_RANGE`, `GHOST_GLOSS` and `EXPLAINER`, change `hero_sentence` to the plain-language version and add the `explain` paragraph after the motto, exactly as in "Plain-language version" of `design.md` (under the landing page's hero).
   - Update the tests in `hexperiment/tests/test_gallery_pages.py` that pin the old sentence, and add: the sentence for the example shapes (first run and a later run; with and without a gloss; a metric without a range entry); every catalogue ghost has a gloss of at most eight words; the explainer is at most 70 words, follows the `h1` and appears in the hero without a `Hero`; a hostile ghost name or location in the sentence is escaped.
   - Add the class `explain` to the classes the stylesheet test of task 12 expects.
@@ -114,7 +114,7 @@
   - Tests added: about 8. None starts a Python process.
   - Verify: `.venv/Scripts/python -m pytest hexperiment/tests/test_gallery_pages.py hexperiment/tests/test_gallery_site.py -q`, then the two full commands.
 
-- [ ] 12. The stylesheet
+- [x] 12. The stylesheet
   - Replace the placeholder `gallery/assets/gallery.css` with the stylesheet described in "The stylesheet and the haunted number" of `design.md` and in `.kiro/steering/gallery-design.md`: custom properties for the six colours and the spacing steps, base and focus (`2px` Paper outline, `2px` offset), skip link, one-column layout (`72rem`, 16px gutter, 32px from 768px), headings and scale, the cases list (two columns with one vertical Faded cyan rule from 768px), the record rail, status marks (Lantern square with `4px` corners, Verdigris circle, dashed hollow Faded cyan circle), findings, tables and `.scroll`, `.diff` (Plex Mono 14px on Deep print, left bars, side by side from 1024px), `.haunted` with the `::after` ghost copy, `.honest`, and the reduced-motion rule that wraps the only `@keyframes`. Exactly the six colours, no gradient, no shadow, no `transition`, no `@import`, no `url()` to another origin, no `text-transform`.
   - Create `hexperiment/tests/test_gallery_assets.py`: the file ships as package data (pattern in `pyproject.toml`); the hex colours are exactly the six of the steering file; none of `gradient`, `box-shadow`, `text-shadow`, `transition`, `@import`, `text-transform`; the focus rule; `prefers-reduced-motion` wraps the only `@keyframes` and the base `.haunted::after` rule already has the offset; `overflow-x: auto` on `.diff` and `.scroll`; the `min-width` queries 768px and 1024px; the font stacks; `font-variant-numeric` on figures; the status mark rules; the contrast of the six pairs on Prussian and on Deep print computed from the hex values with the WCAG formula, at least 4.5; the class names used by `pages.py` and `difftext.py` (collected from a built site) all have a rule or are listed as structural in the test.
   - _Requirements: 1.1, 4.2, 5.1, 5.2, 5.3, 5.4_

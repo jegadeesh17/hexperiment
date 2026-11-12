@@ -43,6 +43,23 @@ HOW_IT_WAS_BUILT = (
     "time a training script is saved, and a workflow repeats fix, retrain and the "
     "full check until the verdict is APPROVED. The kit ships as a Kiro power."
 )
+METRIC_RANGE = MappingProxyType({"roc_auc": "0.5 is guessing and 1.0 is perfect"})
+GHOST_GLOSS = MappingProxyType(
+    {
+        "The Doppelganger": "the same rows in training and test",
+        "The Possession": "a column that gives the answer away",
+        "The Peeking Spirit": "training that saw the test rows",
+        "The Prophet": "training rows from after the test period",
+        "The Shapeshifter": "results that change between identical runs",
+    }
+)
+EXPLAINER = (
+    "A data leak is information a model should not have had while it learned: "
+    "the rows it is graded on, data from the future, or the answer itself. "
+    "A leaky model is like a unit test that reads its expected value from the "
+    "code it tests: it passes every time and proves nothing. Hexperiment finds "
+    "the leak before anyone trusts the score."
+)
 _COUNT_WORDS = (
     "No",
     "One",
@@ -260,6 +277,9 @@ def _finding_phrase(finding: Finding) -> Markup:
         el("em", finding.ghost, class_="ghost") if finding.ghost else finding.check
     )
     parts: list[Child] = [name]
+    gloss = GHOST_GLOSS.get(finding.ghost or "")
+    if gloss:
+        parts.append(f", {gloss}," if finding.location else f", {gloss}")
     if finding.location:
         parts += [" at ", code(finding.location)]
     lines = suspect_lines(finding)
@@ -286,23 +306,35 @@ def hero_sentence(hero: Hero) -> Markup:
     rejected = hero.rejected
     score = score_text(rejected.metric.value)
     label = _metric_label(rejected.metric.name)
-    parts: list[Child] = [
-        f"{hero.app.name} scored {label} {score} on its first rejected run. "
-    ]
+    runs = list(hero.app.runs)
+    number = runs.index(rejected) + 1 if rejected in runs else 1
+    when = "On its first run," if number == 1 else f"On run {number},"
+    range_clause = METRIC_RANGE.get(rejected.metric.name)
+    tail = f", where {range_clause}. " if range_clause else ". "
+    parts: list[Child] = [f"{when} {hero.app.name} scored {score} on {label}{tail}"]
     errors = [f for f in rejected.findings if f.severity is Severity.ERROR]
     if errors:
         phrases = [_finding_phrase(f) for f in errors]
         parts += ["The audit found ", _joined(phrases), ". "]
     else:
         parts.append("The audit rejected it. ")
-    parts.append("Its honest score is" if hero.approved else "No approved run yet.")
+    parts.append(
+        "With the leaks removed, its honest score is"
+        if hero.approved
+        else "No approved run yet."
+    )
     return el("p", parts, class_="lede")
 
 
 def _hero_section(hero: Hero | None) -> Markup:
     motto = el("h1", MOTTO, id="motto")
+    explain = el("p", EXPLAINER, class_="explain")
     if hero is None:
-        body: list[Child] = [el("p", "No run has been rejected yet."), motto]
+        body: list[Child] = [
+            el("p", "No run has been rejected yet."),
+            motto,
+            explain,
+        ]
     else:
         figure = score_text(hero.rejected.metric.value)
         body = [
@@ -313,7 +345,7 @@ def _hero_section(hero: Hero | None) -> Markup:
             body.append(
                 el("p", score_text(hero.approved.metric.value), class_="honest")
             )
-        body.append(motto)
+        body += [motto, explain]
     return el("section", body, class_="hero", aria_labelledby="motto")
 
 
