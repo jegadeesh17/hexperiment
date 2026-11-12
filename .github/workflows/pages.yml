@@ -1,0 +1,55 @@
+# Builds the gallery of the two example apps from their committed run history and
+# publishes it on GitHub Pages. It reads only committed files: no secret, no dataset.
+name: pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: hexperiment/pyproject.toml
+      - name: Install the package
+        run: python -m pip install ./hexperiment
+      - name: Build the gallery
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: >-
+          hexperiment gallery apps/hotel-cancellations apps/flight-delays
+          --out site --repo-url "$REPO_URL"
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  deploy:
+    # Deploys only while the repository is public; while it is private the gallery
+    # is still built (and so checked) but not published.
+    if: ${{ !github.event.repository.private }}
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
