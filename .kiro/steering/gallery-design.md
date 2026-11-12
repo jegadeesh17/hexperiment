@@ -33,7 +33,7 @@ The gallery is the public face of Hexperiment: judges and ML engineers open it f
 ### Type
 
 - **Spectral** (Google Fonts, weights 200, 400, 600 and italic 400) for everything that is not code. Its name is a happy accident; it was chosen because it is a screen serif with clear figures. Fallback: `Georgia, "Times New Roman", serif`.
-- **IBM Plex Mono** (400, 500) only for code: the diff, file paths, column names and commands. Never for labels, numbers or metadata. Fallback: `ui-monospace, Consolas, monospace`.
+- **IBM Plex Mono** (400, 500) only for code: the diff (including its line numbers), file paths, column names and commands. Never for labels, scores, counts or metadata. Fallback: `ui-monospace, Consolas, monospace`.
 - Load both from Google Fonts with `display=swap`; the pages must read correctly with the fallbacks.
 - Scale (px, on a 16px root): 14, 16, 18 (body), 21, 26, 34, 48, and the hero figure at `clamp(5rem, 18vw, 12rem)`. Body 18px with line height 1.6; headings line height 1.15. Measure at most 68 characters for prose.
 - Figures: `font-variant-numeric: tabular-nums lining-nums` wherever scores, counts and times appear, so columns of numbers align.
@@ -79,7 +79,8 @@ Hexperiment                                         Source on GitHub
 ```
 
 - The hero uses the app whose first REJECTED score is the highest (the most too-good-to-be-true number), with that app's last APPROVED score as the honest one; the sentence under it is written from that run's findings.
-- The two cases sit side by side from 768px, divided by a single vertical Faded cyan rule, and stack below that. They are not cards.
+- The two cases sit side by side from 768px, divided by a single vertical Faded cyan rule, and stack below that. They are not cards, and not a sequence: an unnumbered list.
+- The motto is the page's only `h1`, set after the hero figure and its sentence; the figure itself is not a heading.
 
 ### Case page (`<app>/index.html`)
 
@@ -107,7 +108,7 @@ target is_canceled, metric roc_auc, threshold 0.85, 4 recorded runs
 
 ## Components
 
-- **Status mark.** A small shape before the word: filled square in Lantern for REJECTED, filled circle in Verdigris for APPROVED, dashed hollow circle in Faded cyan for UNVERIFIED. The word is always written out; colour is never the only signal.
+- **Status mark.** A small shape before the word: filled square in Lantern for REJECTED (4px corners), filled circle in Verdigris for APPROVED, dashed hollow circle in Faded cyan for UNVERIFIED. The word is always written out, so the mark is `aria-hidden`; colour is never the only signal. Status words are written as the verdict writes them (`REJECTED`, `APPROVED`, `UNVERIFIED`): they are values, not labels, so the no-capitals rule does not apply, and no `text-transform` is used.
 - **Haunted number.** The figure is real text. The ghost copy comes from a pseudo-element reading a `data-value` attribute, is `aria-hidden` by construction, offset by about `0.05em 0.03em`, blurred 2px, Paper at 30% opacity.
 - **Code diff.** Plex Mono 14px on Deep print, line numbers in Faded cyan, removed lines marked with a Lantern left bar and a minus sign, added lines with a Verdigris left bar and a plus sign, so it also reads in greyscale.
 
@@ -123,4 +124,4 @@ Exactly one orchestrated moment: on the landing page, the ghost copy of the haun
 
 ## Quality floor
 
-Visible keyboard focus (2px Paper outline, 2px offset), skip link to the main content, landmarks (`header`, `main`, `footer`), `lang="en"`, a distinct `<title>` per page, alt text or `aria-label` for every non-text mark, and readable pages with CSS and JavaScript disabled.
+Visible keyboard focus (2px Paper outline, 2px offset), skip link to the main content, landmarks (`header`, `main`, `footer`), `lang="en"`, a distinct `<title>` per page, an `aria-label` for every non-text mark that carries meaning (a decorative mark next to a word that says the same is `aria-hidden`), and readable pages with CSS disabled. The pages have no JavaScript.
