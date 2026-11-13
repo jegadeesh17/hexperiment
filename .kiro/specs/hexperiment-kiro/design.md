@@ -694,7 +694,7 @@ The node discriminator `type` (`repeat`, `step`) and the `jsonPath` form `$.stat
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "hexperiment",
   "version": "0.1.0",
-  "description": "Leakage-proof ML for Kiro. Audits a training script for data leakage, writes a verdict and a model card, and refuses to approve a model whose score depends on test information reaching training.",
+  "description": "Catches data leakage in ML training code in Kiro. Audits a training script for data leakage, writes a verdict and a model card, and refuses to approve a model whose score depends on test information reaching training.",
   "author": { "name": "Jegadeesh" },
   "homepage": "https://github.com/jegadeesh17/hexperiment",
   "repository": "https://github.com/jegadeesh17/hexperiment",

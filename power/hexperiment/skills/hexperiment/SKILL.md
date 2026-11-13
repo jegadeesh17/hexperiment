@@ -3,7 +3,7 @@ name: hexperiment
 description: "Use when training, tuning or reviewing a tabular ML model and the result must be trusted: data leakage, train test split, target leakage, a model card, or a score that looks too good to be true. Audits the training script, writes a verdict (APPROVED, REJECTED or UNVERIFIED) and a model card."
 ---
 
-# Hexperiment: leakage-proof ML
+# Hexperiment: catch data leakage in ML training
 
 "If your model looks too good to be true, it's haunted."
 

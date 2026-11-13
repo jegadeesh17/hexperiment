@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "hexperiment"
 version = "0.1.0"
-description = "A leakage-proof ML kit: if your model looks too good to be true, it's haunted."
+description = "An ML kit that catches data leakage: if your model looks too good to be true, it's haunted."
 requires-python = ">=3.13"
 dependencies = [
     "pandas",

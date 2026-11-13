@@ -1,4 +1,4 @@
-"""Hexperiment: a leakage-proof ML kit.
+"""Hexperiment: an ML kit that catches data leakage.
 
 If your model looks too good to be true, it's haunted.
 """

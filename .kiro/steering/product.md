@@ -2,7 +2,7 @@
 
 **Motto:** "If your model looks too good to be true, it's haunted."
 
-Hexperiment is a spec-driven, leakage-proof ML kit for Kiro. A data scientist states what a model must achieve (a metric threshold) and what it must never do (leak test information into training). The AI agent writes the training code; Hexperiment checks every run and refuses to approve a result whose score depends on test information reaching training.
+Hexperiment is a spec-driven ML kit for Kiro that catches data leakage before a result counts. A data scientist states what a model must achieve (a metric threshold) and what it must never do (leak test information into training). The AI agent writes the training code; Hexperiment checks every run and refuses to approve a result whose score depends on test information reaching training.
 
 ## Who it is for
 - **Customer:** a data scientist or ML engineer who lets an AI coding agent write training code and needs to trust the number it reports.
