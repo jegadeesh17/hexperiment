@@ -123,3 +123,14 @@
   - Gallery note (`hexperiment/src/hexperiment/gallery/pages.py`, `_CASES_NOTE`). Use the text now in `.kiro/specs/hexperiment-gallery/design.md` and `mockups/landing.html`: "The honest score is lower. That is the point: it is an honest estimate of how the model will do on new data." Update the test that asserts it.
   - Run the whole suite (`.venv/Scripts/python -m pytest hexperiment/tests -q --durations=10`) and `.venv/Scripts/python -m ruff check hexperiment`; both must report no problems.
   - _Requirements: core 4, 14 and 16; kiro 4, 6 and 7.4_
+
+- [ ] 12. The ghost hunter runs audits through the MCP tool only
+  - Write `.kiro/agents/ghost-hunter.json` and `.kiro/workflows/exorcise.workflow.json` exactly as the two JSON blocks of `design.md` (sections "`.kiro/agents/ghost-hunter.json`" and "`.kiro/workflows/exorcise.workflow.json`"), and the same bytes to `hexperiment/src/hexperiment/templates/kiro/agents/ghost-hunter.json` and `hexperiment/src/hexperiment/templates/kiro/workflows/exorcise.workflow.json`, so the test that compares them stays green.
+  - Update the agent and workflow checks in `hexperiment/tests/test_kiro_files.py` as "Agent", "Workflow" and "Permission simulator" in `design.md` now say: the `mcp` capability, no shell tool, `@hexperiment` and `includeMcpJson`, and the workflow prompt naming `run_audit`; remove the shell cases of the simulator. Update `hexperiment/tests/test_init.py` only where it asserts the old agent or workflow text.
+  - In `power/hexperiment/skills/hexperiment/SKILL.md`: setup step 5 says that hooks run the bare command `hexperiment` and that Kiro starts the bare command `hexperiment-mcp`, which the ghost hunter uses; the loop paragraph says that the ghost hunter edits the app's Python files and runs the audit through `run_audit` (it has no shell), and keeps the list of what it cannot edit. Update the skill tests if they assert the old text.
+  - Do not run `kiro-cli` or a workflow. The live headless check is task 13.
+  - Run the whole suite (`.venv/Scripts/python -m pytest hexperiment/tests -q --durations=10`) and `.venv/Scripts/python -m ruff check hexperiment`; both must report no problems.
+  - _Requirements: 2.5, 3.1, 3.4, 3.6_
+
+- [ ] 13. **Owner:** the live headless check of the loop
+  - Copy `apps/hotel-cancellations` to `apps/zz-check` without `runs/`, `verdict.json`, `model_card.md` and `.hex/`, and put its haunted script in place as `train.py`. Run `exorcise` on it headless with the trust list of "Headless runs" in `design.md` (no shell tool). Pass: the log shows `run_audit` calls and no shell tool, and the run ends with `apps/zz-check/verdict.json` APPROVED. Delete `apps/zz-check` afterwards.

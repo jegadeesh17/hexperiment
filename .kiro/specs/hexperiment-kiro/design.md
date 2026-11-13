@@ -39,7 +39,7 @@ Two constraints on who can do what affect the tasks. The `builder` agent cannot 
 | Finding the `hexperiment` executable | The command is the bare word `hexperiment`; `init --kiro` warns when it is not on `PATH` | Requirement 1.1 fixes the command. A bare name resolves to `hexperiment.exe` on Windows and to `bin/hexperiment` elsewhere through the shell's `PATH` lookup, so one file works on both. |
 | Workflow stop condition | `fileCheck` on `{{app}}/verdict.json`, `$.status` equals `APPROVED` | Requirement 2.3. A wrong placeholder gives a path that never exists, which the documented rule treats as "no match", so the loop runs to its limit and pauses. |
 | Ghost hunter write scope | Allow `apps/**/*.py`; deny the files of Requirement 3.3 and the `hexperiment` package; deny wins | Requirement 3.2 and 3.3. |
-| Ghost hunter shell | Allow only `hexperiment run apps/*` and `hexperiment run --fast apps/*` (with and without a venv prefix); deny shell metacharacters and the command families of Requirement 3.4 | An allow pattern ending in `*` also matches `hexperiment run apps/x && curl ...`, so chaining characters are denied explicitly. |
+| Ghost hunter runs | No shell tool. `tools` is `read`, `write` and `@hexperiment`; `includeMcpJson` is `true`; one `mcp` rule allows `hexperiment/*`. The agent runs audits with `run_audit` | Requirement 3.4. Shell rules are not a boundary in a headless workflow (they are case-sensitive, and a command that matches no rule runs; see "Shell, checked live the same way"), so the agent gets no shell at all. Rejected: a longer deny list, which would still miss spellings. |
 | MCP SDK isolation | Only `mcp_server/server.py` imports `mcp` and `anyio`; `mcp_server/__init__.py` imports it lazily inside `main` | `import hexperiment` must not load the SDK (Requirement 4.1), and the console command must explain a missing SDK instead of crashing. |
 | MCP audit concurrency | One `anyio.Lock` per server; a second `run_audit` waits | Requirement 4.6. The lock covers one server process only. |
 | Template copies | `src/hexperiment/templates/kiro/...` are copies of `.kiro/...`, compared byte for byte (after line-ending normalisation) by a test | Requirement 5.4. |
@@ -491,17 +491,32 @@ The matcher `.*\.py$` gives the same result whether Kiro matches the whole path 
 ```json
 {
   "name": "ghost-hunter",
-  "description": "Fixes data leakage in one Hexperiment app. Can edit the app's Python files and run hexperiment run on it. Cannot change thresholds, waivers, verdicts, run history, data, .kiro or the hexperiment package.",
-  "prompt": "You are the ghost hunter for one Hexperiment app. Your goal is to make `hexperiment run <app>` end with status APPROVED by fixing the cause of each finding in the app's Python files.\n\nRules:\n1. Thresholds, waivers and every other setting in hex.toml are the human's decision. You cannot edit them. Never ask to lower a threshold or to add a waiver.\n2. Removing the hexperiment.audit call, or a feature that is not the cause of a finding, does not count as a fix, and neither does silencing, skipping or weakening a check. Dropping a column flagged by The Possession is a fix only when the column is recorded after the outcome; say why it is. If an honest fix leaves the metric below its threshold, report that.\n3. If you cannot fix a finding, stop and report it with its ghost, location and fix hint instead of working around it.\n4. Never edit verdict.json, model_card.md, fetch_data.py, test files, runs/, .hex/, data/, haunted/, .kiro/ or the hexperiment package. Your tools refuse these writes; do not look for another way.\n5. Run only `hexperiment run apps/<name>` or `hexperiment run --fast apps/<name>`, one command per call, with forward slashes and no other shell syntax.\n6. Follow the ML integrity rules in the steering file.\n7. End every reply with the status, the metric against its threshold and one line per finding of the latest verdict.json.",
+  "description": "Fixes data leakage in one Hexperiment app. Can edit the app's Python files and run the audit through the hexperiment MCP tool run_audit; it has no shell. Cannot change thresholds, waivers, verdicts, run history, data, .kiro or the hexperiment package.",
+  "prompt": "You are the ghost hunter for one Hexperiment app. Your goal is to make the full audit (the hexperiment MCP tool run_audit) end with status APPROVED by fixing the cause of each finding in the app's Python files.\n\nRules:\n1. Thresholds, waivers and every other setting in hex.toml are the human's decision. You cannot edit them. Never ask to lower a threshold or to add a waiver.\n2. Removing the hexperiment.audit call, or a feature that is not the cause of a finding, does not count as a fix, and neither does silencing, skipping or weakening a check. Dropping a column flagged by The Possession is a fix only when the column is recorded after the outcome; say why it is. If an honest fix leaves the metric below its threshold, report that.\n3. If you cannot fix a finding, stop and report it with its ghost, location and fix hint instead of working around it.\n4. Never edit verdict.json, model_card.md, fetch_data.py, test files, runs/, .hex/, data/, haunted/, .kiro/ or the hexperiment package. Your tools refuse these writes; do not look for another way.\n5. You have no shell. Run the audit only with the hexperiment MCP tool run_audit: `app` is the app folder relative to the workspace with forward slashes (for example apps/churn), and `mode` is \"full\" (the default and the only mode that can give APPROVED) or \"fast\" for a quick check. Read results with get_verdict, get_history and explain_ghost. If the hexperiment tools are not listed yet, read the app's hex.toml and train.py first and look again: the server needs a few seconds to start.\n6. Follow the ML integrity rules in the steering file.\n7. End every reply with the status, the metric against its threshold and one line per finding of the latest verdict.json.",
   "model": "claude-sonnet-5.5",
-  "tools": ["read", "write", "shell"],
-  "resources": ["file://.kiro/steering/ml-integrity.md"],
+  "tools": [
+    "read",
+    "write",
+    "@hexperiment"
+  ],
+  "includeMcpJson": true,
+  "resources": [
+    "file://.kiro/steering/ml-integrity.md"
+  ],
   "permissions": {
     "rules": [
-      { "capability": "fs_read", "effect": "allow" },
+      {
+        "capability": "fs_read",
+        "effect": "allow"
+      },
       {
         "capability": "fs_write",
-        "match": ["apps/*/*.py", "apps/*/**/*.py", "**/apps/*/*.py", "**/apps/*/**/*.py"],
+        "match": [
+          "apps/*/*.py",
+          "apps/*/**/*.py",
+          "**/apps/*/*.py",
+          "**/apps/*/**/*.py"
+        ],
         "effect": "allow"
       },
       {
@@ -510,53 +525,42 @@ The matcher `.*\.py$` gives the same result whether Kiro matches the whole path 
           "**/hex.toml",
           "**/verdict.json",
           "**/model_card.md",
-          "apps/**/runs/**", "**/apps/**/runs/**",
-          "apps/**/.hex/**", "**/apps/**/.hex/**",
-          "apps/**/data/**", "**/apps/**/data/**",
-          "apps/**/haunted/**", "**/apps/**/haunted/**",
+          "apps/**/runs/**",
+          "**/apps/**/runs/**",
+          "apps/**/.hex/**",
+          "**/apps/**/.hex/**",
+          "apps/**/data/**",
+          "**/apps/**/data/**",
+          "apps/**/haunted/**",
+          "**/apps/**/haunted/**",
           "**/fetch_data.py",
-          "apps/**/hexperiment.py", "**/apps/**/hexperiment.py",
-          "apps/**/hexperiment/**", "**/apps/**/hexperiment/**",
-          ".kiro/**", "**/.kiro/**",
-          "hexperiment/src/**", "**/hexperiment/src/**",
-          "hexperiment/tests/**", "**/hexperiment/tests/**",
-          "hexperiment/pyproject.toml", "**/hexperiment/pyproject.toml",
-          "**/.venv/**", "**/site-packages/**",
+          "apps/**/hexperiment.py",
+          "**/apps/**/hexperiment.py",
+          "apps/**/hexperiment/**",
+          "**/apps/**/hexperiment/**",
+          ".kiro/**",
+          "**/.kiro/**",
+          "hexperiment/src/**",
+          "**/hexperiment/src/**",
+          "hexperiment/tests/**",
+          "**/hexperiment/tests/**",
+          "hexperiment/pyproject.toml",
+          "**/hexperiment/pyproject.toml",
+          "**/.venv/**",
+          "**/site-packages/**",
           "*..*",
-          "**/tests/**", "**/test_*.py", "**/conftest.py"
+          "**/tests/**",
+          "**/test_*.py",
+          "**/conftest.py"
         ],
         "effect": "deny"
       },
       {
-        "capability": "shell",
+        "capability": "mcp",
         "match": [
-          "hexperiment run apps/*",
-          "hexperiment run --fast apps/*",
-          ".venv/Scripts/hexperiment run apps/*",
-          ".venv/Scripts/hexperiment run --fast apps/*",
-          ".venv\\Scripts\\hexperiment run apps/*",
-          ".venv\\Scripts\\hexperiment run --fast apps/*",
-          ".venv/bin/hexperiment run apps/*",
-          ".venv/bin/hexperiment run --fast apps/*"
+          "hexperiment/*"
         ],
         "effect": "allow"
-      },
-      {
-        "capability": "shell",
-        "match": [
-          "*&*", "*;*", "*|*", "*>*", "*<*", "*`*", "*$(*", "*..*",
-          "git*", "rm *", "rmdir*", "del *", "Remove-Item*",
-          "curl*", "wget*", "Invoke-WebRequest*", "Invoke-RestMethod*", "iwr *", "irm *",
-          "pip*", "python*", "hexperiment init*", "hexperiment hook*",
-          "Set-Content*", "Add-Content*", "Clear-Content*", "Out-File*", "Tee-Object*",
-          "Copy-Item*", "Move-Item*", "New-Item*", "Rename-Item*", "Set-Item*",
-          "sc *", "ac *", "ni *", "cp *", "mv *", "copy *", "move *", "ren *", "tee *",
-          "xcopy*", "robocopy*", "mklink*", "echo *", "Write-Output*",
-          "cmd*", "powershell*", "pwsh*", "bash*", "sh *", "wsl*", "node*", "py *",
-          "Start-Process*", "saps *", "start *", "Invoke-Expression*", "iex*",
-          "Invoke-Command*", "icm *", "*::*"
-        ],
-        "effect": "deny"
       }
     ]
   }
@@ -567,8 +571,9 @@ Why these choices:
 
 - The `fs_write` deny list covers every item of Requirement 3.3. The package is denied by the specific folders `hexperiment/src/**`, `hexperiment/tests/**` and `hexperiment/pyproject.toml` rather than `**/hexperiment/**`: a checkout whose folder is named `hexperiment` would otherwise turn `**/hexperiment/**` into a rule that denies every file, including the app code that the agent may edit. The two `apps/**/hexperiment*` entries stop an app folder from shadowing the real package: `train.py` runs with its own folder first on `sys.path`, so a file `hexperiment.py` there would replace the kit. `.venv` and `site-packages` cover an installed copy of the package.
 - Every path appears in a relative form and a `**/` form, as in `builder.json`, because the documentation does not say whether a rule sees workspace-relative or absolute paths.
-- The shell allow patterns end in `apps/*`, so the agent can only run apps below `apps/`. `hexperiment run --full` is not allowed because `hexperiment run` is already a full run.
-- The deny list holds the characters that chain or redirect commands, the command families named in Requirement 3.4, and `..` so that `apps/../..` cannot leave the apps folder. Deny wins over allow.
+- **No shell (2026-11-13).** The agent's only way to execute code is `run_audit`, which runs `hexperiment run` inside the MCP server. The server resolves `app` inside its workspace (`resolve_app`), so the agent cannot run anything else, and the server's lock serialises two calls (parallel tool calls no longer collide on `.hex/`). `includeMcpJson: true` gives the agent the workspace server of `.kiro/settings/mcp.json`, which `init --kiro` writes. The `mcp` rule's match is `server/tool` without `@` (Kiro permissions documentation); `*` matches any sequence.
+- **Checked live 2026-11-13** (Kiro CLI 3.3.0, headless, Power saver): a custom agent with `includeMcpJson: true` and tools `@hexperiment/get_history` called that tool with `--trust-tools=read_file,list_directory,tool_load,tool_call,mcp_hexperiment_get_history,...` and got the history. MCP tools are deferred: the agent finds them through `tool_load`, which names them `hexperiment::<tool>`. In the first probe the agent looked before the server had started (about 13 s) and found none; in the second it read four files first and found all five. `tool_load` offered all five tools although `tools` named two, so `tools` does not narrow MCP tools; in a headless session the trust list and the `mcp` rule do. Hence the prompt's line about reading files first.
+- The shell rules were removed with the shell; the record of the shell checks below is kept because it is the reason.
 - **Checked live** in Kiro CLI 3.2.0 on 2026-11-11, with the agent writing into a throwaway app. Write rules match case-insensitively and treat `\` like `/`: `apps/x\hex.toml`, `apps/x/HEX.TOML` and `apps/x/Fetch_Data.py` were refused. `..` is not resolved before matching: `apps/x/../y.py` was written, hence the `*..*` deny. Under the earlier allow rule `apps/**/*.py`, `apps/tests/x.py` was writable, so the allow rule now requires an app folder (`apps/<app>/...`, which also leaves out a file directly in `apps/` such as `apps/verify.py`) and test files are denied: editing the tests that check the apps would weaken a check. An absolute path inside an app folder was written, as the `**/` forms intend.
 - **Shell, checked live the same way.** A command that matches an allow rule and no deny rule runs. A deny match is refused with the rule's text. A command that matches no allow rule asks the user, which a headless session cannot answer, so it does not run (`ls`, `whoami`, a command followed by a line break and `whoami`, and one with `; whoami`). A deny pattern that contains a line feed or carriage return makes every shell call fail in Kiro CLI 3.2.0, allowed ones included, so the list has none, and a test checks that no pattern contains a control character. **Inside a workflow step (checked live 2026-11-12)** the shell tool is `run_command`, and the allow rules do not let a command run: every call is evaluated `ask`, so a headless workflow needs `--trust-tools=...,run_command`. With that trust the deny rules still apply, but a command that matches no rule runs (`ls`, `Get-Content`), and a command chained with `;` is split and each part judged alone. In a headless workflow the shell is therefore limited by the deny list only; the list names the PowerShell and cmd commands that write, copy, move or delete files, start another interpreter or call .NET directly (`*::*`). An interactive session asks the user before each command instead. Write rules are unaffected: the `hex.toml` write was still refused. A second probe the same day, in a chat session where no command could run, showed that `*` in a shell rule also matches `/` (`git*` refused `git log -1 apps/x`) and that the match is case-sensitive (`GIT log -1` and `write-output x` matched no deny rule), while PowerShell and cmd ignore case; a chain with `;` was split there too. The deny list therefore stops the usual spellings only; it is not a boundary.
 - `resources` loads only the integrity rules. The same file also attaches itself to any `apps/**/*.py` the agent reads (its `fileMatch` front matter).
@@ -580,7 +585,7 @@ Why these choices:
 ```json
 {
   "name": "exorcise",
-  "description": "Repeats the ghost-hunter agent on one Hexperiment app until hexperiment run writes an APPROVED verdict.json. After 5 rounds it pauses for the human.",
+  "description": "Repeats the ghost-hunter agent on one Hexperiment app until the full audit writes an APPROVED verdict.json. After 5 rounds it pauses for the human.",
   "inputs": {
     "app": "string"
   },
@@ -602,7 +607,7 @@ Why these choices:
           "type": "step",
           "id": "hunt",
           "agent": "ghost-hunter",
-          "prompt": "Work on the Hexperiment app in the folder given as the workflow input `app` ({{app}}), written with forward slashes relative to the workspace, for example apps/churn.\n1. Run `hexperiment run {{app}}` (full mode).\n2. Read `{{app}}/verdict.json` and the model card in the newest folder under `{{app}}/runs/`.\n3. If the status is APPROVED, stop here and report it.\n4. Otherwise change the app's Python files so that each finding is fixed at its cause. Use the finding's fix hint and the suspect lines it lists. Then run `hexperiment run {{app}}` again as the last thing you do in this step.\nDo not change thresholds, waivers or any file outside the app's Python code. If you cannot fix a finding, say so and stop; do not work around it.\nEnd your reply with the status, the metric against its threshold, and one line per finding of the latest verdict.json."
+          "prompt": "Work on the Hexperiment app in the folder given as the workflow input `app` ({{app}}), written with forward slashes relative to the workspace, for example apps/churn.\n1. Read `{{app}}/hex.toml` and `{{app}}/train.py`.\n2. Call the hexperiment MCP tool `run_audit` with app `{{app}}` and mode `full`. If the tool is not listed yet, read the other Python files of the app and look again.\n3. Read `{{app}}/verdict.json` and the model card in the newest folder under `{{app}}/runs/`.\n4. If the status is APPROVED, stop here and report it.\n5. Otherwise change the app's Python files so that each finding is fixed at its cause. Use the finding's fix hint and the suspect lines it lists. Then call `run_audit` with app `{{app}}` and mode `full` again as the last thing you do in this step.\nDo not change thresholds, waivers or any file outside the app's Python code. If you cannot fix a finding, say so and stop; do not work around it.\nEnd your reply with the status, the metric against its threshold, and one line per finding of the latest verdict.json."
         }
       ]
     }
@@ -615,7 +620,7 @@ Why these choices:
 - *Why it is safe.* A path that is not expanded, or is wrong, names a file that does not exist. Kiro treats that as "no match, continue", so a mistake costs iterations, never a false stop. A shared test constant (`INPUT_REF`) holds the placeholder.
 - *Check.* Task 9 validates the file with Kiro's `validate_workflow` tool and runs the workflow once on a prepared haunted app. The loop must stop after the first `APPROVED`.
 - *A failing step.* A step that fails ends the whole run with status `failed`; the next iteration does not start. In the probe this happened when the step agent's file writes were refused. For the ghost hunter, failing is an acceptable way to hand back a finding it cannot fix (Requirement 3.5).
-- *Headless runs.* In a non-interactive CLI session, a step agent can use only the tools that the session trusts (`--trust-tools`), in addition to its own permission rules. In Git Bash the command needs `MSYS_NO_PATHCONV=1`, or `/workflow` is rewritten as a file path.
+- *Headless runs.* In a non-interactive CLI session, a step agent can use only the tools that the session trusts (`--trust-tools`), in addition to its own permission rules. In Git Bash the command needs `MSYS_NO_PATHCONV=1`, or `/workflow` is rewritten as a file path. The trust list for `exorcise` is `run_workflow,inspect_workflow,read_file,list_directory,file_search,grep_search,fs_write,str_replace,fs_append,tool_load,tool_call,mcp_hexperiment_run_audit,mcp_hexperiment_get_verdict,mcp_hexperiment_get_history,mcp_hexperiment_explain_ghost,mcp_hexperiment_list_apps`, with no shell tool (`run_command`, `execute_pwsh`).
 
 The node discriminator `type` (`repeat`, `step`) and the `jsonPath` form `$.status` are likewise taken from the documented field names and common usage, not from a documented example; `validate_workflow` in task 9 covers them too.
 
@@ -660,7 +665,7 @@ The node discriminator `type` (`repeat`, `step`) and the `jsonPath` form `$.stat
 
 No secrets are needed and none are referenced. The server takes its workspace from the working directory it is started in, or from `HEXPERIMENT_WORKSPACE`. The power does not set that variable because the documentation names no workspace placeholder. `list_apps` returns the workspace it uses, so a client sees at once when the server started in the wrong folder (Open question 10).
 
-`skills/hexperiment/SKILL.md` has front matter `name: hexperiment` (equal to its folder) and a `description` that says when to use it, followed by these sections: when to use the kit; setup (`pip install "hexperiment[mcp]"`, `hexperiment init apps/<name>`, `hexperiment init --kiro`, putting `hexperiment` on `PATH`); the ML-integrity rules (all eight, with the same bold titles as `ml-integrity.md`); how to read a verdict (the three statuses, exit codes `0`, `1`, `2`, `3`, the fields of a finding); the five ghosts and the other check names, as in the catalogue table above; the loop (`/workflow` `exorcise`, the ghost hunter, what it may not touch); the MCP tools; and the statement that only `hexperiment run` (in full mode) produces `APPROVED`, that nobody edits `verdict.json` or a model card, and that thresholds and waivers belong to the human. Tests check that the rule titles and ghost names in the skill match `ml-integrity.md` and `ghosts.CATALOG`.
+`skills/hexperiment/SKILL.md` has front matter `name: hexperiment` (equal to its folder) and a `description` that says when to use it, followed by these sections: when to use the kit; setup (`pip install "hexperiment[mcp] @ git+https://github.com/jegadeesh17/hexperiment#subdirectory=hexperiment"`, `hexperiment init apps/<name>`, `hexperiment init --kiro`, putting `hexperiment` on `PATH`); the ML-integrity rules (all eight, with the same bold titles as `ml-integrity.md`); how to read a verdict (the three statuses, exit codes `0`, `1`, `2`, `3`, the fields of a finding); the five ghosts and the other check names, as in the catalogue table above; the loop (`/workflow` `exorcise`, the ghost hunter, what it may not touch); the MCP tools; and the statement that only `hexperiment run` (in full mode) produces `APPROVED`, that nobody edits `verdict.json` or a model card, and that thresholds and waivers belong to the human. Tests check that the rule titles and ghost names in the skill match `ml-integrity.md` and `ghosts.CATALOG`.
 
 Satisfies: 6.1 to 6.4.
 
@@ -728,11 +733,11 @@ Commands as in `tech.md`. Tests mirror the modules. Every new test that needs a 
 `test_kiro_files.py` loads each file and asserts the fields that its Kiro format requires:
 
 - **Hook.** `version` is `v1`; `hooks` has one entry with non-empty `name`, `trigger` equal to the module constant `EXPECTED_TRIGGER` (`PostFileSave`), a `matcher` that compiles and matches `apps/x/train.py` and `C:\p\apps\x\train.py`, and does not match `hex.toml` or `train.py.bak`; `action.type` is `command`; `action.command` is `hexperiment hook`; `timeout` is `120`; the hook runner's cap is smaller than the timeout.
-- **Workflow.** `name`, `inputs.app`, `steps` present; exactly one `repeat` node with `id`, `maxIterations` `5`, `onMaxIterations` `pause`, and a `stopCondition` that has `fileCheck` and none of `containsText`, `completionSignal`, `stopWhen`; `fileCheck.path` equals the input placeholder plus `/verdict.json`, `jsonPath` is `$.status`, `value` is `APPROVED`; the body is a `step` with `id`, `agent` equal to the `name` in `.kiro/agents/ghost-hunter.json`, and a `prompt` that contains the input placeholder, `hexperiment run`, `verdict.json`, `model_card`, `fix` and the words about thresholds and waivers; ids are unique; step count is at most 50 and nesting at most 8.
-- **Agent.** `name`, `description`, `prompt`, `model`, `tools`, `permissions.rules`; every rule has a `capability` in `fs_read`, `fs_write`, `shell` and an `effect` in `allow`, `deny`; every non-read rule has a non-empty `match`; the prompt contains the statements of Requirement 3.5 (a phrase for each: the human's decision on thresholds and waivers, removing features or the audit call not counting as a fix, reporting a finding instead of working around it).
+- **Workflow.** `name`, `inputs.app`, `steps` present; exactly one `repeat` node with `id`, `maxIterations` `5`, `onMaxIterations` `pause`, and a `stopCondition` that has `fileCheck` and none of `containsText`, `completionSignal`, `stopWhen`; `fileCheck.path` equals the input placeholder plus `/verdict.json`, `jsonPath` is `$.status`, `value` is `APPROVED`; the body is a `step` with `id`, `agent` equal to the `name` in `.kiro/agents/ghost-hunter.json`, and a `prompt` that contains the input placeholder, `run_audit`, `verdict.json`, `model_card`, `fix` and the words about thresholds and waivers; ids are unique; step count is at most 50 and nesting at most 8.
+- **Agent.** `name`, `description`, `prompt`, `model`, `tools`, `permissions.rules`; every rule has a `capability` in `fs_read`, `fs_write`, `mcp` and an `effect` in `allow`, `deny`; no rule has capability `shell`; `tools` contains `@hexperiment` and none of `shell`, `execute_pwsh`, `run_command`, `*`, `@builtin`; `includeMcpJson` is `true`; exactly one `mcp` rule, with effect `allow` and match `["hexperiment/*"]`; every non-read rule has a non-empty `match`; the prompt contains the statements of Requirement 3.5 (a phrase for each: the human's decision on thresholds and waivers, removing features or the audit call not counting as a fix, reporting a finding instead of working around it).
 - **Power.** `plugin.json` has `name` `hexperiment`, a semver `version` equal to the package version in `pyproject.toml`, a `description`, `author.name`, and `keywords` that include "data leakage", "train test split", "model card" and "too good to be true". `mcp.json` has one stdio server whose `command` is `hexperiment-mcp`, with no `${` anywhere. `SKILL.md` has front matter whose `name` equals its folder, a `description`, and the content checks above.
 
-**Permission simulator.** A small helper in the test module turns each glob into a regular expression in two readings: strict (`*` does not cross `/`, `**` does) and loose (`*` matches anything). A path is *surely denied* if a deny rule matches it under the strict reading, and *possibly allowed* if an allow rule matches under the loose reading and no deny rule matches under the loose reading. The test asserts that these paths are surely denied for writing: `apps/churn/hex.toml`, `apps/churn/verdict.json`, `apps/churn/runs/20260101-000000-abcdef/model_card.md`, `apps/churn/.hex/normal/meta.json`, `apps/churn/data/raw.csv`, `apps/churn/data/helper.py`, `.kiro/agents/ghost-hunter.json`, `.kiro/steering/ml-integrity.md`, `hexperiment/src/hexperiment/cli.py`, `hexperiment/tests/test_cli.py`, `apps/churn/hexperiment.py`, and the same with an absolute prefix. It asserts that `apps/churn/train.py` and `apps/churn/features/encode.py` are possibly allowed and not surely denied, that `apps/churn/notes.md` and `train.py` at the root are not allowed, and the same for the shell: `hexperiment run apps/churn` and `hexperiment run --fast apps/churn` are allowed; `hexperiment run apps/churn && curl x`, `hexperiment run ../x`, `hexperiment run apps/a; rm -rf .`, `git status`, `python -c 1`, `pip install x`, `hexperiment init apps/x` and `hexperiment run apps/a > out` are surely denied or not allowed. The simulator is an approximation of Kiro's matcher and says so in its docstring. It guards the intent of the rules, not Kiro's engine.
+**Permission simulator.** A small helper in the test module turns each glob into a regular expression in two readings: strict (`*` does not cross `/`, `**` does) and loose (`*` matches anything). A path is *surely denied* if a deny rule matches it under the strict reading, and *possibly allowed* if an allow rule matches under the loose reading and no deny rule matches under the loose reading. The test asserts that these paths are surely denied for writing: `apps/churn/hex.toml`, `apps/churn/verdict.json`, `apps/churn/runs/20260101-000000-abcdef/model_card.md`, `apps/churn/.hex/normal/meta.json`, `apps/churn/data/raw.csv`, `apps/churn/data/helper.py`, `.kiro/agents/ghost-hunter.json`, `.kiro/steering/ml-integrity.md`, `hexperiment/src/hexperiment/cli.py`, `hexperiment/tests/test_cli.py`, `apps/churn/hexperiment.py`, and the same with an absolute prefix. It asserts that `apps/churn/train.py` and `apps/churn/features/encode.py` are possibly allowed and not surely denied, that `apps/churn/notes.md` and `train.py` at the root are not allowed. The shell part of the simulator was removed with the shell rules. The simulator is an approximation of Kiro's matcher and says so in its docstring. It guards the intent of the rules, not Kiro's engine.
 
 ### Generated app runs end to end
 
@@ -763,6 +768,6 @@ Each question has a recommended answer. The design follows the recommendation.
 10. **MCP server start-up folder.** The power's `mcp.json` cannot name the workspace (no documented placeholder), so the server relies on the working directory Kiro gives it. *Recommended:* leave `env` empty, document `HEXPERIMENT_WORKSPACE` in the skill, and check in task 9 that `list_apps` reports the project folder after `kiro-cli powers install`. If it does not, the power needs a documented way to pass the workspace.
 11. **Requirement 7.1 asks to test the hook for "an approved run".** *Resolved:* Requirement 7.1 now says a clean (`UNVERIFIED`), a rejected and a failed run. Original question: A fast run cannot be `APPROVED` (only a full run whose canary passed can), and the hook always runs in fast mode, so the hook never prints `APPROVED` for real. *Recommended:* test the reachable outcomes through the real `main(["hook"])` (clean fast run `UNVERIFIED`, `REJECTED`, failed) and cover `APPROVED` by calling `format_hook_output` with an `APPROVED` outcome, so the formatter is correct for any status. Reword Requirement 7.1 to "a clean (UNVERIFIED), a rejected and a failed run" at the next revision.
 12. **Interpretation of "the core package SHALL NOT import the SDK" (Requirement 4.1).** The server lives inside the `hexperiment` distribution as the subpackage `hexperiment.mcp_server`. *Recommended:* read it as "no module outside `mcp_server/server.py` imports the SDK and `import hexperiment` does not load it", enforced by `test_architecture.py`. A separate distribution for the server would need a second `pyproject.toml` and is not worth it for one optional module.
-13. **Review of the Kiro layer (2026-11-11).** *Resolved:* the ghost hunter rules changed after a live check (see "Why these choices"). The hook checks containment in the workspace lexically, after normalising the path, before it touches the file system, so a UNC or network path in an event never causes a network access; the second tier of `candidate_paths` is used only when the event has no value under a path key at all; the full-check notice quotes an app path that contains a space. `load_config` and every MCP read turn a file that is not valid UTF-8 into a `HexInputError`. `get_verdict` and `model_card` resolve the file they read and refuse one outside the workspace (a symlink). The `train.py.tmpl` of `init` removes the test rows that also appear in the training rows after the split, as steering rule 2 says. The Doppelganger's fix hint says to remove the overlap after the split. The stop condition is evaluated after each completed iteration (workflow documentation), so a stale `APPROVED` from before the run cannot stop the loop before the first step; the README replay instructions also run `hexperiment run` on the haunted script before the workflow starts, which replaces any stale verdict. *Known limits, accepted:* the ghost hunter's shell allow rule `hexperiment run apps/*` does not match a quoted path, so the fix loop cannot run an app whose folder name contains whitespace (`init` accepts such a name; use names without spaces); `list_apps` and `get_history` read `verdict.json` and the run files without following links, and return only the status and the run fields; an event path that reaches the workspace only through a link, a junction or a short 8.3 name fails the lexical check, so that save does not start a run.
-14. **Live checks (2026-11-12).** *Resolved:* (a) The output of a command hook does not reach the agent in Kiro CLI 3.2.0 headless sessions: probe hooks on `PostFileSave` and on `PostToolUse` with matcher `write` ran and completed, Kiro waited for them before the next model turn, but no output was added to the context (the docs say exit-0 output is added for every trigger). Accepted limit: the hook still runs the fast check and records it in the history; the `exorcise` workflow does not depend on it, because the ghost hunter runs `hexperiment run` itself. Checked in the Kiro IDE 1.4.154 the same day, in a trusted workspace: the hook fired, its fast run was recorded, and no output reached the session. We keep the command hook because its run clears a stale `APPROVED` after every change, and we do not switch to an agent hook, which would cost an agent turn on every save and add test-set uses. (b) Workflow steps and shell permissions: see "Shell, checked live the same way"; the deny list was extended and the limit is documented. The deny match is also case-sensitive, so the deny list is not a boundary either. Moving the ghost hunter from the shell to the MCP tool `run_audit` would remove the gap and is left to the owner. (c) A power's MCP server starts in the power's install folder, and Kiro CLI offers no MCP roots; `init --kiro` therefore registers a workspace-level server, and `list_apps` gives a `hint` when it finds no app. (d) Start-up cost and the run lock: see those sections. (e) The CLI has no `validate_workflow` tool (only `run_workflow`, `inspect_workflow`, `update_workflow`); `run_workflow` validates the file when it starts, and the recordings started it without error. (f) The Kiro IDE runs a project's hooks and its workspace-level MCP servers only after the user trusts the folder (Workspaces: Manage Workspace Trust); in an untrusted window only the power's server starts, so `list_apps` reports the power's install folder and the hook does nothing. The README tells users to trust the project folder. In everyday use (Balanced plan, the Kiro IDE, a browser and an editor open) both hexperiment servers connected 11.6 s after Kiro started its MCP subsystem.
+13. **Review of the Kiro layer (2026-11-11).** *Resolved:* the ghost hunter rules changed after a live check (see "Why these choices"). The hook checks containment in the workspace lexically, after normalising the path, before it touches the file system, so a UNC or network path in an event never causes a network access; the second tier of `candidate_paths` is used only when the event has no value under a path key at all; the full-check notice quotes an app path that contains a space. `load_config` and every MCP read turn a file that is not valid UTF-8 into a `HexInputError`. `get_verdict` and `model_card` resolve the file they read and refuse one outside the workspace (a symlink). The `train.py.tmpl` of `init` removes the test rows that also appear in the training rows after the split, as steering rule 2 says. The Doppelganger's fix hint says to remove the overlap after the split. The stop condition is evaluated after each completed iteration (workflow documentation), so a stale `APPROVED` from before the run cannot stop the loop before the first step; the README replay instructions also run `hexperiment run` on the haunted script before the workflow starts, which replaces any stale verdict. *Known limits, accepted:* `list_apps` and `get_history` read `verdict.json` and the run files without following links, and return only the status and the run fields; an event path that reaches the workspace only through a link, a junction or a short 8.3 name fails the lexical check, so that save does not start a run.
+14. **Live checks (2026-11-12).** *Resolved:* (a) The output of a command hook does not reach the agent in Kiro CLI 3.2.0 headless sessions: probe hooks on `PostFileSave` and on `PostToolUse` with matcher `write` ran and completed, Kiro waited for them before the next model turn, but no output was added to the context (the docs say exit-0 output is added for every trigger). Accepted limit: the hook still runs the fast check and records it in the history; the `exorcise` workflow does not depend on it, because the ghost hunter runs `hexperiment run` itself. Checked in the Kiro IDE 1.4.154 the same day, in a trusted workspace: the hook fired, its fast run was recorded, and no output reached the session. We keep the command hook because its run clears a stale `APPROVED` after every change, and we do not switch to an agent hook, which would cost an agent turn on every save and add test-set uses. (b) Workflow steps and shell permissions: see "Shell, checked live the same way"; the deny list was extended and the limit is documented. The deny match is also case-sensitive, so the deny list is not a boundary either. *Resolved 2026-11-13:* the ghost hunter has no shell and runs audits through `run_audit` (Requirement 3.4). (c) A power's MCP server starts in the power's install folder, and Kiro CLI offers no MCP roots; `init --kiro` therefore registers a workspace-level server, and `list_apps` gives a `hint` when it finds no app. (d) Start-up cost and the run lock: see those sections. (e) The CLI has no `validate_workflow` tool (only `run_workflow`, `inspect_workflow`, `update_workflow`); `run_workflow` validates the file when it starts, and the recordings started it without error. (f) The Kiro IDE runs a project's hooks and its workspace-level MCP servers only after the user trusts the folder (Workspaces: Manage Workspace Trust); in an untrusted window only the power's server starts, so `list_apps` reports the power's install folder and the hook does nothing. The README tells users to trust the project folder. In everyday use (Balanced plan, the Kiro IDE, a browser and an editor open) both hexperiment servers connected 11.6 s after Kiro started its MCP subsystem.
 15. **What a user waits for (measured 2026-11-12, Power saver, Kiro IDE, a browser and VS Code open, on copies of the two apps).** Full `hexperiment run` on the honest scripts: 46.5 s (hotels) and 44.7 s (flights); fast run: 25.6 and 25.5 s; importing the MCP server module: 6.9 s (Kiro connected the servers in 12.6 to 13.1 s earlier the same day); `hexperiment gallery` on both apps: 3.5 s; the built site is static and opens at once. On the Balanced plan the full runs took 21 to 34 s. These are reported in the README; they are not limits.
