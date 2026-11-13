@@ -53,7 +53,7 @@ Other columns that are recorded after the outcome, such as `reservation_status_d
 
 ## Results
 
-Measured on 2026-11-12 on an AMD Ryzen 7 3750H laptop (4 cores, 8 threads), Windows 11, Balanced power plan, with the Kiro IDE, Chrome and VS Code open, in full mode (`hexperiment run` through `apps/verify.py` in a scratch copy of the app).
+Measured on 2026-11-12 on an AMD Ryzen 7 3750H laptop (4 cores, 8 threads), Windows 11, Balanced power plan, with the Kiro IDE, Chrome and VS Code open, in full mode (`hexperiment run` through `apps/verify.py` in a scratch copy of the app). These runs are not in `runs/`; the recorded history is below.
 
 | Script | Verdict | AUC | Threshold | Findings | Executions | Wall time |
 |---|---|---|---|---|---|---|
@@ -64,6 +64,19 @@ Measured on 2026-11-12 on an AMD Ryzen 7 3750H laptop (4 cores, 8 threads), Wind
 The second row is not a file in the repository. `apps/verify.py` builds it from the haunted script by removing the list item marked `# LEAK: The Possession`. It is the state an agent reaches after fixing the first finding.
 
 The haunted AUC is 0.0904 higher than the honest one, and it is not a better model: it reads the answer. The `country_cancel_rate` leak adds only 0.0005 to the AUC (0.9101 against 0.9096), but the canary still catches it, because it looks at what training depends on, not at the metric.
+
+## Recorded history
+
+The committed `runs/` folder holds the runs of one `exorcise` workflow on the haunted script (2026-11-11), followed by one run of the honest script. The ghost hunter's session is in [docs/kiro/exorcise-hotel-cancellations.md](../../docs/kiro/exorcise-hotel-cancellations.md).
+
+| Run | Started by | Mode | Verdict | AUC | Error findings |
+|---|---|---|---|---|---|
+| `20261111-194957-38a52f` | the ghost hunter, on the haunted script | full | `REJECTED` | 1.0000 | The Possession, The Peeking Spirit |
+| `20261111-195114-c55aa8` | the save hook, after the ghost hunter's edit | fast | `UNVERIFIED` | 0.9090 | none |
+| `20261111-195154-f34364` | the ghost hunter, on its fix | full | `APPROVED` | 0.9090 | none |
+| `20261111-195610-68b4d6` | a manual run, on the honest script restored | full | `APPROVED` | 0.9096 | none |
+
+The ghost hunter fixed both leaks in one round. Its script differs from the honest one, so the honest script was put back and run last, and that run is the current `verdict.json`.
 
 ## Replay the demo
 
@@ -87,7 +100,7 @@ The haunted AUC is 0.0904 higher than the honest one, and it is not a better mod
    .venv/Scripts/hexperiment run apps/hotel-cancellations
    ```
 
-3. In the Kiro CLI, start the workflow and let the ghost hunter fix the script until `hexperiment run` gives `APPROVED`:
+3. In the Kiro CLI, start the workflow and let the ghost hunter fix the script until the full audit gives `APPROVED`:
 
    ```
    /workflow run exorcise --app apps/hotel-cancellations

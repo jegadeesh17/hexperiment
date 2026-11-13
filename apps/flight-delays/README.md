@@ -44,7 +44,7 @@ The haunted script splits with `train_test_split` and its default test share of 
 
 `train.py` differs from the haunted script in these ways:
 
-- It splits with `hexperiment.split`, so every training flight is earlier than every test flight.
+- It splits with `hexperiment.split`, so no training flight is later than any test flight. Flights in the same scheduled hour at the cutoff are divided by row id.
 - It has no `carrier_day_late_rate`.
 - The features are known when the flight is scheduled: `carrier`, `origin`, `dest`, `month`, `day`, `sched_dep_time`, `sched_arr_time` and `distance`.
 - `flight` and `tailnum` are identifiers and are left out. `hour` and `minute` are already inside `sched_dep_time`.
@@ -54,7 +54,7 @@ The haunted script splits with `train_test_split` and its default test share of 
 
 ## Results
 
-Measured on 2026-11-12 on an AMD Ryzen 7 3750H laptop (4 cores, 8 threads), Windows 11, Balanced power plan, with the Kiro IDE, Chrome and VS Code open, in full mode (`hexperiment run` through `apps/verify.py` in a scratch copy of the app).
+Measured on 2026-11-12 on an AMD Ryzen 7 3750H laptop (4 cores, 8 threads), Windows 11, Balanced power plan, with the Kiro IDE, Chrome and VS Code open, in full mode (`hexperiment run` through `apps/verify.py` in a scratch copy of the app). These runs are not in `runs/`; the recorded history is below.
 
 | Script | Verdict | AUC | Threshold | Findings | Executions | Wall time |
 |---|---|---|---|---|---|---|
@@ -65,6 +65,19 @@ Measured on 2026-11-12 on an AMD Ryzen 7 3750H laptop (4 cores, 8 threads), Wind
 The second row is not a file in the repository. `apps/verify.py` builds it from the haunted script by replacing the line ending in `# LEAK: random split` with `train, test = hexperiment.split(df)`. It is the state an agent reaches after fixing the first finding.
 
 The haunted AUC is 0.1778 higher than the honest one. The honest model is only 0.0193 above the threshold. That is what the schedule alone can tell you about delays.
+
+## Recorded history
+
+The committed `runs/` folder holds the runs of one `exorcise` workflow on the haunted script (2026-11-11), followed by one run of the honest script. The ghost hunter's session is in [docs/kiro/exorcise-flight-delays.md](../../docs/kiro/exorcise-flight-delays.md).
+
+| Run | Started by | Mode | Verdict | AUC | Error findings |
+|---|---|---|---|---|---|
+| `20261111-195811-190e10` | the ghost hunter, on the haunted script | full | `REJECTED` | 0.7971 | The Prophet |
+| `20261111-195934-464b02` | the save hook, after the ghost hunter's edit | fast | `UNVERIFIED` | 0.6193 | none |
+| `20261111-200013-a6caaf` | the ghost hunter, on its fix | full | `APPROVED` | 0.6193 | none |
+| `20261111-200257-5f6e81` | a manual run, on the honest script restored | full | `APPROVED` | 0.6193 | none |
+
+The ghost hunter fixed the split and removed `carrier_day_late_rate` in one round, so the recorded history never shows The Peeking Spirit; the "split fixed" row of the results table shows that stage. The honest script was put back and run last, and that run is the current `verdict.json`.
 
 ## Replay the demo
 
@@ -88,7 +101,7 @@ The haunted AUC is 0.1778 higher than the honest one. The honest model is only 0
    .venv/Scripts/hexperiment run apps/flight-delays
    ```
 
-3. In the Kiro CLI, start the workflow and let the ghost hunter fix the script until `hexperiment run` gives `APPROVED`:
+3. In the Kiro CLI, start the workflow and let the ghost hunter fix the script until the full audit gives `APPROVED`:
 
    ```
    /workflow run exorcise --app apps/flight-delays
@@ -100,7 +113,7 @@ The haunted AUC is 0.1778 higher than the honest one. The honest model is only 0
    git checkout -- apps/flight-delays/train.py
    ```
 
-Every run adds a folder to `runs/`, so replaying adds to the history. The first verdict is `REJECTED` by The Prophet; after the split is fixed, expect The Peeking Spirit. Do not lower the threshold in `hex.toml` and do not edit `verdict.json`.
+Every run adds a folder to `runs/`, so replaying adds to the history. The first verdict is `REJECTED` by The Prophet. If the agent fixes only the split first, the next verdict shows The Peeking Spirit; in the recorded run it fixed both leaks at once. Do not lower the threshold in `hex.toml` and do not edit `verdict.json`.
 
 ## Limits
 
