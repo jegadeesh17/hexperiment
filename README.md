@@ -151,13 +151,11 @@ An app is a folder with a `hex.toml` (target, metric, threshold, split), a `trai
 
 ```bash
 pip install -e "./hexperiment[dev]"
-python -m pytest hexperiment/tests -q                 # the kit: about 3,100 tests, about 2 minutes; many start real training runs
-python -m pytest apps/tests -q                        # the two apps: about 220 tests, no network and no downloaded data
+python -m pytest hexperiment/tests apps/tests -q      # about 3,400 tests, about 2 minutes: many start real training runs
+python -m pytest apps/tests -q                        # only the two apps: no network and no downloaded data, about 30 s
 python -m pytest hexperiment/tests/test_canary.py -q   # one file
 python -m ruff check hexperiment apps
 ```
-
-Run the two test folders as separate commands. In one command, the apps folder's no-network guard also applies to the kit's MCP server tests and fails them.
 
 The benchmark takes about 40 minutes: `python hexperiment/benchmark/run_benchmark.py --out hexperiment/benchmark/results.json`.
 

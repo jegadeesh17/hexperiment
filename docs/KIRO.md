@@ -32,7 +32,7 @@ Every task was then verified outside Kiro: the full test suite and the linter we
 
 - **The spec writer refused a statistically wrong requirement.** The first draft said the canary would shuffle test values within each column. The spec writer pointed out that shuffling keeps each column's mean, so a leak through a mean imputer could never be seen. The design was changed to a "tilted resample" of the test rows before any code existed. In the benchmark, the canary later rejected all six apps that leak through a scaler or an imputer fitted on all rows.
 - **The reviewer found a loophole.** A training script that reported its training-set predictions only in the normal run, and not in the canary run, could make the leak check pass silently. The builder closed it and showed the fix worked by breaking the code on purpose and watching the tests fail.
-- **Mutation checks as a habit.** Across the tasks the builder repeatedly broke its own code on purpose (a wrong boundary, a missing salt, two decision steps swapped) to show that the tests would catch it. The suite now has about 3,100 tests, including property-based tests with Hypothesis.
+- **Mutation checks as a habit.** Across the tasks the builder repeatedly broke its own code on purpose (a wrong boundary, a missing salt, two decision steps swapped) to show that the tests would catch it. The suite now has about 3,400 tests, including property-based tests with Hypothesis.
 
 ## 2. Kiro as part of the product
 
@@ -71,5 +71,5 @@ We checked how Kiro behaves with live probes wherever the documentation was sile
 ## 4. Numbers
 
 - 5 specs, 45 requirements, 75 tasks. Kiro wrote the code of every task, and each task was verified before it was committed.
-- About 3,100 tests, run in 2 to 3 minutes on a 2019 four-core laptop on a power-saving plan.
+- About 3,400 tests, run in about 2 minutes on a 2019 four-core laptop on a power-saving plan.
 - Benchmark: 78 apps, 30 of 39 leaky apps rejected as predicted, 0 of 39 false alarms ([hexperiment/benchmark/README.md](../hexperiment/benchmark/README.md)).
