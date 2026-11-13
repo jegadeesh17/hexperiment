@@ -175,7 +175,7 @@
   - Tell the builder when `results.json`, the generated block and both README sections are committed.
   - _Requirements: 4.4, 5.2, 5.3_
 
-- [ ] 18. The results tests
+- [x] 18. The results tests
   - Start only after task 17 is done. Create `hexperiment/tests/test_benchmark_results.py`. These tests **fail, and do not skip,** when `hexperiment/benchmark/results.json` is absent, with a message that names the path and says to run task 17. No test runs a case.
   - Results file: `format` is `"hexperiment-benchmark/1"`; `created_at` is ISO 8601 UTC (`%Y-%m-%dT%H:%M:%SZ`); `complete` is true and `only` is null; the `environment` keys and types of Requirement 4.1 (`hexperiment`, `python`, `numpy`, `pandas`, `scikit-learn`, `os` strings; `cpu_count` an integer; `run_seconds` a number); `source` contains the DOI; `mechanisms` has one item per `MECHANISMS` entry in the same order, with the same `key`, `leak_type`, `leak_type_name`, `mechanism` and `designed_to_catch`; `scripts == 3`; `statuses` has the four keys and sums to `scripts`; `rejected` equals the `REJECTED` count; every `by_ghost` count is at most `rejected`; `clean.scripts == 39`; `clean.false_alarms` equals the clean `REJECTED` count; `not_measured` equals `NOT_MEASURED`; `cases` has 39 items; and `summary.build_results` applied to the file's own `cases` reproduces its `mechanisms` and `clean` sections.
   - README: the text between the markers equals `render_block(results)`; the file cites the paper, states that the data is synthetic and that the cases are written by the authors of the checks, names `L3.3`, has the sections "What we expected before the first run" and "Missed or partly caught", and names, in "Missed or partly caught", every mechanism key whose `rejected` is less than `scripts`; the "Changes after the first complete run" section exists.
@@ -185,7 +185,7 @@
   - Tests added: about 14. None starts a Python process and none runs a case.
   - Verify: `.venv/Scripts/python -m pytest hexperiment/tests/test_benchmark_results.py -q`, then the two full commands.
 
-- [ ] 19. Final verification
+- [x] 19. Final verification
   - Run the whole suite with `.venv/Scripts/python -m pytest hexperiment/tests -q --durations=10` and confirm it passes. Report the time and the ten slowest tests; there is no time limit. Do not lower Hypothesis settings.
   - Run `.venv/Scripts/python -m ruff check hexperiment` and confirm it reports no problems in `hexperiment/benchmark/` and the new tests.
   - Confirm, with `git status` and `git diff --stat`, that only `hexperiment/pyproject.toml` (the two lines of task 1), `hexperiment/benchmark/` and the new `tests/test_benchmark_*.py` files changed (plus the owner's `.github/workflows/pages.yml` edit); nothing under `hexperiment/src/hexperiment/` or `apps/`; `tests/conftest.py` is unchanged.
