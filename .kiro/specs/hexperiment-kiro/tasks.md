@@ -151,5 +151,5 @@
   - Run the whole suite and `ruff check`; both must report no problems.
   - _Requirements: 9.6_
 
-- [ ] 15. **Owner:** the stop check in a live session
+- [x] 15. **Owner:** the stop check in a live session
   - In a headless Kiro CLI session in this workspace, with a throwaway app, ask the agent to change its `train.py` and then finish. Pass: the agent receives "Hexperiment: not approved yet." after its reply and runs the full audit or reports the app as not approved. Delete the throwaway app afterwards.
