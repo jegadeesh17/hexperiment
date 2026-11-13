@@ -112,7 +112,7 @@
   - Tests added: none.
   - Verify: the three `--only` commands above finish with exit code 0 and no `ERROR` line caused by a script of the benchmark; then the two full commands.
 
-- [ ] 12. Smoke runs, group B: the pre-processing mechanisms
+- [x] 12. Smoke runs, group B: the pre-processing mechanisms
   - **The builder does this task by running commands in a terminal; nothing goes into the test suite.** Mechanisms: `scaler-all-rows`, `imputer-all-rows`, `target-encoding-all-rows`, `univariate-selection-all-rows`.
   - Run, for each key: `.venv/Scripts/python hexperiment/benchmark/run_benchmark.py --only <key> --out $env:TEMP\smoke-<key>.json`. `univariate-selection-all-rows` has the largest file (2,400 x 501); note its run times against the 30 seconds of Requirement 2.2.
   - This group is where the design expects `NO EFFECT` to be most likely, for random forest and boosting on `scaler-all-rows` and `imputer-all-rows` (a scaler is a monotone map; the two leaks were given a clip at two standard deviations and long-tailed data for that reason; Open question 3). Look for crashes, scripts that do not do what the mechanism says, and `NO EFFECT`.
