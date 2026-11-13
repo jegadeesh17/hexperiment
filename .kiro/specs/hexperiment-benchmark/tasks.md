@@ -162,7 +162,7 @@
   - Tests added: none.
   - Verify: the commands above, then `.venv/Scripts/python -m pytest hexperiment/tests -q` and `.venv/Scripts/python -m ruff check hexperiment`.
 
-- [ ] 17. **Owner:** the complete run, the results file and the README text
+- [x] 17. **Owner:** the complete run, the results file and the README text
   - The builder cannot do this: the recorded environment and run time must come from your own machine in everyday use (Open question 9: about 15 to 25 minutes, one case at a time, nothing else heavy running), and the two README sections are your judgement, not code.
   - **Before the run**, in `hexperiment/benchmark/README.md`, add the section **"What we expected before the first run"** after the list of mechanisms and before "How to run it": copy the table "Predicted totals" of `design.md` and its closing sentence ("Predicted 30 of 39 leaky apps rejected, 0 of 39 clean twins rejected. These are predictions, not targets"), and add that nothing in the cases was adjusted toward them. Commit the README before you run, so the order is visible in the history (Open question 14).
   - Read the builder's report of task 16. If a smoke-run line in it still shows a script that crashes or does not do what its mechanism says, send it back to the builder as a fix before you run.
