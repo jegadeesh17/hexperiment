@@ -167,7 +167,7 @@
   - Tests added: about 16. None starts a Python process.
   - Verify: `.venv/Scripts/python -m pytest hexperiment/tests/test_pages_workflow.py -q`, then the two full commands.
 
-- [ ] 15. Final verification
+- [x] 15. Final verification
   - Run the whole suite with `.venv/Scripts/python -m pytest hexperiment/tests -q --durations=10` and confirm it passes. Report the time and the ten slowest tests; there is no time limit. Do not lower Hypothesis settings or add a separate stage.
   - Run `.venv/Scripts/python -m ruff check hexperiment` and confirm it reports no problems.
   - Build the real gallery once by hand: `.venv/Scripts/hexperiment gallery apps/hotel-cancellations apps/flight-delays --out <a temporary folder outside the repository> --repo-url https://github.com/example/example`; confirm exit code 0, that standard output is the path of `index.html`, that the folder holds `index.html`, `assets/gallery.css`, the four files of `assets/fonts/`, `.hexperiment-gallery` and one folder per app, and delete the temporary folder. Confirm that `hexperiment gallery --help` prints usage, that the runtime dependencies are still `pandas`, `numpy` and `scikit-learn`, and that `git status` shows no change under `apps/`.
