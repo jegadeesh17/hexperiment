@@ -19,7 +19,8 @@ from types import ModuleType
 import pandas as pd
 import pytest
 
-APPS_DIR = Path(__file__).resolve().parent.parent
+TESTS_DIR = Path(__file__).resolve().parent
+APPS_DIR = TESTS_DIR.parent
 HOTELS = "hotel-cancellations"
 FLIGHTS = "flight-delays"
 APP_NAMES = (HOTELS, FLIGHTS)
@@ -86,8 +87,15 @@ class App:
 
 
 @pytest.fixture(autouse=True)
-def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fail any test that tries to open a network connection (Requirement 5.1)."""
+def no_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail any apps test that tries to open a network connection (Requirement 5.1).
+
+    Only tests under this folder are guarded. Pytest's root folder can lie outside
+    ``apps/`` (``hexperiment/`` when both test folders are run), and then this
+    autouse fixture would also reach tests that are not ours.
+    """
+    if not Path(request.path).resolve().is_relative_to(TESTS_DIR):
+        return
 
     def refuse(*args: object, **kwargs: object) -> None:
         raise RuntimeError("a test tried to use the network")

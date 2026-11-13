@@ -73,3 +73,4 @@ Scope: data fetching, the two apps (haunted and honest scripts, configuration, R
 2. A full `hexperiment run` of each honest app SHALL finish within its `timeout_seconds` on the reference laptop, and the measured time SHALL be stated in the app's README.
 3. THE committed run history (`runs/`), `verdict.json` and `model_card.md` of each app SHALL come from real runs of the haunted and honest scripts, never be edited by hand, and show the haunted, flagged and honest steps in order.
 4. `ruff check apps` SHALL report no problems.
+5. WHEN the apps tests run in the same pytest command as the kit tests (`pytest hexperiment/tests apps/tests`), THE apps no-network guard SHALL apply only to tests whose file is inside `apps/tests/`, and every kit test SHALL pass as it does when the kit tests run alone.

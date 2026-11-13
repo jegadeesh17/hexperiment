@@ -380,7 +380,7 @@ No placeholder text may remain in a finished README (a test checks this).
 
 ### Tests (`apps/tests/`)
 
-Run with `.venv/Scripts/python -m pytest apps/tests -q`. No test uses the network or needs `data/`. Target: under 20 s in total. There is no `pytest.ini` under `apps/`, so Hypothesis tests set `@settings(max_examples=50, deadline=None)` themselves.
+Run with `.venv/Scripts/python -m pytest apps/tests -q`. No test uses the network or needs `data/`. Target: under 40 s in total on the reference laptop on its Power saver plan with everyday apps open (raised from 20 s on 2026-11-13 by the owner: the regression test for Requirement 5.5 starts a child pytest that takes about 12 s; the suite measured 27 to 34 s). There is no `pytest.ini` under `apps/`, so Hypothesis tests set `@settings(max_examples=50, deadline=None)` themselves.
 
 **`conftest.py`**: `load_module(path, name)` (importlib, registers in `sys.modules`; needed because folder names contain hyphens), session fixtures for the two `fetch_data` modules and `verify.py`, a parametrized `app` fixture (name, folder, fetch module), and factories `raw_hotels(n)` and `raw_flights(arr_delays, ...)` that build a frame with every `REQUIRED_COLUMNS` column.
 
