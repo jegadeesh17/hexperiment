@@ -35,12 +35,13 @@ hexperiment = ["templates/**/*"]
 "hexperiment.gallery" = ["assets/*.css", "assets/fonts/*"]
 
 [tool.ruff]
-src = ["src", "tests"]
+src = ["src", "tests", "benchmark"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["benchmark"]
 # The canary scenarios spawn real training runs; spread them across CPU cores.
 addopts = "-n auto --dist loadscope"
