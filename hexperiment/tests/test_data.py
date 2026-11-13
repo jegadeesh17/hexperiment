@@ -496,17 +496,13 @@ def test_missing_values_keep_their_positions(values: pd.Series) -> None:
     assert set(out.dropna()) <= set(values.dropna())
 
 
-def test_constant_numeric_draws_are_repaired_with_the_largest_different_value() -> (
-    None
-):
+def test_constant_numeric_draws_are_repaired_with_the_largest_different_value() -> None:
     values = pd.Series([3.0, 1.0, 2.0])  # pool [2, 3]; every draw picks 2
     out = tilt_column(values, ConstantDraws())  # type: ignore[arg-type]
     assert out.tolist() == [3.0, 2.0, 2.0]
 
 
-def test_constant_category_draws_are_repaired_with_the_most_frequent_category() -> (
-    None
-):
+def test_constant_category_draws_are_repaired_with_the_most_frequent_category() -> None:
     # counts a=3, b=2, c=1, so the pool is the positions of a and b. The first pool
     # entry is position 1 ("a"), so every draw is "a" and the repair writes the
     # highest-ranked different pool value ("b", first at position 3) at position 0.
@@ -991,9 +987,7 @@ def make_app(
     if time_column is not None:
         lines.append(f'time_column = "{time_column}"')
     (app / "hex.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    (frame if frame is not None else app_frame()).to_csv(
-        app / "data.csv", index=False
-    )
+    (frame if frame is not None else app_frame()).to_csv(app / "data.csv", index=False)
     return app
 
 
@@ -1022,7 +1016,8 @@ def test_load_missing_csv_names_the_resolved_path(tmp_path: Path) -> None:
     with pytest.raises(HexInputError) as error:
         data.load(app)
     assert str((app / "data.csv").resolve()) in str(error.value)
-    assert "fetch_data.py" in str(error.value)
+    assert "data/dataset.csv" in str(error.value)
+    assert "Put the data file at that path" in str(error.value)
 
 
 def test_load_empty_csv_names_the_resolved_path(tmp_path: Path) -> None:
@@ -1917,9 +1912,7 @@ def test_an_empty_features_list_has_the_same_message_in_both_modes() -> None:
 
 def test_validate_snapshot_inputs_returns_features_and_a_score_copy() -> None:
     scores = SCORES_TRAIN.copy()
-    result = validate_snapshot_inputs(
-        audit_frames()[0], scores, ["x", "c"]
-    )
+    result = validate_snapshot_inputs(audit_frames()[0], scores, ["x", "c"])
     assert isinstance(result, SnapshotInputs)
     assert result.features == ("x", "c")
     assert result.y_score_train is not None

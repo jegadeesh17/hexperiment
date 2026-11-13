@@ -60,7 +60,9 @@ def read_stylesheet() -> bytes:
     except (OSError, ModuleNotFoundError) as error:
         raise HexInputError(
             f"the stylesheet gallery.css is missing from the install ({error}).",
-            "Reinstall the package: pip install --force-reinstall hexperiment.",
+            "Reinstall the package: pip install --force-reinstall "
+            '"hexperiment[mcp] @ git+https://github.com/jegadeesh17/hexperiment'
+            '#subdirectory=hexperiment".',
         ) from None
 
 
@@ -89,7 +91,9 @@ def read_fonts() -> tuple[tuple[str, bytes], ...]:
     except (OSError, ModuleNotFoundError) as error:
         raise HexInputError(
             f"the fonts are missing from the install ({error}).",
-            "Reinstall the package: pip install --force-reinstall hexperiment.",
+            "Reinstall the package: pip install --force-reinstall "
+            '"hexperiment[mcp] @ git+https://github.com/jegadeesh17/hexperiment'
+            '#subdirectory=hexperiment".',
         ) from None
     return fonts
 

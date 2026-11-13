@@ -176,17 +176,35 @@ def test_metric_against_threshold():
     metric = sections(render(make_verdict(), []))["Metric"]
     assert "**roc_auc:** 0.8734" in metric
     assert "**Threshold:** 0.8000" in metric
-    assert "**Result:** passed" in metric
+    assert "**Threshold met:** yes" in metric
+    assert "**Result:**" not in metric
 
 
 def test_failed_metric_and_missing_metric_value():
     failed = MetricResult("roc_auc", 0.7, 0.8, False)
     metric = sections(render(make_verdict(metric=failed), []))["Metric"]
-    assert "**Result:** failed" in metric
+    assert "**Threshold met:** no" in metric
     missing = MetricResult("roc_auc", None, 0.8, False)
     metric = sections(render(make_verdict(metric=missing), []))["Metric"]
     assert "not computed" in metric
-    assert "**Result:** failed" in metric
+    assert "**Threshold met:** no" in metric
+
+
+def test_a_passed_check_with_a_warning_finding_reads_passed_with_warnings():
+    warning = make_finding(Severity.WARNING, "split_order", None, "train.py:14")
+    rows = tables(sections(render(make_verdict(findings=(warning,)), []))["Checks"])[0]
+    assert ["split_order", "-", "passed, with warnings"] in rows
+    assert ["row_overlap", "The Doppelganger", "passed"] in rows
+    assert ["canary", "The Peeking Spirit", "failed"] in rows
+
+
+def test_the_largest_change_key_is_labelled_in_the_findings_table():
+    finding = make_finding(evidence={"rows_changed": 2, "largest_change": 0.5})
+    card = render(make_verdict(findings=(finding,)), [])
+    evidence = tables(sections(card)["Findings"])[0][1][4]
+    assert "largest change in a training prediction" in evidence
+    assert "largest_change" not in evidence
+    assert finding.evidence["largest_change"] == 0.5
 
 
 def test_checks_table_lists_ghost_and_outcome():

@@ -19,7 +19,7 @@ Use it when any of these is true:
 
 ## Setup
 
-1. Install: `pip install "hexperiment[mcp]"`. The `mcp` extra is needed only for the MCP server.
+1. Install: `pip install "hexperiment[mcp] @ git+https://github.com/jegadeesh17/hexperiment#subdirectory=hexperiment"`. The `mcp` extra is needed only for the MCP server.
 2. Start an app: `hexperiment init apps/<name>`. It writes a commented `hex.toml` and a `train.py` that follows the rules below. It never overwrites a file and lists what it created and skipped.
 3. Add the Kiro files to the project: `hexperiment init --kiro`. It writes the save hook, the `exorcise` workflow, the `ghost-hunter` agent and the steering file into `.kiro/`.
 4. Put the data at the `data.path` of `hex.toml` and edit the lines marked `CHANGE`.

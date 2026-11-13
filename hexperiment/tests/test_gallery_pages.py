@@ -851,7 +851,10 @@ def test_description_paragraph_is_left_out_when_empty():
 
 
 def test_the_note_is_shown_only_when_every_honest_score_is_lower():
-    note = "The honest score is lower. That is the point"
+    note = (
+        "The honest score is lower. That is the point: it is an honest estimate "
+        "of how the model will do on new data."
+    )
     assert note in landing()
     higher = make_source("x", runs=[rejected(0.7), approved(0.9)])
     assert note not in landing(hotel_source(), higher)

@@ -21,7 +21,7 @@ from hexperiment.hook_event import (
 
 # The real event: a flat object; the path is absolute with backslashes and a
 # lower-case drive letter, while cwd has an upper-case one.
-REAL_CWD = "C:\\Users\\jegad\\projects\\KiroweenHackathonSubmission"
+REAL_CWD = "C:\\work\\project"
 REAL_PATH = REAL_CWD.replace("C:", "c:", 1) + "\\apps\\churn\\train.py"
 REAL_EVENT = {
     "session_id": "sess_01HZ",

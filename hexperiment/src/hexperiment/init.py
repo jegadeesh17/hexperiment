@@ -128,15 +128,15 @@ def _mcp_notes(target: Path, template: bytes) -> tuple[str, ...]:
         return (
             "",
             f"{_MCP_PATH} is not valid JSON ({error}), so it was left alone. Fix it, "
-            f"then add this to its \"mcpServers\":\n{entry}",
+            f'then add this to its "mcpServers":\n{entry}',
         )
     servers = settings.get("mcpServers") if isinstance(settings, dict) else None
     if isinstance(servers, dict) and "hexperiment" in servers:
         return ()
     return (
         "",
-        f"{_MCP_PATH} has no \"hexperiment\" server, so it was left alone. Add this "
-        f"to its \"mcpServers\" so that Kiro starts hexperiment-mcp in this "
+        f'{_MCP_PATH} has no "hexperiment" server, so it was left alone. Add this '
+        f'to its "mcpServers" so that Kiro starts hexperiment-mcp in this '
         f"project:\n{entry}",
     )
 
@@ -169,7 +169,9 @@ def _read_template(item: TemplateFile) -> bytes:
         raise HexInputError(
             f"the template {item.source} is missing from the installed hexperiment "
             "package.",
-            'Reinstall the package: pip install --force-reinstall "hexperiment".',
+            "Reinstall the package: pip install --force-reinstall "
+            '"hexperiment[mcp] @ git+https://github.com/jegadeesh17/hexperiment'
+            '#subdirectory=hexperiment".',
         ) from None
 
 

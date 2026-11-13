@@ -40,7 +40,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     commands = parser.add_subparsers(dest="command", required=True)
     run = commands.add_parser(
-        "run", help="run an app's train.py and write its verdict and model card"
+        "run",
+        help="run an app's train.py and write its verdict and model card",
+        description=(
+            "Run the app's train.py under the audit and write a verdict, a model "
+            "card and a run record. Full mode also runs the canary test."
+        ),
+        epilog=(
+            "exit codes:\n"
+            "  0  APPROVED\n"
+            "  1  REJECTED, or a problem with the input found by the audit\n"
+            "  2  the run could not finish (timeout, crash, a held lock, or an "
+            "app folder or hex.toml that cannot be used)\n"
+            "  3  UNVERIFIED (fast mode or a check could not run)"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     run.add_argument("app_dir", help="folder with hex.toml and train.py")
     mode = run.add_mutually_exclusive_group()

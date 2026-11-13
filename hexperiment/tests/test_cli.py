@@ -480,9 +480,7 @@ def test_an_unexpected_exception_returns_2_with_the_type_and_a_traceback(
     assert not (app / "runs").exists()
 
 
-def test_an_unexpected_exception_while_running_returns_2(
-    tmp_path, monkeypatch, capsys
-):
+def test_an_unexpected_exception_while_running_returns_2(tmp_path, monkeypatch, capsys):
     app = make_app(tmp_path)
 
     def explode(*args, **kwargs):
@@ -1133,3 +1131,21 @@ def test_the_hook_passes_on_the_refusal_of_a_held_lock_and_exits_0(
     assert lines[-1] == HOOK_NOTICE
     assert runner.calls == []
     assert not (app / "runs").exists()
+
+
+def test_run_help_describes_the_command_and_lists_the_four_exit_codes(capsys):
+    with pytest.raises(SystemExit) as stop:
+        main(["run", "--help"])
+    assert stop.value.code == 0
+    text = capsys.readouterr().out
+    assert "Run the app's train.py under the audit" in text
+    assert "Full mode also runs the canary test." in text
+    codes = {
+        EXIT_APPROVED: "APPROVED",
+        EXIT_REJECTED: "REJECTED",
+        EXIT_RUN_FAILED: "the run could not finish",
+        EXIT_UNVERIFIED: "UNVERIFIED",
+    }
+    for code, meaning in codes.items():
+        line = next(ln for ln in text.splitlines() if ln.startswith(f"  {code}  "))
+        assert meaning in line

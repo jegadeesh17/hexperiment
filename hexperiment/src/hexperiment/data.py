@@ -418,7 +418,8 @@ def _read_csv(directory: Path, relative: str) -> pd.DataFrame:
     except FileNotFoundError:
         raise HexInputError(
             f'data.path "{relative}" does not exist (looked at {path}).',
-            "Run fetch_data.py or correct [data] path in hex.toml.",
+            "Put the data file at that path, or correct [data] path in hex.toml "
+            "(an app made by hexperiment init reads data/dataset.csv).",
         ) from None
     except pd.errors.EmptyDataError:
         raise HexInputError(

@@ -16,7 +16,9 @@ SDK_MODULES = frozenset({"mcp", "anyio"})
 EXIT_FAILED = 2
 MISSING_SDK_MESSAGE = (
     "hexperiment-mcp: the MCP SDK is not installed. "
-    'Install it with: pip install "hexperiment[mcp]"'
+    "Install it with: pip install "
+    '"hexperiment[mcp] @ git+https://github.com/jegadeesh17/hexperiment'
+    '#subdirectory=hexperiment"'
 )
 
 

@@ -87,8 +87,8 @@ _CASES_LEDE = (
     "run and every finding."
 )
 _CASES_NOTE = (
-    "The honest score is lower. That is the point: it is the score the model "
-    "will really get once it meets new data."
+    "The honest score is lower. That is the point: it is an honest estimate of "
+    "how the model will do on new data."
 )
 _KIRO_TITLE = "It lives inside Kiro."
 _KIRO_LEDE = (

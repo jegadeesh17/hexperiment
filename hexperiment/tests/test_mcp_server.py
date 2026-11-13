@@ -471,7 +471,10 @@ def test_main_explains_a_missing_sdk_and_exits_with_code_2(monkeypatch, capsys):
     assert caught.value.code == 2
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert 'pip install "hexperiment[mcp]"' in captured.err
+    assert 'pip install "hexperiment[mcp] @ git+https://github.com/jegadeesh17/' in (
+        captured.err
+    )
+    assert "#subdirectory=hexperiment" in captured.err
 
 
 def test_main_reports_an_invalid_workspace_and_exits_with_code_2(
