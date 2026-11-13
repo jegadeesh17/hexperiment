@@ -2,39 +2,57 @@
 
 from __future__ import annotations
 
+import re
 import socket
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from conftest import APPS_DIR
 
 REPO_ROOT = APPS_DIR.parent
-MCP_TESTS = "hexperiment/tests/test_mcp_server.py"
-MCP_TEST = "test_the_server_has_exactly_the_five_tools"
 OTHER_APPS_TEST = "apps/tests/test_hex_toml.py"
 
+# One test that opens a listening socket on the loopback address and connects a
+# second socket to it. It goes through ``socket.socket.connect`` on every operating
+# system, and it never leaves the machine.
+PROBE = """\
+import socket
 
-def test_the_guard_does_not_reach_tests_outside_the_apps_folder() -> None:
-    # The child run takes the root folder from the first argument (the kit), so the
-    # apps conftest lies outside it, as in a run of both folders. It runs one MCP
-    # test, which opens only asyncio's loopback socket pair (no outside network).
-    # ``-k`` deselects every test of the apps file, so this test is not collected
-    # again and cannot recurse. ``-n0`` is used because ``-p no:xdist`` would make
-    # the kit's ``-n`` option an error.
+
+def test_probe() -> None:
+    with socket.socket() as server, socket.socket() as client:
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        client.connect(server.getsockname())
+"""
+
+
+def test_the_guard_does_not_reach_tests_outside_the_apps_folder(tmp_path: Path) -> None:
+    # The probe folder has its own pytest configuration, so the child run takes it
+    # as its root folder, and the apps conftest lies outside that root (the same
+    # situation as a run of both test folders). If the guard ignored the scope, it
+    # would patch ``connect`` for the probe and the probe would fail. ``-k``
+    # deselects the apps file's tests, so the guard tests are not run again and
+    # cannot recurse.
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.pytest.ini_options]\n", encoding="utf-8"
+    )
+    probe = tmp_path / "test_probe.py"
+    probe.write_text(PROBE, encoding="utf-8")
     result = subprocess.run(
         [
             sys.executable,
             "-m",
             "pytest",
             "-q",
-            "-n0",
             "-p",
             "no:cacheprovider",
-            "-k",
-            MCP_TEST,
-            MCP_TESTS,
+            str(probe),
             OTHER_APPS_TEST,
+            "-k",
+            "test_probe",
         ],
         cwd=REPO_ROOT,
         capture_output=True,
@@ -45,7 +63,7 @@ def test_the_guard_does_not_reach_tests_outside_the_apps_folder() -> None:
     output = result.stdout + result.stderr
     assert "a test tried to use the network" not in output, output
     assert result.returncode == 0, output
-    assert "1 passed" in output, output
+    assert re.search(r"\b1 passed\b", output), output
 
 
 def test_a_connection_attempt_in_an_apps_test_is_refused() -> None:
