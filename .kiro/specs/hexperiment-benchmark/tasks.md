@@ -123,7 +123,7 @@
   - Tests added: none.
   - Verify: the four `--only` commands finish with exit code 0 and no `ERROR` line caused by a script of the benchmark; then the two full commands.
 
-- [ ] 13. Smoke runs, group C: the feature mechanisms
+- [x] 13. Smoke runs, group C: the feature mechanisms
   - **The builder does this task by running commands in a terminal; nothing goes into the test suite.** Mechanisms: `post-outcome-copy`, `noisy-proxy`, `weak-proxy`.
   - Run, for each key: `.venv/Scripts/python hexperiment/benchmark/run_benchmark.py --only <key> --out $env:TEMP\smoke-<key>.json`. Look for crashes, scripts that do not do what the mechanism says, and `NO EFFECT`. The data tests of task 5 already fix the stand-alone AUC of the two proxies (at least 0.97, and between 0.86 and 0.92); a repair must not move either outside its range (Requirement 1.1).
   - **Allowed fixes** (copied from "Build order", step 4): a crash; a script that does not implement its mechanism; a leak that does not move the score (change the data parameter or the leak, with the reason noted in the commit message).
@@ -133,7 +133,7 @@
   - Tests added: none.
   - Verify: the three `--only` commands finish with exit code 0 and no `ERROR` line caused by a script of the benchmark; then the two full commands.
 
-- [ ] 14. Smoke runs, group D: the temporal mechanisms
+- [x] 14. Smoke runs, group D: the temporal mechanisms
   - **The builder does this task by running commands in a terminal; nothing goes into the test suite.** Mechanisms: `random-split-in-script`, `time-column-undeclared`.
   - Run, for each key: `.venv/Scripts/python hexperiment/benchmark/run_benchmark.py --only <key> --out $env:TEMP\smoke-<key>.json`. Look for crashes, scripts that do not do what the mechanism says (the leaky app of `random-split-in-script` must split with `train_test_split`; the leaky app of `time-column-undeclared` must differ from its twin in `hex.toml` only), and `NO EFFECT`. Also check that the clean twins pass the metric gate of 0.55 (a clean twin that is `REJECTED` by `metric` or a data crash is a defect of the data parameters; a clean twin rejected by a ghost is a result).
   - **Allowed fixes** (copied from "Build order", step 4): a crash; a script that does not implement its mechanism; a leak that does not move the score (change the data parameter or the leak, with the reason noted in the commit message).
@@ -143,7 +143,7 @@
   - Tests added: none.
   - Verify: the two `--only` commands finish with exit code 0 and no `ERROR` line caused by a script of the benchmark; then the two full commands.
 
-- [ ] 15. Smoke runs, group E: the entity mechanism
+- [x] 15. Smoke runs, group E: the entity mechanism
   - **The builder does this task by running commands in a terminal; nothing goes into the test suite.** Mechanism: `entity-leak`.
   - Run: `.venv/Scripts/python hexperiment/benchmark/run_benchmark.py --only entity-leak --out $env:TEMP\smoke-entity-leak.json`. Look for crashes, a script that does not do what the mechanism says, and `NO EFFECT`. Remember the caveat of Open question 4: the clean twin scores a different test set (single-row entities only), so a score pair that differs is expected and is not a repair target by itself; only equal scores to four decimals are `NO EFFECT`. Check that the clean twin keeps enough test rows for a score (a clean twin with an empty or one-class test set is a data defect).
   - **Allowed fixes** (copied from "Build order", step 4): a crash; a script that does not implement its mechanism; a leak that does not move the score (change the data parameter or the leak, with the reason noted in the commit message).
@@ -153,7 +153,7 @@
   - Tests added: none.
   - Verify: the `--only` command finishes with exit code 0 and no `ERROR` line caused by a script of the benchmark; then the two full commands.
 
-- [ ] 16. Smoke-run report and freeze
+- [x] 16. Smoke-run report and freeze
   - Make no new change unless a rerun is needed. Write the report for the owner, in the task report and nowhere else (no file, no README text): for each of the 13 mechanisms the six smoke lines as printed, so the owner can see them before the complete run; the list of every fix made in tasks 11 to 15, each with its case id, reason and commit; every case that is still `NO EFFECT` or `ERROR`, with what is known; every run over 30 seconds; and the slowest case.
   - State plainly that the smoke runs are observations made before the freeze and are **not** the benchmark's result. They are not written to `results.json` or to the README.
   - Confirm `git status` shows no `results.json`, no `smoke-*.json` and no change under `hexperiment/src/hexperiment/` or `apps/`.
