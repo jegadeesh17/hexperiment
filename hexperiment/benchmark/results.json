@@ -1,0 +1,1354 @@
+{
+  "format": "hexperiment-benchmark/1",
+  "created_at": "2026-11-13T09:17:59Z",
+  "complete": true,
+  "only": null,
+  "environment": {
+    "hexperiment": "0.1.0",
+    "python": "3.13.2",
+    "numpy": "2.5.4",
+    "pandas": "3.1.1",
+    "scikit-learn": "1.9.1",
+    "os": "Windows-11-10.0.26340-SP0",
+    "cpu_count": 8,
+    "run_seconds": 2180.2
+  },
+  "source": "Kapoor and Narayanan, Leakage and the reproducibility crisis in machine-learning-based science, Patterns 4(9), 100804, 2023, doi:10.1016/j.patter.2023.100804",
+  "mechanisms": [
+    {
+      "key": "no-test-set",
+      "leak_type": "L1.1",
+      "leak_type_name": "No test set",
+      "mechanism": "The model is scored on the rows it was trained on.",
+      "designed_to_catch": [
+        "The Doppelganger"
+      ],
+      "scripts": 3,
+      "rejected": 3,
+      "by_ghost": {
+        "The Doppelganger": 3
+      },
+      "statuses": {
+        "APPROVED": 0,
+        "REJECTED": 3,
+        "UNVERIFIED": 0,
+        "ERROR": 0
+      },
+      "mean_score_leaky": 0.9182,
+      "mean_score_clean": 0.712
+    },
+    {
+      "key": "scaler-all-rows",
+      "leak_type": "L1.2",
+      "leak_type_name": "Pre-processing on training and test set",
+      "mechanism": "A standard scaler is fitted on all rows before the split.",
+      "designed_to_catch": [
+        "The Peeking Spirit"
+      ],
+      "scripts": 3,
+      "rejected": 3,
+      "by_ghost": {
+        "The Peeking Spirit": 3
+      },
+      "statuses": {
+        "APPROVED": 0,
+        "REJECTED": 3,
+        "UNVERIFIED": 0,
+        "ERROR": 0
+      },
+      "mean_score_leaky": 0.7389,
+      "mean_score_clean": 0.7418
+    },
+    {
+      "key": "imputer-all-rows",
+      "leak_type": "L1.2",
+      "leak_type_name": "Pre-processing on training and test set",
+      "mechanism": "A mean imputer is fitted on all rows before the split.",
+      "designed_to_catch": [
+        "The Peeking Spirit"
+      ],
+      "scripts": 3,
+      "rejected": 3,
+      "by_ghost": {
+        "The Peeking Spirit": 3
+      },
+      "statuses": {
+        "APPROVED": 0,
+        "REJECTED": 3,
+        "UNVERIFIED": 0,
+        "ERROR": 0
+      },
+      "mean_score_leaky": 0.6763,
+      "mean_score_clean": 0.6784
+    },
+    {
+      "key": "oversample-before-split",
+      "leak_type": "L1.2",
+      "leak_type_name": "Pre-processing on training and test set",
+      "mechanism": "The rare class is randomly over-sampled before the split.",
+      "designed_to_catch": [
+        "The Doppelganger"
+      ],
+      "scripts": 3,
+      "rejected": 3,
+      "by_ghost": {
+        "The Doppelganger": 3
+      },
+      "statuses": {
+        "APPROVED": 0,
+        "REJECTED": 3,
+        "UNVERIFIED": 0,
+        "ERROR": 0
+      },
+      "mean_score_leaky": 0.9296,
+      "mean_score_clean": 0.7742
+    },
+    {
+      "key": "target-encoding-all-rows",
+      "leak_type": "L1.2",
+      "leak_type_name": "Pre-processing on training and test set",
+      "mechanism": "A category's mean label is computed from all rows and used as a feature.",
+      "designed_to_catch": [
+        "The Peeking Spirit"
+      ],
+      "scripts": 3,
+      "rejected": 3,
+      "by_ghost": {
+        "The Peeking Spirit": 3
+      },
+      "statuses": {
+        "APPROVED": 0,
+        "REJECTED": 3,
+        "UNVERIFIED": 0,
+        "ERROR": 0
+      },
+      "mean_score_leaky": 0.8292,
+      "mean_score_clean": 0.6663
+    },
+    {
+      "key": "univariate-selection-all-rows",
+      "leak_type": "L1.3",
+      "leak_type_name": "Feature selection on training and test set",
+      "mechanism": "The 15 best columns are chosen with the labels of all rows before the split.",
+      "designed_to_catch": [
+        "The Peeking Spirit"
+      ],
+      "scripts": 3,
+      "rejected": 3,
+      "by_ghost": {
+        "The Peeking Spirit": 3
+      },
+      "statuses": {
+        "APPROVED": 0,
+        "REJECTED": 3,
+        "UNVERIFIED": 0,
+        "ERROR": 0
+      },
+      "mean_score_leaky": 0.5947,
+      "mean_score_clean": 0.5564
+    },
+    {
+      "key": "duplicated-rows",
+      "leak_type": "L1.4",
+      "leak_type_name": "Duplicates in datasets",
+      "mechanism": "Part of the rows appear twice in the source file, and the split is random.",
+      "designed_to_catch": [
+        "The Doppelganger"
+      ],
+      "scripts": 3,
+      "rejected": 3,
+      "by_ghost": {
+        "The Doppelganger": 3
+      },
+      "statuses": {
+        "APPROVED": 0,
+        "REJECTED": 3,
+        "UNVERIFIED": 0,
+        "ERROR": 0
+      },
+      "mean_score_leaky": 0.8492,
+      "mean_score_clean": 0.7362
+    },
+    {
+      "key": "post-outcome-copy",
+      "leak_type": "L2",
+      "leak_type_name": "Model uses features that are not legitimate",
+      "mechanism": "A column recorded after the outcome copies the label.",
+      "designed_to_catch": [
+        "The Possession"
+      ],
+      "scripts": 3,
+      "rejected": 3,
+      "by_ghost": {
+        "The Possession": 3
+      },
+      "statuses": {
+        "APPROVED": 0,
+        "REJECTED": 3,
+        "UNVERIFIED": 0,
+        "ERROR": 0
+      },
+      "mean_score_leaky": 1.0,
+      "mean_score_clean": 0.7292
+    },
+    {
+      "key": "noisy-proxy",
+      "leak_type": "L2",
+      "leak_type_name": "Model uses features that are not legitimate",
+      "mechanism": "A noisy measurement of the label is used as a feature.",
+      "designed_to_catch": [
+        "The Possession"
+      ],
+      "scripts": 3,
+      "rejected": 3,
+      "by_ghost": {
+        "The Possession": 3
+      },
+      "statuses": {
+        "APPROVED": 0,
+        "REJECTED": 3,
+        "UNVERIFIED": 0,
+        "ERROR": 0
+      },
+      "mean_score_leaky": 0.9874,
+      "mean_score_clean": 0.7345
+    },
+    {
+      "key": "weak-proxy",
+      "leak_type": "L2",
+      "leak_type_name": "Model uses features that are not legitimate",
+      "mechanism": "A weaker proxy of the label (stand-alone AUC about 0.89) is used as a feature.",
+      "designed_to_catch": [],
+      "scripts": 3,
+      "rejected": 0,
+      "by_ghost": {},
+      "statuses": {
+        "APPROVED": 3,
+        "REJECTED": 0,
+        "UNVERIFIED": 0,
+        "ERROR": 0
+      },
+      "mean_score_leaky": 0.9062,
+      "mean_score_clean": 0.7443
+    },
+    {
+      "key": "random-split-in-script",
+      "leak_type": "L3.1",
+      "leak_type_name": "Temporal leakage",
+      "mechanism": "Time-ordered data is split at random by the script instead of with `hexperiment.split`.",
+      "designed_to_catch": [
+        "The Prophet"
+      ],
+      "scripts": 3,
+      "rejected": 3,
+      "by_ghost": {
+        "The Prophet": 3
+      },
+      "statuses": {
+        "APPROVED": 0,
+        "REJECTED": 3,
+        "UNVERIFIED": 0,
+        "ERROR": 0
+      },
+      "mean_score_leaky": 0.7978,
+      "mean_score_clean": 0.7273
+    },
+    {
+      "key": "time-column-undeclared",
+      "leak_type": "L3.1",
+      "leak_type_name": "Temporal leakage",
+      "mechanism": "The time column is not declared in `hex.toml`, so `hexperiment.split` splits at random.",
+      "designed_to_catch": [
+        "The Prophet"
+      ],
+      "scripts": 3,
+      "rejected": 0,
+      "by_ghost": {},
+      "statuses": {
+        "APPROVED": 3,
+        "REJECTED": 0,
+        "UNVERIFIED": 0,
+        "ERROR": 0
+      },
+      "mean_score_leaky": 0.8234,
+      "mean_score_clean": 0.7227
+    },
+    {
+      "key": "entity-leak",
+      "leak_type": "L3.2",
+      "leak_type_name": "Nonindependence between training and test samples",
+      "mechanism": "Several rows of one entity, each differing by small noise, are split at random.",
+      "designed_to_catch": [],
+      "scripts": 3,
+      "rejected": 0,
+      "by_ghost": {},
+      "statuses": {
+        "APPROVED": 3,
+        "REJECTED": 0,
+        "UNVERIFIED": 0,
+        "ERROR": 0
+      },
+      "mean_score_leaky": 0.8386,
+      "mean_score_clean": 0.7788
+    }
+  ],
+  "clean": {
+    "scripts": 39,
+    "false_alarms": 0,
+    "by_ghost": {},
+    "statuses": {
+      "APPROVED": 39,
+      "REJECTED": 0,
+      "UNVERIFIED": 0,
+      "ERROR": 0
+    }
+  },
+  "not_measured": [
+    {
+      "leak_type": "L3.3",
+      "leak_type_name": "Sampling bias in test distribution",
+      "reason": "It depends on the population a claim is about, which neither the code nor the data shows."
+    }
+  ],
+  "cases": [
+    {
+      "id": "no-test-set-lr",
+      "mechanism": "no-test-set",
+      "model": "lr",
+      "data_seed": 1010,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 0.7545172618329725,
+        "ghosts": [
+          "The Doppelganger"
+        ],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 23.7,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.7207742914979758,
+        "ghosts": [],
+        "warnings": [],
+        "seconds": 27.0,
+        "message": null
+      }
+    },
+    {
+      "id": "no-test-set-rf",
+      "mechanism": "no-test-set",
+      "model": "rf",
+      "data_seed": 1011,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 1.0,
+        "ghosts": [
+          "The Doppelganger"
+        ],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 31.9,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.7154793594456414,
+        "ghosts": [],
+        "warnings": [],
+        "seconds": 31.8,
+        "message": null
+      }
+    },
+    {
+      "id": "no-test-set-hgb",
+      "mechanism": "no-test-set",
+      "model": "hgb",
+      "data_seed": 1012,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 1.0,
+        "ghosts": [
+          "The Doppelganger"
+        ],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 27.7,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.6998703065194698,
+        "ghosts": [],
+        "warnings": [],
+        "seconds": 28.0,
+        "message": null
+      }
+    },
+    {
+      "id": "scaler-all-rows-lr",
+      "mechanism": "scaler-all-rows",
+      "model": "lr",
+      "data_seed": 1020,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 0.7476901885992795,
+        "ghosts": [
+          "The Peeking Spirit"
+        ],
+        "warnings": [
+          "split_order"
+        ],
+        "seconds": 33.9,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.7474147065056156,
+        "ghosts": [],
+        "warnings": [
+          "split_order"
+        ],
+        "seconds": 24.0,
+        "message": null
+      }
+    },
+    {
+      "id": "scaler-all-rows-rf",
+      "mechanism": "scaler-all-rows",
+      "model": "rf",
+      "data_seed": 1021,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 0.7551714321862347,
+        "ghosts": [
+          "The Peeking Spirit"
+        ],
+        "warnings": [
+          "metric",
+          "split_order"
+        ],
+        "seconds": 43.5,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.7568003542510121,
+        "ghosts": [],
+        "warnings": [
+          "metric",
+          "split_order"
+        ],
+        "seconds": 28.5,
+        "message": null
+      }
+    },
+    {
+      "id": "scaler-all-rows-hgb",
+      "mechanism": "scaler-all-rows",
+      "model": "hgb",
+      "data_seed": 1022,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 0.7137314848980023,
+        "ghosts": [
+          "The Peeking Spirit"
+        ],
+        "warnings": [
+          "split_order"
+        ],
+        "seconds": 36.6,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.7212060513415213,
+        "ghosts": [],
+        "warnings": [
+          "split_order"
+        ],
+        "seconds": 24.9,
+        "message": null
+      }
+    },
+    {
+      "id": "imputer-all-rows-lr",
+      "mechanism": "imputer-all-rows",
+      "model": "lr",
+      "data_seed": 1030,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 0.6826359303159404,
+        "ghosts": [
+          "The Peeking Spirit"
+        ],
+        "warnings": [
+          "split_order"
+        ],
+        "seconds": 32.8,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.6827835660353482,
+        "ghosts": [],
+        "warnings": [],
+        "seconds": 22.6,
+        "message": null
+      }
+    },
+    {
+      "id": "imputer-all-rows-rf",
+      "mechanism": "imputer-all-rows",
+      "model": "rf",
+      "data_seed": 1031,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 0.6849647545481408,
+        "ghosts": [
+          "The Peeking Spirit"
+        ],
+        "warnings": [
+          "split_order"
+        ],
+        "seconds": 38.2,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.688331011776624,
+        "ghosts": [],
+        "warnings": [],
+        "seconds": 27.1,
+        "message": null
+      }
+    },
+    {
+      "id": "imputer-all-rows-hgb",
+      "mechanism": "imputer-all-rows",
+      "model": "hgb",
+      "data_seed": 1032,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 0.661196472886636,
+        "ghosts": [
+          "The Peeking Spirit"
+        ],
+        "warnings": [
+          "split_order"
+        ],
+        "seconds": 37.1,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.6641005332910925,
+        "ghosts": [],
+        "warnings": [],
+        "seconds": 25.2,
+        "message": null
+      }
+    },
+    {
+      "id": "oversample-before-split-lr",
+      "mechanism": "oversample-before-split",
+      "model": "lr",
+      "data_seed": 1040,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 0.7901182432432432,
+        "ghosts": [
+          "The Doppelganger"
+        ],
+        "warnings": [
+          "canary",
+          "metric"
+        ],
+        "seconds": 23.0,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.7904299052396879,
+        "ghosts": [],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 23.3,
+        "message": null
+      }
+    },
+    {
+      "id": "oversample-before-split-rf",
+      "mechanism": "oversample-before-split",
+      "model": "rf",
+      "data_seed": 1041,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 1.0,
+        "ghosts": [
+          "The Doppelganger"
+        ],
+        "warnings": [
+          "canary",
+          "metric"
+        ],
+        "seconds": 33.3,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.7543852179836512,
+        "ghosts": [],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 29.1,
+        "message": null
+      }
+    },
+    {
+      "id": "oversample-before-split-hgb",
+      "mechanism": "oversample-before-split",
+      "model": "hgb",
+      "data_seed": 1042,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 0.9986765691311146,
+        "ghosts": [
+          "The Doppelganger"
+        ],
+        "warnings": [
+          "canary",
+          "metric"
+        ],
+        "seconds": 25.0,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.7778305332359386,
+        "ghosts": [],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 24.3,
+        "message": null
+      }
+    },
+    {
+      "id": "target-encoding-all-rows-lr",
+      "mechanism": "target-encoding-all-rows",
+      "model": "lr",
+      "data_seed": 1050,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 0.8325632911392404,
+        "ghosts": [
+          "The Peeking Spirit"
+        ],
+        "warnings": [
+          "metric",
+          "split_order"
+        ],
+        "seconds": 29.5,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.6696413502109704,
+        "ghosts": [],
+        "warnings": [],
+        "seconds": 21.1,
+        "message": null
+      }
+    },
+    {
+      "id": "target-encoding-all-rows-rf",
+      "mechanism": "target-encoding-all-rows",
+      "model": "rf",
+      "data_seed": 1051,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 0.8540366439621944,
+        "ghosts": [
+          "The Peeking Spirit"
+        ],
+        "warnings": [
+          "metric",
+          "split_order"
+        ],
+        "seconds": 36.1,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.6904324409947726,
+        "ghosts": [],
+        "warnings": [],
+        "seconds": 25.4,
+        "message": null
+      }
+    },
+    {
+      "id": "target-encoding-all-rows-hgb",
+      "mechanism": "target-encoding-all-rows",
+      "model": "hgb",
+      "data_seed": 1052,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 0.8010297205195024,
+        "ghosts": [
+          "The Peeking Spirit"
+        ],
+        "warnings": [
+          "metric",
+          "split_order"
+        ],
+        "seconds": 33.0,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.6386904824704852,
+        "ghosts": [],
+        "warnings": [],
+        "seconds": 23.9,
+        "message": null
+      }
+    },
+    {
+      "id": "univariate-selection-all-rows-lr",
+      "mechanism": "univariate-selection-all-rows",
+      "model": "lr",
+      "data_seed": 1060,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 0.6240157480314961,
+        "ghosts": [
+          "The Peeking Spirit"
+        ],
+        "warnings": [
+          "split_order"
+        ],
+        "seconds": 32.8,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.5681832613665228,
+        "ghosts": [],
+        "warnings": [],
+        "seconds": 23.7,
+        "message": null
+      }
+    },
+    {
+      "id": "univariate-selection-all-rows-rf",
+      "mechanism": "univariate-selection-all-rows",
+      "model": "rf",
+      "data_seed": 1061,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 0.5744886941056911,
+        "ghosts": [
+          "The Peeking Spirit"
+        ],
+        "warnings": [
+          "split_order"
+        ],
+        "seconds": 38.0,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.537935086382114,
+        "ghosts": [],
+        "warnings": [],
+        "seconds": 27.0,
+        "message": null
+      }
+    },
+    {
+      "id": "univariate-selection-all-rows-hgb",
+      "mechanism": "univariate-selection-all-rows",
+      "model": "hgb",
+      "data_seed": 1062,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 0.5855179028132993,
+        "ghosts": [
+          "The Peeking Spirit"
+        ],
+        "warnings": [
+          "split_order"
+        ],
+        "seconds": 35.4,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.5631393861892583,
+        "ghosts": [],
+        "warnings": [],
+        "seconds": 25.5,
+        "message": null
+      }
+    },
+    {
+      "id": "duplicated-rows-lr",
+      "mechanism": "duplicated-rows",
+      "model": "lr",
+      "data_seed": 1070,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 0.7555094053276887,
+        "ghosts": [
+          "The Doppelganger"
+        ],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 21.4,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.7715459015507646,
+        "ghosts": [],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 22.2,
+        "message": null
+      }
+    },
+    {
+      "id": "duplicated-rows-rf",
+      "mechanism": "duplicated-rows",
+      "model": "rf",
+      "data_seed": 1071,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 0.92200677229747,
+        "ghosts": [
+          "The Doppelganger"
+        ],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 28.8,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.7540964480165933,
+        "ghosts": [],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 29.0,
+        "message": null
+      }
+    },
+    {
+      "id": "duplicated-rows-hgb",
+      "mechanism": "duplicated-rows",
+      "model": "hgb",
+      "data_seed": 1072,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 0.8700987441280797,
+        "ghosts": [
+          "The Doppelganger"
+        ],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 25.0,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.6828595317725752,
+        "ghosts": [],
+        "warnings": [],
+        "seconds": 24.8,
+        "message": null
+      }
+    },
+    {
+      "id": "post-outcome-copy-lr",
+      "mechanism": "post-outcome-copy",
+      "model": "lr",
+      "data_seed": 1080,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 1.0,
+        "ghosts": [
+          "The Possession"
+        ],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 21.2,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.7497778718002961,
+        "ghosts": [],
+        "warnings": [],
+        "seconds": 21.0,
+        "message": null
+      }
+    },
+    {
+      "id": "post-outcome-copy-rf",
+      "mechanism": "post-outcome-copy",
+      "model": "rf",
+      "data_seed": 1081,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 1.0,
+        "ghosts": [
+          "The Possession"
+        ],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 24.6,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.7128887480859601,
+        "ghosts": [],
+        "warnings": [],
+        "seconds": 26.8,
+        "message": null
+      }
+    },
+    {
+      "id": "post-outcome-copy-hgb",
+      "mechanism": "post-outcome-copy",
+      "model": "hgb",
+      "data_seed": 1082,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 1.0,
+        "ghosts": [
+          "The Possession"
+        ],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 22.4,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.724957805907173,
+        "ghosts": [],
+        "warnings": [],
+        "seconds": 23.8,
+        "message": null
+      }
+    },
+    {
+      "id": "noisy-proxy-lr",
+      "mechanism": "noisy-proxy",
+      "model": "lr",
+      "data_seed": 1090,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 0.985620777027027,
+        "ghosts": [
+          "The Possession"
+        ],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 17.0,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.7262246621621622,
+        "ghosts": [],
+        "warnings": [],
+        "seconds": 23.8,
+        "message": null
+      }
+    },
+    {
+      "id": "noisy-proxy-rf",
+      "mechanism": "noisy-proxy",
+      "model": "rf",
+      "data_seed": 1091,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 0.986896384372725,
+        "ghosts": [
+          "The Possession"
+        ],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 30.6,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.7366721880505998,
+        "ghosts": [],
+        "warnings": [],
+        "seconds": 34.5,
+        "message": null
+      }
+    },
+    {
+      "id": "noisy-proxy-hgb",
+      "mechanism": "noisy-proxy",
+      "model": "hgb",
+      "data_seed": 1092,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 0.989579707852133,
+        "ghosts": [
+          "The Possession"
+        ],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 29.3,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.7406423034330013,
+        "ghosts": [],
+        "warnings": [],
+        "seconds": 25.6,
+        "message": null
+      }
+    },
+    {
+      "id": "weak-proxy-lr",
+      "mechanism": "weak-proxy",
+      "model": "lr",
+      "data_seed": 1100,
+      "leaky": {
+        "status": "APPROVED",
+        "score": 0.9324095620901206,
+        "ghosts": [],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 22.5,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.7646075735138567,
+        "ghosts": [],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 22.5,
+        "message": null
+      }
+    },
+    {
+      "id": "weak-proxy-rf",
+      "mechanism": "weak-proxy",
+      "model": "rf",
+      "data_seed": 1101,
+      "leaky": {
+        "status": "APPROVED",
+        "score": 0.8977690455064014,
+        "ghosts": [],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 32.3,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.7200373938395233,
+        "ghosts": [],
+        "warnings": [],
+        "seconds": 31.2,
+        "message": null
+      }
+    },
+    {
+      "id": "weak-proxy-hgb",
+      "mechanism": "weak-proxy",
+      "model": "hgb",
+      "data_seed": 1102,
+      "leaky": {
+        "status": "APPROVED",
+        "score": 0.888523067831666,
+        "ghosts": [],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 26.1,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.7481744122240513,
+        "ghosts": [],
+        "warnings": [],
+        "seconds": 27.4,
+        "message": null
+      }
+    },
+    {
+      "id": "random-split-in-script-lr",
+      "mechanism": "random-split-in-script",
+      "model": "lr",
+      "data_seed": 1110,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 0.7740410874920578,
+        "ghosts": [
+          "The Prophet"
+        ],
+        "warnings": [
+          "canary",
+          "metric"
+        ],
+        "seconds": 25.3,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.65041928721174,
+        "ghosts": [],
+        "warnings": [],
+        "seconds": 25.1,
+        "message": null
+      }
+    },
+    {
+      "id": "random-split-in-script-rf",
+      "mechanism": "random-split-in-script",
+      "model": "rf",
+      "data_seed": 1111,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 0.8192252989021734,
+        "ghosts": [
+          "The Prophet"
+        ],
+        "warnings": [
+          "canary",
+          "metric"
+        ],
+        "seconds": 30.7,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.7302298186344239,
+        "ghosts": [],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 27.6,
+        "message": null
+      }
+    },
+    {
+      "id": "random-split-in-script-hgb",
+      "mechanism": "random-split-in-script",
+      "model": "hgb",
+      "data_seed": 1112,
+      "leaky": {
+        "status": "REJECTED",
+        "score": 0.8000977788642096,
+        "ghosts": [
+          "The Prophet"
+        ],
+        "warnings": [
+          "canary",
+          "metric"
+        ],
+        "seconds": 24.9,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.8011912302341345,
+        "ghosts": [],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 24.3,
+        "message": null
+      }
+    },
+    {
+      "id": "time-column-undeclared-lr",
+      "mechanism": "time-column-undeclared",
+      "model": "lr",
+      "data_seed": 1120,
+      "leaky": {
+        "status": "APPROVED",
+        "score": 0.8279352654960863,
+        "ghosts": [],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 23.5,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.6167691298595903,
+        "ghosts": [],
+        "warnings": [],
+        "seconds": 22.4,
+        "message": null
+      }
+    },
+    {
+      "id": "time-column-undeclared-rf",
+      "mechanism": "time-column-undeclared",
+      "model": "rf",
+      "data_seed": 1121,
+      "leaky": {
+        "status": "APPROVED",
+        "score": 0.8254535864978902,
+        "ghosts": [],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 29.7,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.7565174372714032,
+        "ghosts": [],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 29.5,
+        "message": null
+      }
+    },
+    {
+      "id": "time-column-undeclared-hgb",
+      "mechanism": "time-column-undeclared",
+      "model": "hgb",
+      "data_seed": 1122,
+      "leaky": {
+        "status": "APPROVED",
+        "score": 0.8169317079343654,
+        "ghosts": [],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 24.9,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.794927794615796,
+        "ghosts": [],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 24.4,
+        "message": null
+      }
+    },
+    {
+      "id": "entity-leak-lr",
+      "mechanism": "entity-leak",
+      "model": "lr",
+      "data_seed": 1130,
+      "leaky": {
+        "status": "APPROVED",
+        "score": 0.7847915280550011,
+        "ghosts": [],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 24.9,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.7625504967791243,
+        "ghosts": [],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 24.9,
+        "message": null
+      }
+    },
+    {
+      "id": "entity-leak-rf",
+      "mechanism": "entity-leak",
+      "model": "rf",
+      "data_seed": 1131,
+      "leaky": {
+        "status": "APPROVED",
+        "score": 0.8552452347637536,
+        "ghosts": [],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 34.4,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.761203231292517,
+        "ghosts": [],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 34.6,
+        "message": null
+      }
+    },
+    {
+      "id": "entity-leak-hgb",
+      "mechanism": "entity-leak",
+      "model": "hgb",
+      "data_seed": 1132,
+      "leaky": {
+        "status": "APPROVED",
+        "score": 0.8757676655567886,
+        "ghosts": [],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 29.7,
+        "message": null
+      },
+      "clean": {
+        "status": "APPROVED",
+        "score": 0.8125225225225224,
+        "ghosts": [],
+        "warnings": [
+          "metric"
+        ],
+        "seconds": 28.8,
+        "message": null
+      }
+    }
+  ]
+}
