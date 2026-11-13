@@ -100,7 +100,7 @@
   - Tests added: none (the README is tested in task 18, with `results.json`).
   - Verify: confirm by eye that both marker lines are present exactly once and that the README mentions no score, count or date from a run; then the two full commands.
 
-- [ ] 11. Smoke runs, group A: the Doppelganger mechanisms
+- [x] 11. Smoke runs, group A: the Doppelganger mechanisms
   - **The builder does this task by running commands in a terminal.** These are not tests and nothing here goes into the test suite. Mechanisms: `no-test-set`, `duplicated-rows`, `oversample-before-split`.
   - For each key, run (PowerShell, from the repository root; the output file goes to a folder outside the repository and is deleted afterwards): `.venv/Scripts/python hexperiment/benchmark/run_benchmark.py --only <key> --out $env:TEMP\smoke-<key>.json`. Each run is 6 full runs of about 10 to 20 seconds each.
   - Look for three things only: a script that **crashes** (an `ERROR` line or a message from standard error); a script that **does not do what its mechanism says** (read the generated `train.py` against the mechanism's text in `design.md`); and a case that prints **`NO EFFECT`** (leaky and clean scores equal to four decimals). Also note any run over 30 seconds (Requirement 2.2).
