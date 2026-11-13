@@ -144,5 +144,12 @@
   - Run the whole suite (`.venv/Scripts/python -m pytest hexperiment/tests -q --durations=10`) and `.venv/Scripts/python -m ruff check hexperiment`; both must report no problems.
   - _Requirements: 9.1 to 9.6, 7_
 
+- [ ] 14a. A light entry point for the stop check
+  - Create `hexperiment/src/hexperiment/entry.py` as in `design.md` ("A light entry point"), move `stop_command`, `read_event_text` and `MAX_EVENT_BYTES` into `hook.py` as described there, make `cli._stop_command` and `cli._read_event_text` call them, and change the `hexperiment` console script in `hexperiment/pyproject.toml` to `hexperiment.entry:main`. `hexperiment-mcp` is unchanged.
+  - Tests: `entry.main(["hook", "--stop"])` calls `hook.stop_command` and does not import `hexperiment.cli` (check `sys.modules` in a subprocess); every other argument list is passed to `cli.main` unchanged (stub it); a subprocess that runs `entry.main(["hook", "--stop"])` with a Stop event on standard input for a workspace in `tmp_path` exits `0` with no output and has loaded none of `pandas`, `numpy`, `sklearn`; the same with an app whose `.hex/agent-session` holds the event's id and whose `verdict.json` is `UNVERIFIED` exits `1` with the message on standard error; `pyproject.toml` declares `hexperiment = "hexperiment.entry:main"`. Keep `tests/test_architecture.py` green (only `console.py` calls `print`); add `entry.py` to a module list there only if a test requires every module to be listed, and say so.
+  - Do not run `pip`. The owner reinstalls the editable package so that the `hexperiment` executable uses the new entry point.
+  - Run the whole suite and `ruff check`; both must report no problems.
+  - _Requirements: 9.6_
+
 - [ ] 15. **Owner:** the stop check in a live session
   - In a headless Kiro CLI session in this workspace, with a throwaway app, ask the agent to change its `train.py` and then finish. Pass: the agent receives "Hexperiment: not approved yet." after its reply and runs the full audit or reports the app as not approved. Delete the throwaway app afterwards.

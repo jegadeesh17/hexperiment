@@ -316,6 +316,19 @@ Do not call the work done until each app above is APPROVED or reported as not ap
 
   A missing status reads "changed in this session and has no verdict" with the run-the-full-audit instruction. Any other status (an unknown word) is treated like `UNVERIFIED`.
 - `cli.py`: the `hook` subcommand gets the flag `--stop`. `_stop_command` reads the event as `_hook_command` does, calls `handle_stop(..., workspace=resolve_workspace())`, writes a non-empty message to standard error and returns `1`; an empty message or any exception returns `0` with no output. `handle_stop` imports nothing heavy (`hook.py` must not import `canary`, `auditor`, pandas, NumPy or scikit-learn at module level; a test runs `python -X importtime -c "import hexperiment.hook"` or checks `sys.modules` in a subprocess).
+- **A light entry point (2026-11-13).** `cli.py` imports `canary` (pandas, NumPy) at module level, and the existing tests replace `cli.run_executions` and `cli.new_run_id`, so `cli.py` stays as it is. Measured on Power saver: `hexperiment hook --stop` through `cli.main` took 3.3 to 4.2 s, `import hexperiment.hook` alone 1.1 s, bare Python 0.35 s. The stop check runs at the end of every agent turn, so the console script `hexperiment` now points to a new module `hexperiment/entry.py`:
+
+  ```python
+  def main(argv: Sequence[str] | None = None) -> int:
+      args = list(sys.argv[1:] if argv is None else argv)
+      if args == ["hook", "--stop"]:
+          from hexperiment.hook import stop_command
+          return stop_command()
+      from hexperiment.cli import main as cli_main
+      return cli_main(args)
+  ```
+
+  `stop_command()` and `read_event_text()` move to `hook.py` (the body of today's `cli._stop_command` and `cli._read_event_text`, with `MAX_EVENT_BYTES` defined in `hook.py`); `cli._stop_command` and `cli._read_event_text` call them, and `cli.MAX_EVENT_BYTES` stays as a name for the same value. `stop_command` writes through `console.print_text(message, sys.stderr)`. `entry.py` imports only `sys` and `collections.abc` at module level. `pyproject.toml` declares `hexperiment = "hexperiment.entry:main"`. Any other argument list, including `--help`, goes to `cli.main` unchanged.
 - **Why exit 1 and standard error.** Checked live 2026-11-13 (Kiro CLI 3.3.0, headless, two runs): a `Stop` hook that exits `1` with a message on standard error gave the agent the message and one more turn ("A hook message arrived after my last reply"); with exit `2`, and for a `PostToolUse` hook with either code, the hook ran but nothing reached the agent. The Stop hook fired once per prompt, not again after the extra turn, so it cannot loop. The message must say what to do: with a bare notice the agent quoted it and did nothing.
 - **Why only this session's apps.** The `Stop` event carries `session_id` and `cwd` and nothing about files. Without the session file, every app that is not approved would add a turn, and its credits, to every prompt in the workspace. File-save hooks fire for the agent's changes, so `.hex/agent-session` names the session whose agent last changed the app.
 - **Why fail quietly.** The hook is advice; the gate is `verdict.json`, which only a full run can make `APPROVED`. A broken stop check must never stop the agent from answering.
