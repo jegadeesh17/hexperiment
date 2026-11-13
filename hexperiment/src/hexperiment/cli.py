@@ -18,7 +18,10 @@ from hexperiment.canary import SCRIPT_NAME, ExecutionFailed, run_executions
 from hexperiment.config import load_config
 from hexperiment.console import print_text
 from hexperiment.errors import HexInputError
-from hexperiment.hook import handle_hook, handle_stop
+from hexperiment.hook import (
+    MAX_EVENT_BYTES as MAX_EVENT_BYTES,  # kept as a name for the same value
+)
+from hexperiment.hook import handle_hook, read_event_text, stop_command
 from hexperiment.init import InitReport, format_report, init_app, init_kiro
 from hexperiment.models import RunOutcome, Status, Verdict
 from hexperiment.runs import app_lock, clear_app_verdict, finalize_run, new_run_id
@@ -29,7 +32,6 @@ EXIT_APPROVED = 0
 EXIT_REJECTED = 1
 EXIT_RUN_FAILED = 2
 EXIT_UNVERIFIED = 3
-MAX_EVENT_BYTES = 1024 * 1024  # the most of a hook event that the command reads
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -221,17 +223,10 @@ def _stop_command() -> int:
 
     A message goes to standard error with exit code 1, which Kiro gives to the
     agent; no message, or any failure, gives no output and exit code 0
-    (Requirement 9.4, 9.5).
+    (Requirement 9.4, 9.5). The body is ``hook.stop_command``, which the light
+    entry point (``entry.py``) also calls.
     """
-    try:
-        message = handle_stop(_read_event_text(), workspace=resolve_workspace())
-    except Exception:
-        return 0
-    if not message:
-        return 0
-    with contextlib.suppress(Exception):
-        print_text(message, sys.stderr)
-    return 1
+    return stop_command()
 
 
 def _init_command(app_dir: str | None, *, kiro: bool) -> int:
@@ -269,11 +264,7 @@ def _init_command(app_dir: str | None, *, kiro: bool) -> int:
 
 def _read_event_text() -> str:
     """At most ``MAX_EVENT_BYTES`` of standard input; a terminal counts as empty."""
-    stream = sys.stdin
-    if stream is None or stream.isatty():
-        return ""
-    data = stream.buffer.read(MAX_EVENT_BYTES)
-    return data.decode("utf-8-sig", errors="replace")
+    return read_event_text()
 
 
 def _failed(message: str) -> RunOutcome:

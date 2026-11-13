@@ -14,6 +14,7 @@ import pytest
 from hexperiment import canary, config
 from hexperiment import hook as hook_module
 from hexperiment import workspace as workspace_module
+from hexperiment.errors import HexInputError
 from hexperiment.hook import (
     FULL_CHECK_NOTICE,
     HOOK_RUN_CAP_SECONDS,
@@ -504,7 +505,23 @@ def tree(root: Path) -> dict[str, bytes | None]:
     }
 
 
+def test_the_light_workspace_resolution_matches_the_original(tmp_path, monkeypatch):
+    (tmp_path / "chosen").mkdir()
+    monkeypatch.chdir(tmp_path)
+    for value in (None, "", "  ", "chosen", str(tmp_path / "chosen")):
+        if value is None:
+            monkeypatch.delenv(workspace_module.ENV_WORKSPACE, raising=False)
+        else:
+            monkeypatch.setenv(workspace_module.ENV_WORKSPACE, value)
+        assert hook_module._resolve_workspace() == workspace_module.resolve_workspace()
+    monkeypatch.setenv(workspace_module.ENV_WORKSPACE, "nowhere")
+    with pytest.raises(HexInputError, match="HEXPERIMENT_WORKSPACE"):
+        hook_module._resolve_workspace()
+
+
 def test_the_names_copied_for_the_light_import_equal_the_originals():
+    assert hook_module.ENV_WORKSPACE == workspace_module.ENV_WORKSPACE
+    assert hook_module.MAX_EVENT_BYTES == 1024 * 1024
     assert hook_module.CONFIG_NAME == config.CONFIG_FILENAME
     assert hook_module.SCRIPT_NAME == canary.SCRIPT_NAME
     assert hook_module.VENV_MARKER == workspace_module.VENV_MARKER

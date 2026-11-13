@@ -24,7 +24,7 @@ dev = [
 ]
 
 [project.scripts]
-hexperiment = "hexperiment.cli:main"
+hexperiment = "hexperiment.entry:main"
 hexperiment-mcp = "hexperiment.mcp_server:main"
 
 [tool.setuptools.packages.find]

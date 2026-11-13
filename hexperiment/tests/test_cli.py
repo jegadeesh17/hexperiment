@@ -19,6 +19,7 @@ import numpy as np
 import pytest
 
 from hexperiment import cli
+from hexperiment import hook as hook_module
 from hexperiment.canary import LoadMarker, Snapshot, run_executions
 from hexperiment.cli import (
     EXIT_APPROVED,
@@ -31,6 +32,7 @@ from hexperiment.cli import (
     run_app,
 )
 from hexperiment.config import ExecMode
+from hexperiment.entry import main as entry_main
 from hexperiment.models import (
     CheckResult,
     DataAuditResult,
@@ -201,15 +203,15 @@ def test_the_exit_code_constants_are_the_documented_ones():
     )
 
 
-def test_pyproject_maps_the_console_script_to_main():
+def test_pyproject_maps_the_console_script_to_the_light_entry_point():
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
     scripts = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["scripts"]
     assert scripts == {
-        "hexperiment": "hexperiment.cli:main",
+        "hexperiment": "hexperiment.entry:main",
         "hexperiment-mcp": "hexperiment.mcp_server:main",
     }
     module, _, attribute = scripts["hexperiment"].partition(":")
-    assert getattr(importlib.import_module(module), attribute) is main
+    assert getattr(importlib.import_module(module), attribute) is entry_main
 
 
 def test_the_console_script_is_installed_in_the_environment():
@@ -225,7 +227,7 @@ def test_the_console_script_is_installed_in_the_environment():
         for entry in dist.entry_points
         if entry.group == "console_scripts"
     }
-    assert installed.get("hexperiment") == "hexperiment.cli:main", (
+    assert installed.get("hexperiment") == "hexperiment.entry:main", (
         "the package is installed but has no console script 'hexperiment'; "
         "reinstall it with pip install -e"
     )
@@ -1216,7 +1218,7 @@ def test_stop_exits_0_without_output_when_the_handler_raises(
     def explode(*args, **kwargs):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(cli, "handle_stop", explode)
+    monkeypatch.setattr(hook_module, "handle_stop", explode)
     feed_stdin(monkeypatch, stop_event())
     assert main(["hook", "--stop"]) == 0
     captured = capsys.readouterr()

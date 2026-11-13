@@ -14,10 +14,13 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from hexperiment.console import print_text
+from hexperiment.errors import HexInputError
 from hexperiment.hook_event import candidate_paths, session_id
 from hexperiment.models import RunOutcome
 
@@ -37,7 +40,9 @@ CONFIG_NAME = "hex.toml"
 SCRIPT_NAME = "train.py"
 VENV_MARKER = "pyvenv.cfg"
 SKIPPED_FOLDERS = frozenset({"node_modules", "__pycache__"})
+ENV_WORKSPACE = "HEXPERIMENT_WORKSPACE"  # as in `workspace`; pinned by test_hook.py
 APPROVED = "APPROVED"
+MAX_EVENT_BYTES = 1024 * 1024  # the most of a hook event that the command reads
 
 FULL_CHECK_NOTICE = (
     "Fast check only: the canary test did not run, so this result can never be "
@@ -100,6 +105,57 @@ def handle_stop(event_text: str, *, workspace: Path) -> str:
         if status != APPROVED:
             pending.append((relative, status))
     return format_stop_message(sorted(pending)) if pending else ""
+
+
+def read_event_text() -> str:
+    """At most ``MAX_EVENT_BYTES`` of standard input; a terminal counts as empty."""
+    stream = sys.stdin
+    if stream is None or stream.isatty():
+        return ""
+    data = stream.buffer.read(MAX_EVENT_BYTES)
+    return data.decode("utf-8-sig", errors="replace")
+
+
+def stop_command() -> int:
+    """``hexperiment hook --stop``: tell the agent which of its apps are not approved.
+
+    A message goes to standard error with exit code 1, which Kiro gives to the
+    agent; no message, or any failure, gives no output and exit code 0
+    (Requirements 9.4, 9.5, 9.6).
+    """
+    try:
+        message = handle_stop(read_event_text(), workspace=_resolve_workspace())
+    except Exception:
+        return 0
+    if not message:
+        return 0
+    with contextlib.suppress(Exception):
+        print_text(message, sys.stderr)
+    return 1
+
+
+def _resolve_workspace() -> Path:
+    """``workspace.resolve_workspace()`` for the process, without importing it.
+
+    ``workspace`` imports ``canary`` and so pandas; the stop check must not
+    (Requirement 9.6). test_hook.py checks that both give the same answer.
+    """
+    value = os.environ.get(ENV_WORKSPACE, "").strip()
+    base = Path.cwd()
+    if not value:
+        return base.resolve()
+    try:
+        resolved = (base / value).resolve()
+        is_folder = resolved.is_dir()
+    except (OSError, ValueError, RuntimeError):
+        is_folder = False
+    if not is_folder:
+        raise HexInputError(
+            f"{ENV_WORKSPACE} is set to {value!r}, which is not an existing folder.",
+            f"Set {ENV_WORKSPACE} to the project folder, or unset it to use the "
+            "current folder.",
+        )
+    return resolved
 
 
 def format_stop_message(pending: Sequence[tuple[str, str | None]]) -> str:
