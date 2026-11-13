@@ -9,12 +9,14 @@ import tomllib
 from collections import Counter
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
-from hexbench.cases import all_cases, render_app
+from hexbench.cases import all_cases, render_app, write_case
+from hexbench.datagen import generate
 from hexbench.mechanisms import LEAK_TYPE_NAMES, MECHANISMS, NOT_MEASURED
 from hexbench.spec import MARK
-from hexperiment.config import parse_config
+from hexperiment.config import load_config, parse_config
 from hexperiment.ghosts import CATALOG
 
 _KEY = re.compile(r"^[a-z]+(-[a-z]+)*$")
@@ -262,3 +264,68 @@ def test_the_two_configs_differ_only_in_split_extra(case) -> None:
     assert set(added) <= allowed_clean
     assert f'name = "{case.case_id}"' in leaky
     assert f'name = "{case.case_id}"' in clean
+
+
+# --- write_case (task 6) -----------------------------------------------------------
+
+_LR_CASES = [case for case in CASES if case.model.key == "lr"]
+_CHEAP = next(case for case in CASES if case.case_id == "no-test-set-lr")
+
+
+def test_write_case_writes_both_apps(tmp_path: Path) -> None:
+    leaky, clean = write_case(_CHEAP, tmp_path)
+    assert leaky == tmp_path / _CHEAP.case_id / "leaky"
+    assert clean == tmp_path / _CHEAP.case_id / "clean"
+    for app in (leaky, clean):
+        assert (app / "train.py").is_file()
+        assert (app / "hex.toml").is_file()
+        assert (app / "data" / "dataset.csv").is_file()
+
+
+def test_write_case_datasets_are_identical_and_match_the_generator(
+    tmp_path: Path,
+) -> None:
+    leaky, clean = write_case(_CHEAP, tmp_path)
+    assert (leaky / "data" / "dataset.csv").read_bytes() == (
+        clean / "data" / "dataset.csv"
+    ).read_bytes()
+    expected = generate(_CHEAP.mechanism.data, _CHEAP.data_seed)
+    written = pd.read_csv(leaky / "data" / "dataset.csv")
+    assert list(written.columns) == list(expected.columns)
+    assert len(written) == len(expected)
+    pd.testing.assert_frame_equal(written, expected, check_dtype=False)
+
+
+def test_write_case_scripts_equal_render_app(tmp_path: Path) -> None:
+    leaky, clean = write_case(_CHEAP, tmp_path)
+    for variant, app in (("leaky", leaky), ("clean", clean)):
+        files = render_app(_CHEAP, variant)
+        assert (app / "train.py").read_bytes() == files.train_py.encode("utf-8")
+        assert (app / "hex.toml").read_bytes() == files.hex_toml.encode("utf-8")
+
+
+def test_write_case_has_no_carriage_returns(tmp_path: Path) -> None:
+    for app in write_case(_CHEAP, tmp_path):
+        for path in app.rglob("*"):
+            if path.is_file():
+                assert b"\r" not in path.read_bytes(), path
+
+
+def test_write_case_twice_gives_identical_bytes(tmp_path: Path) -> None:
+    first = write_case(_CHEAP, tmp_path / "a")
+    second = write_case(_CHEAP, tmp_path / "b")
+    for one, two in zip(first, second, strict=True):
+        names = sorted(p.relative_to(one) for p in one.rglob("*") if p.is_file())
+        assert names == sorted(
+            p.relative_to(two) for p in two.rglob("*") if p.is_file()
+        )
+        for name in names:
+            assert (one / name).read_bytes() == (two / name).read_bytes()
+
+
+def test_every_mechanism_writes_a_loadable_app(tmp_path: Path) -> None:
+    assert len(_LR_CASES) == len(MECHANISMS)
+    for case in _LR_CASES:
+        for app in write_case(case, tmp_path):
+            config = load_config(app)
+            assert (app / config.data.path).is_file(), case.case_id

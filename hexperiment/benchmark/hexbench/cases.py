@@ -1,10 +1,12 @@
-"""The 39 cases and the two renderings of each (pure; no file work yet)."""
+"""The 39 cases and the two renderings of each (pure; ``write_case`` writes files)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
+from hexbench.datagen import generate
 from hexbench.mechanisms import MECHANISMS
 from hexbench.modelspecs import MODELS
 from hexbench.spec import Case, Line, Mechanism, both, render
@@ -117,3 +119,28 @@ def render_app(case: Case, variant: Literal["leaky", "clean"]) -> AppFiles:
         train_py=render(_train_lines(case), variant),
         hex_toml=render(_toml_lines(case), variant),
     )
+
+
+def _write_bytes(path: Path, text: str) -> None:
+    """Write UTF-8 text with ``\\n`` line endings, whatever the platform."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(text.encode("utf-8"))
+
+
+def write_case(case: Case, root: Path) -> tuple[Path, Path]:
+    """Write the leaky app and its clean twin under ``root/<case_id>/``.
+
+    The dataset is generated once and each app gets its own copy. Returns the
+    leaky and the clean app folders.
+    """
+    frame = generate(case.mechanism.data, case.data_seed)
+    dataset = frame.to_csv(index=False, lineterminator="\n")
+    folders: list[Path] = []
+    for variant in ("leaky", "clean"):
+        app_dir = Path(root) / case.case_id / variant
+        files = render_app(case, variant)
+        _write_bytes(app_dir / "train.py", files.train_py)
+        _write_bytes(app_dir / "hex.toml", files.hex_toml)
+        _write_bytes(app_dir / "data" / "dataset.csv", dataset)
+        folders.append(app_dir)
+    return folders[0], folders[1]
