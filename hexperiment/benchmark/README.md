@@ -133,6 +133,18 @@ Run with hexperiment 0.1.0, Python 3.13.2 and scikit-learn 1.9.1 on 2026-11-13: 
 
 <!-- END BENCHMARK TABLE -->
 
+## Missed or partly caught
+
+Three mechanisms were missed in all three models. Each leaky app was `APPROVED`, although its leak raised the reported score.
+
+- `weak-proxy` (L2): the extra column predicts the label with a stand-alone AUC of about 0.89. The Possession fires only at or above `checks.proxy_auc_max` (default 0.95), so a weaker proxy passes. The column is an ordinary feature of each row, so the canary sees no use of test rows, and no rows are duplicated. A project that lowers `checks.proxy_auc_max` would flag this column, at the cost of flagging genuinely strong features too. The mean score went from 0.7443 (clean) to 0.9062 (leaky).
+- `time-column-undeclared` (L3.1): The Prophet can only compare dates when `split.time_column` is declared in `hex.toml`. Here it is not, so the kit does not know the rows are ordered in time, and `hexperiment.split` splits at random. A random split does not make training depend on the test rows' values, so the canary does not fire either. The kit cannot find a time column it has not been told about. The mean score went from 0.7227 (clean) to 0.8234 (leaky).
+- `entity-leak` (L3.2): rows of the same entity land in both train and test, but each copy differs by small noise, so no row is identical and The Doppelganger does not fire. Training does not depend on the test rows' values, so the canary does not fire. The kit has no notion of an entity and no group split, so this leak is outside what it can see. The mean score went from 0.7788 (clean) to 0.8386 (leaky). The clean twin drops every test row whose entity also appears in training, so it scores a different, smaller test set: the gap mixes the leak with that change of test rows and is not a pure measure of the leak.
+
+No run ended `UNVERIFIED` or `ERROR`, and no clean twin was rejected.
+
+The result matches "What we expected before the first run" mechanism by mechanism: 30 of 39 leaky apps rejected, each by the predicted ghost, and 0 of 39 clean twins rejected. One thing the predictions did not state: in `scaler-all-rows` and `imputer-all-rows` the leak hardly moved the score (leaky and clean differ by 0.008 or less in all six cases, and five of the six leaky apps scored lower than their clean twins), so comparing scores would not have shown these leaks; the canary rejected all six.
+
 ## Changes after the first complete run
 
 None yet.
