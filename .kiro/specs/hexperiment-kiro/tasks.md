@@ -134,3 +134,15 @@
 
 - [ ] 13. **Owner:** the live headless check of the loop
   - Copy `apps/hotel-cancellations` to `apps/zz-check` without `runs/`, `verdict.json`, `model_card.md` and `.hex/`, and put its haunted script in place as `train.py`. Run `exorcise` on it headless with the trust list of "Headless runs" in `design.md` (no shell tool). Pass: the log shows `run_audit` calls and no shell tool, and the run ends with `apps/zz-check/verdict.json` APPROVED. Delete `apps/zz-check` afterwards.
+
+- [ ] 14. The stop check
+  - In `hexperiment/src/hexperiment/hook_event.py` add `session_id(event_text)` as in `design.md` ("The stop check"). It stays pure and never raises.
+  - In `hexperiment/src/hexperiment/hook.py` add `SESSION_FILE`, `record_session`, `handle_stop` and `format_stop_message`; `handle_hook` calls `record_session` before the run when the event has a session id. `hook.py` must not import `canary`, `auditor`, pandas, NumPy or scikit-learn at module level.
+  - In `hexperiment/src/hexperiment/cli.py` add the flag `--stop` to the `hook` subcommand and `_stop_command`: message on standard error and exit `1` when `handle_stop` returns text; otherwise no output and exit `0`, also on any exception.
+  - Write `.kiro/hooks/hexperiment.json` exactly as the JSON block of `design.md` ("`.kiro/hooks/hexperiment.json`"), and the same bytes to `hexperiment/src/hexperiment/templates/kiro/hooks/hexperiment.json`. Update the hook-file checks in `hexperiment/tests/test_kiro_files.py`: the file now holds two hooks, the save hook unchanged and a `Stop` hook with the command `hexperiment hook --stop` and timeout `30`.
+  - Tests (no test starts a training run): `session_id` examples (the real Stop event shape `{"session_id": "sess_...", "hook_event_name": "Stop", "cwd": "..."}`, missing, not a string, too long, bad characters, invalid JSON, an array) and a Hypothesis property that it never raises; `record_session` writes the id and a failed write does not change `handle_hook`'s output; `handle_stop` with apps in `tmp_path` covering: no session file, another session, this session with `APPROVED` (no message), with `UNVERIFIED`, with `REJECTED`, with no `verdict.json`, with invalid JSON, two apps sorted by path; the exact message lines of `format_stop_message`; `hexperiment hook --stop` through `main` with a stubbed standard input: exit `1` and the message on standard error, exit `0` and no output for an empty event, and exit `0` when `handle_stop` raises; one subprocess test that `import hexperiment.hook` loads none of `pandas`, `numpy`, `sklearn`.
+  - Run the whole suite (`.venv/Scripts/python -m pytest hexperiment/tests -q --durations=10`) and `.venv/Scripts/python -m ruff check hexperiment`; both must report no problems.
+  - _Requirements: 9.1 to 9.6, 7_
+
+- [ ] 15. **Owner:** the stop check in a live session
+  - In a headless Kiro CLI session in this workspace, with a throwaway app, ask the agent to change its `train.py` and then finish. Pass: the agent receives "Hexperiment: not approved yet." after its reply and runs the full audit or reports the app as not approved. Delete the throwaway app afterwards.

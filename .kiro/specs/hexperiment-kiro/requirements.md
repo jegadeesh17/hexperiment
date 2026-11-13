@@ -5,6 +5,7 @@
 `hexperiment-core` gives a training script a verdict. This spec makes that verdict part of how Kiro works on ML code, so an agent cannot hand over a haunted model as finished work:
 
 - a **hook** re-checks an app every time an agent saves its training code; the check clears the app's verdict and is never `APPROVED`, so a saved change replaces an earlier `APPROVED` (Kiro's documentation says the hook's output is also added to the agent's context; Kiro CLI 3.2.0 and Kiro IDE 1.4.154 do not do this, see `design.md`, Open question 14);
+- a **stop check** tells the agent, when it ends a turn, which apps it changed in this session that are not `APPROVED` (Kiro CLI 3.3.0 gives the agent the message of a Stop hook that exits with code `1`; checked live, see `design.md`);
 - a **workflow** loops an agent on an app until `hexperiment run` writes an `APPROVED` verdict, with a restricted agent that can change the training code but never the verdict, the thresholds or the waivers;
 - an **MCP server** lets any agent list apps, run audits, read verdicts and history, and ask what a ghost means;
 - a **power** packages the kit so another Kiro user can install it in one step, and `hexperiment init` writes the hook, the workflow, the agent and the steering into their project.
@@ -27,7 +28,7 @@ Scope: the `hexperiment hook` and `hexperiment init` commands, the Kiro hook, wo
 
 #### Acceptance Criteria
 
-1. THE repository SHALL contain `.kiro/hooks/hexperiment.json` with one hook that triggers when the agent saves a file, whose matcher selects Python files, and whose action is the command `hexperiment hook` (which decides whether the file belongs to an app).
+1. THE repository SHALL contain `.kiro/hooks/hexperiment.json` with a save hook that triggers when the agent saves a file, whose matcher selects Python files, and whose action is the command `hexperiment hook` (which decides whether the file belongs to an app).
 2. WHEN `hexperiment hook` runs THEN the system SHALL read the hook event from standard input, find the saved file's path in it, and locate the app as the nearest parent folder of that file that contains `hex.toml` and `train.py`, without leaving the workspace.
 3. WHEN an app is found THEN the system SHALL run that app in fast mode, exactly as `hexperiment run --fast <app>` does, and write the summary to standard output, followed by one line telling the agent to run the full check (`hexperiment run <app>`) before calling the work done.
 4. IF no app is found, the event cannot be parsed, or the saved file is not a Python file THEN the system SHALL write nothing and exit with code `0`.
@@ -123,3 +124,16 @@ Scope: the `hexperiment hook` and `hexperiment init` commands, the Kiro hook, wo
 
 1. WHILE a `hexperiment run` is running on an app THEN a second `hexperiment run` on the same app SHALL exit with code `2` and a message that names the app, without writing a run folder or changing `verdict.json`.
 2. THE lock SHALL be held by the operating system for the life of the first process, so that it is released when that process ends, also when it is killed.
+
+### Requirement 9: Check before the agent finishes
+
+**User Story:** As a data scientist working with an agent, I want the agent to be told, when it ends its turn, that an app it changed is not approved, so that it runs the full audit or says plainly that the work is not done.
+
+#### Acceptance Criteria
+
+1. THE file `.kiro/hooks/hexperiment.json` SHALL also contain a hook that triggers when the agent stops (trigger `Stop`), whose action is the command `hexperiment hook --stop`, with a timeout of `30` seconds.
+2. WHEN `hexperiment hook` (the save hook) finds an app and the event has a valid `session_id` THEN the system SHALL write that id to the app's `.hex/agent-session` before the run; a failed write SHALL NOT change the hook's output or exit code.
+3. WHEN `hexperiment hook --stop` runs THEN the system SHALL read the event from standard input and select every app of the workspace whose `.hex/agent-session` holds the event's `session_id` and whose `verdict.json` is missing or has a status other than `APPROVED`.
+4. WHEN at least one app is selected THEN the system SHALL write a message to standard error that names each app with its state and tells the agent what to do next (run the full audit for an app with no verdict or an `UNVERIFIED` one; fix the findings or tell the user plainly that the app is `REJECTED` for a rejected one), and SHALL exit with code `1`.
+5. WHEN no app is selected, the event has no valid `session_id`, or anything fails THEN the system SHALL write nothing and exit with code `0`.
+6. THE stop check SHALL NOT run `train.py`, start a run, write a run record or count as a test-set use, and SHALL NOT import pandas, NumPy or scikit-learn.

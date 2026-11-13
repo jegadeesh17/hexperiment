@@ -288,6 +288,41 @@ A hook run is an ordinary run: it calls `finalize_run`, writes `runs/<run_id>/` 
 
 Satisfies: 1.2 to 1.7.
 
+**The stop check (Requirement 9).** Two additions to `hook.py` and one to `hook_event.py`:
+
+```python
+# hook_event.py (pure)
+def session_id(event_text: str) -> str | None: ...
+
+# hook.py
+SESSION_FILE = "agent-session"   # inside the app's .hex/ folder
+
+def record_session(app: Path, session: str) -> None: ...
+def handle_stop(event_text: str, *, workspace: Path) -> str: ...
+def format_stop_message(pending: Sequence[tuple[str, str | None]]) -> str: ...
+```
+
+- `session_id` returns the top-level string `session_id` of the event when the event is a JSON object within the size limits of `candidate_paths` and the value matches `^[A-Za-z0-9_-]{1,128}$`; otherwise `None`. It never raises.
+- `handle_hook` calls `record_session(app, sid)` for the app it found, before the run, when `session_id(event_text)` is not `None`. `record_session` creates `.hex/` if needed and writes the id with a final newline; it suppresses `OSError`. Nothing else in `handle_hook` changes.
+- `handle_stop`: `sid = session_id(event_text)`; `None` gives `""`. Otherwise for each app of `discover_apps(workspace)`, read `.hex/agent-session` (at most 256 bytes, UTF-8, stripped; a missing or unreadable file means "not this session") and keep the app when it equals `sid`. For each kept app read the top-level `status` of `verdict.json` with `json` (missing file, invalid JSON or a missing key give `None`); keep the app when the status is not `"APPROVED"`. Return `format_stop_message` of the kept `(relative_posix(app), status)` pairs sorted by path, or `""` when none is kept.
+- `format_stop_message` returns, for example:
+
+```text
+Hexperiment: not approved yet.
+- apps/churn: changed in this session; its verdict is UNVERIFIED (fast check only). Run the full audit: the hexperiment MCP tool run_audit with app apps/churn and mode full (or: hexperiment run apps/churn).
+- apps/fraud: changed in this session; its last full audit is REJECTED. Fix the findings at their cause, or tell the user plainly that apps/fraud is REJECTED and why.
+Do not call the work done until each app above is APPROVED or reported as not approved.
+```
+
+  A missing status reads "changed in this session and has no verdict" with the run-the-full-audit instruction. Any other status (an unknown word) is treated like `UNVERIFIED`.
+- `cli.py`: the `hook` subcommand gets the flag `--stop`. `_stop_command` reads the event as `_hook_command` does, calls `handle_stop(..., workspace=resolve_workspace())`, writes a non-empty message to standard error and returns `1`; an empty message or any exception returns `0` with no output. `handle_stop` imports nothing heavy (`hook.py` must not import `canary`, `auditor`, pandas, NumPy or scikit-learn at module level; a test runs `python -X importtime -c "import hexperiment.hook"` or checks `sys.modules` in a subprocess).
+- **Why exit 1 and standard error.** Checked live 2026-11-13 (Kiro CLI 3.3.0, headless, two runs): a `Stop` hook that exits `1` with a message on standard error gave the agent the message and one more turn ("A hook message arrived after my last reply"); with exit `2`, and for a `PostToolUse` hook with either code, the hook ran but nothing reached the agent. The Stop hook fired once per prompt, not again after the extra turn, so it cannot loop. The message must say what to do: with a bare notice the agent quoted it and did nothing.
+- **Why only this session's apps.** The `Stop` event carries `session_id` and `cwd` and nothing about files. Without the session file, every app that is not approved would add a turn, and its credits, to every prompt in the workspace. File-save hooks fire for the agent's changes, so `.hex/agent-session` names the session whose agent last changed the app.
+- **Why fail quietly.** The hook is advice; the gate is `verdict.json`, which only a full run can make `APPROVED`. A broken stop check must never stop the agent from answering.
+- **Limits.** The IDE's behaviour is not checked (owner step). A user who edits a file by hand does not trigger the save hook, so that change is not tracked. `.hex/` is ignored by git, so the session file is never committed.
+
+Satisfies: 9.1 to 9.6.
+
 ### `ghosts.py` (pure)
 
 ```python
@@ -479,6 +514,16 @@ These four files are the reference. They are written by a human step in task 4 (
         "command": "hexperiment hook"
       },
       "timeout": 120
+    },
+    {
+      "name": "hexperiment-check-on-stop",
+      "description": "When the agent ends its turn, names the apps it changed in this session that are not APPROVED and tells it to run the full audit or to say plainly that the work is not done. Exits 1 only then; Kiro gives the agent the message of a Stop hook that exits 1.",
+      "trigger": "Stop",
+      "action": {
+        "type": "command",
+        "command": "hexperiment hook --stop"
+      },
+      "timeout": 30
     }
   ]
 }
