@@ -124,7 +124,7 @@
   - Run the whole suite (`.venv/Scripts/python -m pytest hexperiment/tests -q --durations=10`) and `.venv/Scripts/python -m ruff check hexperiment`; both must report no problems.
   - _Requirements: core 4, 14 and 16; kiro 4, 6 and 7.4_
 
-- [ ] 12. The ghost hunter runs audits through the MCP tool only
+- [x] 12. The ghost hunter runs audits through the MCP tool only
   - Write `.kiro/agents/ghost-hunter.json` and `.kiro/workflows/exorcise.workflow.json` exactly as the two JSON blocks of `design.md` (sections "`.kiro/agents/ghost-hunter.json`" and "`.kiro/workflows/exorcise.workflow.json`"), and the same bytes to `hexperiment/src/hexperiment/templates/kiro/agents/ghost-hunter.json` and `hexperiment/src/hexperiment/templates/kiro/workflows/exorcise.workflow.json`, so the test that compares them stays green.
   - Update the agent and workflow checks in `hexperiment/tests/test_kiro_files.py` as "Agent", "Workflow" and "Permission simulator" in `design.md` now say: the `mcp` capability, no shell tool, `@hexperiment` and `includeMcpJson`, and the workflow prompt naming `run_audit`; remove the shell cases of the simulator. Update `hexperiment/tests/test_init.py` only where it asserts the old agent or workflow text.
   - In `power/hexperiment/skills/hexperiment/SKILL.md`: setup step 5 says that hooks run the bare command `hexperiment` and that Kiro starts the bare command `hexperiment-mcp`, which the ghost hunter uses; the loop paragraph says that the ghost hunter edits the app's Python files and runs the audit through `run_audit` (it has no shell), and keeps the list of what it cannot edit. Update the skill tests if they assert the old text.

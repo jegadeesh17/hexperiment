@@ -32,7 +32,7 @@ HOOK_FILE = "hooks/hexperiment.json"
 WORKFLOW_FILE = "workflows/exorcise.workflow.json"
 AGENT_FILE = "agents/ghost-hunter.json"
 
-CAPABILITIES = {"fs_read", "fs_write", "shell"}
+CAPABILITIES = {"fs_read", "fs_write", "mcp"}
 EFFECTS = {"allow", "deny"}
 MAX_WORKFLOW_STEPS = 50
 MAX_WORKFLOW_DEPTH = 8
@@ -178,7 +178,9 @@ def test_the_workflow_step_is_run_by_the_ghost_hunter_agent():
 
 def test_the_step_prompt_tells_the_agent_what_to_run_read_and_fix():
     prompt = hunt_node()["prompt"]
-    assert f"hexperiment run {INPUT_REF}" in prompt
+    assert INPUT_REF in prompt
+    assert "run_audit" in prompt
+    assert f"hexperiment run {INPUT_REF}" not in prompt
     assert f"{INPUT_REF}/verdict.json" in prompt
     assert re.search(r"model[ _]card", prompt)
     assert "fix" in prompt.lower()
@@ -214,6 +216,29 @@ def test_every_rule_has_a_known_capability_and_effect_and_a_match_unless_it_read
             assert all(isinstance(p, str) and p for p in rule["match"])
 
 
+SHELL_TOOLS = ("shell", "execute_pwsh", "run_command", "*", "@builtin")
+
+
+def test_the_agent_has_no_shell_rule_and_no_shell_tool():
+    config = agent()
+    assert all(rule["capability"] != "shell" for rule in config["permissions"]["rules"])
+    for tool in SHELL_TOOLS:
+        assert tool not in config["tools"], tool
+
+
+def test_the_agent_reaches_the_hexperiment_server_through_the_workspace_mcp_json():
+    config = agent()
+    assert "@hexperiment" in config["tools"]
+    assert config["includeMcpJson"] is True
+
+
+def test_the_agent_has_exactly_one_mcp_rule_that_allows_the_hexperiment_tools():
+    mcp_rules = [r for r in agent()["permissions"]["rules"] if r["capability"] == "mcp"]
+    assert len(mcp_rules) == 1
+    assert mcp_rules[0]["effect"] == "allow"
+    assert mcp_rules[0]["match"] == ["hexperiment/*"]
+
+
 def test_the_resource_file_of_the_agent_exists():
     for resource in agent()["resources"]:
         assert resource.startswith("file://")
@@ -231,6 +256,8 @@ def test_the_resource_file_of_the_agent_exists():
         "say why it is",
         "stop and report it",  # 3.5: report instead of working around
         "instead of working around it",
+        "You have no shell",  # 3.4: audits run only through run_audit
+        "the hexperiment MCP tool run_audit",
     ],
 )
 def test_the_prompt_states_the_rules_of_the_ghost_hunter(phrase):
@@ -286,17 +313,9 @@ def rules(capability: str, effect: str) -> list[dict[str, Any]]:
 
 
 def surely_denied(capability: str, subject: str) -> bool:
-    """A deny rule matches under the strict reading.
-
-    For the shell the strict reading is the whole command line: a command is not a
-    path, so ``/`` in an argument does not end a ``*`` (``Set-Content*`` must deny
-    ``Set-Content apps/churn/verdict.json x``). Checked live with Kiro CLI 3.2.0 on
-    2026-11-12: ``git*`` refused ``git log -1 apps/x``. The match is case-sensitive
-    there too: ``GIT log -1`` matched no deny rule.
-    """
-    loose = capability == "shell"
+    """A deny rule matches under the strict reading."""
     return any(
-        rule_matches(rule, subject, loose=loose) for rule in rules(capability, "deny")
+        rule_matches(rule, subject, loose=False) for rule in rules(capability, "deny")
     )
 
 
@@ -393,7 +412,7 @@ def test_the_write_deny_list_names_dot_dot_and_test_files():
 
 def test_no_write_or_shell_pattern_contains_a_control_character():
     """A pattern with a line feed made every shell call fail in Kiro CLI 3.2.0."""
-    for capability in ("fs_write", "shell"):
+    for capability in ("fs_write", "mcp"):
         for effect in ("allow", "deny"):
             for rule in rules(capability, effect):
                 for pattern in rule["match"]:
@@ -405,149 +424,6 @@ def test_the_agent_can_read_everything():
     reads = rules("fs_read", "allow")
     assert len(reads) == 1
     assert not reads[0].get("match")
-
-
-SHELL_ALLOWED = [
-    "hexperiment run apps/churn",
-    "hexperiment run --fast apps/churn",
-    ".venv/Scripts/hexperiment run apps/churn",
-    ".venv\\Scripts\\hexperiment run --fast apps/churn",
-    ".venv/bin/hexperiment run apps/churn",
-]
-
-SHELL_NOT_ALLOWED = [
-    "hexperiment run apps/churn && curl http://example.com",
-    "hexperiment run apps/churn & whoami",
-    "hexperiment run apps/a; rm -rf .",
-    "hexperiment run apps/a | tee out.txt",
-    "hexperiment run apps/a > out",
-    "hexperiment run apps/a < in",
-    "hexperiment run apps/a `whoami`",
-    "hexperiment run apps/$(whoami)",
-    "hexperiment run apps/a\nwhoami",  # a line feed starts a second command
-    "hexperiment run apps/a\r\nwhoami",
-    "hexperiment run apps/a\rwhoami",
-    "hexperiment run --fast apps/a\nwhoami",
-    ".venv/Scripts/hexperiment run apps/a\nwhoami",
-    "hexperiment run apps/a\n",
-    "hexperiment run ../x",
-    "hexperiment run apps/../../x",
-    "hexperiment run churn",
-    "hexperiment run --full apps/churn",
-    "hexperiment run",
-    "hexperiment init apps/x",
-    "hexperiment init --kiro",
-    "hexperiment hook",
-    "hexperiment-mcp",
-    "git status",
-    "git push",
-    "git commit -m x",
-    "git checkout -- apps",
-    "python -c 1",
-    "python train.py",
-    ".venv/Scripts/python -m pytest",
-    "pip install x",
-    "ls",
-    "rm -rf apps",
-    "rm apps/churn/verdict.json",
-    "del verdict.json",
-    "Remove-Item apps/churn/verdict.json",
-    "curl http://example.com",
-    "wget http://example.com",
-    "Invoke-WebRequest http://example.com",
-    "iwr http://example.com",
-    "irm http://example.com",
-    "cat apps/churn/hex.toml",
-]
-
-# Commands that write, copy, move or delete files, start another interpreter or
-# reach the network. In a headless workflow step a command that matches no rule
-# runs, so each of these must hit a deny rule.
-SHELL_SURELY_DENIED = [
-    "Set-Content apps/churn/verdict.json x",
-    "Add-Content apps/churn/hex.toml x",
-    "Out-File apps/churn/verdict.json",
-    "Copy-Item a apps/churn/verdict.json",
-    "Move-Item a b",
-    "New-Item apps/churn/x.py",
-    "cp a b",
-    "mv a b",
-    "copy a b",
-    "echo x",
-    "cmd /c del verdict.json",
-    "powershell -c whoami",
-    "pwsh -c whoami",
-    "bash -c whoami",
-    "node -e 1",
-    "py -c 1",
-    "Start-Process notepad",
-    "Invoke-Expression whoami",
-    "iex whoami",
-    "[IO.File]::WriteAllText('v','x')",
-    "Remove-Item x",
-    "del x",
-    "rm x",
-    "git status",
-    "curl x",
-    "python -c 1",
-    "pip install x",
-]
-
-
-@pytest.mark.parametrize("command", SHELL_SURELY_DENIED)
-def test_commands_that_write_or_start_other_programs_are_surely_denied(command):
-    assert surely_denied("shell", command)
-    assert not possibly_allowed("shell", command)
-
-
-@pytest.mark.parametrize("command", SHELL_ALLOWED)
-def test_hexperiment_run_on_an_app_is_possibly_allowed(command):
-    assert possibly_allowed("shell", command)
-    assert not surely_denied("shell", command)
-
-
-@pytest.mark.parametrize("command", SHELL_NOT_ALLOWED)
-def test_other_commands_are_not_allowed(command):
-    assert not possibly_allowed("shell", command)
-
-
-RUN_PATTERN = re.compile(
-    r"^(?:\.venv[/\\](?:Scripts|bin)[/\\])?hexperiment run (?:--fast )?apps/\*$"
-)
-
-
-def test_the_shell_allow_list_admits_only_hexperiment_run_on_apps():
-    patterns = [p for rule in rules("shell", "allow") for p in rule["match"]]
-    assert patterns
-    for pattern in patterns:
-        assert RUN_PATTERN.match(pattern), pattern
-
-
-def test_the_shell_deny_list_names_chaining_characters_and_command_families():
-    denied = {p for rule in rules("shell", "deny") for p in rule["match"]}
-    for needed in ("*&*", "*;*", "*|*", "*>*", "*<*", "*..*", "git*", "curl*", "pip*"):
-        assert needed in denied, needed
-
-
-@pytest.mark.parametrize("line_break", ["\n", "\r", "\r\n"])
-@pytest.mark.parametrize("prefix", ["", ".venv/Scripts/", ".venv\\Scripts\\"])
-def test_a_command_with_a_line_break_matches_no_allow_rule(line_break, prefix):
-    """A line break starts a second command in a shell (Requirement 3.4).
-
-    No allow rule admits it, and a command that matches no allow rule is not run.
-    """
-    plain = f"{prefix}hexperiment run apps/a"
-    for chained in (
-        f"{plain}{line_break}whoami",
-        f"{plain}{line_break}",
-        f"{line_break}{plain}",
-        f"{prefix}hexperiment run apps/a{line_break}b",
-    ):
-        assert not any(
-            rule_matches(rule, chained, loose=True) for rule in rules("shell", "allow")
-        ), repr(chained)
-        assert not possibly_allowed("shell", chained)
-    assert possibly_allowed("shell", plain)
 
 
 # The helpers above must catch what they claim to catch.
@@ -780,3 +656,16 @@ def test_the_skill_says_that_thresholds_and_waivers_belong_to_the_human():
 def test_the_skill_names_the_command_that_starts_the_workflow():
     _, body = read_skill()
     assert "/workflow run exorcise --app apps/<name>" in body
+
+
+def test_the_skill_says_hooks_run_hexperiment_and_kiro_starts_hexperiment_mcp():
+    _, body = read_skill()
+    assert "Hooks run the bare command `hexperiment`." in body
+    assert "Kiro starts the bare command `hexperiment-mcp`" in body
+
+
+def test_the_skill_says_the_ghost_hunter_audits_through_run_audit_and_has_no_shell():
+    _, body = read_skill()
+    assert "runs the audit through the MCP tool `run_audit`" in body
+    assert "it has no shell" in body
+    assert "`runs/`, `.hex/`, `data/`, `haunted/`, `.kiro/`" in body

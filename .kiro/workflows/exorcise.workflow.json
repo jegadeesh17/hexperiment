@@ -1,6 +1,6 @@
 {
   "name": "exorcise",
-  "description": "Repeats the ghost-hunter agent on one Hexperiment app until hexperiment run writes an APPROVED verdict.json. After 5 rounds it pauses for the human.",
+  "description": "Repeats the ghost-hunter agent on one Hexperiment app until the full audit writes an APPROVED verdict.json. After 5 rounds it pauses for the human.",
   "inputs": {
     "app": "string"
   },
@@ -22,7 +22,7 @@
           "type": "step",
           "id": "hunt",
           "agent": "ghost-hunter",
-          "prompt": "Work on the Hexperiment app in the folder given as the workflow input `app` ({{app}}), written with forward slashes relative to the workspace, for example apps/churn.\n1. Run `hexperiment run {{app}}` (full mode).\n2. Read `{{app}}/verdict.json` and the model card in the newest folder under `{{app}}/runs/`.\n3. If the status is APPROVED, stop here and report it.\n4. Otherwise change the app's Python files so that each finding is fixed at its cause. Use the finding's fix hint and the suspect lines it lists. Then run `hexperiment run {{app}}` again as the last thing you do in this step.\nDo not change thresholds, waivers or any file outside the app's Python code. If you cannot fix a finding, say so and stop; do not work around it.\nEnd your reply with the status, the metric against its threshold, and one line per finding of the latest verdict.json."
+          "prompt": "Work on the Hexperiment app in the folder given as the workflow input `app` ({{app}}), written with forward slashes relative to the workspace, for example apps/churn.\n1. Read `{{app}}/hex.toml` and `{{app}}/train.py`.\n2. Call the hexperiment MCP tool `run_audit` with app `{{app}}` and mode `full`. If the tool is not listed yet, read the other Python files of the app and look again.\n3. Read `{{app}}/verdict.json` and the model card in the newest folder under `{{app}}/runs/`.\n4. If the status is APPROVED, stop here and report it.\n5. Otherwise change the app's Python files so that each finding is fixed at its cause. Use the finding's fix hint and the suspect lines it lists. Then call `run_audit` with app `{{app}}` and mode `full` again as the last thing you do in this step.\nDo not change thresholds, waivers or any file outside the app's Python code. If you cannot fix a finding, say so and stop; do not work around it.\nEnd your reply with the status, the metric against its threshold, and one line per finding of the latest verdict.json."
         }
       ]
     }

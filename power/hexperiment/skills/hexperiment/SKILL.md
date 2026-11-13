@@ -23,7 +23,7 @@ Use it when any of these is true:
 2. Start an app: `hexperiment init apps/<name>`. It writes a commented `hex.toml` and a `train.py` that follows the rules below. It never overwrites a file and lists what it created and skipped.
 3. Add the Kiro files to the project: `hexperiment init --kiro`. It writes the save hook, the `exorcise` workflow, the `ghost-hunter` agent and the steering file into `.kiro/`.
 4. Put the data at the `data.path` of `hex.toml` and edit the lines marked `CHANGE`.
-5. Make sure `hexperiment` is on the `PATH` of the shell that starts Kiro. Hooks and the ghost hunter run the bare command `hexperiment`.
+5. Make sure `hexperiment` and `hexperiment-mcp` are on the `PATH` of the shell that starts Kiro. Hooks run the bare command `hexperiment`. Kiro starts the bare command `hexperiment-mcp`, which the ghost hunter uses.
 
 The ghost hunter and the workflow work on apps below `apps/`.
 
@@ -99,7 +99,7 @@ To hand an app to an agent until the full audit approves it, start the workflow 
 
 The workflow repeats the `ghost-hunter` agent at most 5 times and stops when `apps/<name>/verdict.json` says `APPROVED`. Then it pauses for the human with the latest status and findings.
 
-The ghost hunter can edit the Python files of the app and run `hexperiment run` and `hexperiment run --fast` on it. It cannot edit `hex.toml`, `verdict.json`, `model_card.md`, `fetch_data.py`, `runs/`, `.hex/`, `data/`, `haunted/`, `.kiro/` or the hexperiment package. If it cannot fix a finding honestly, it reports the finding and stops.
+The ghost hunter edits the Python files of the app and runs the audit through the MCP tool `run_audit`; it has no shell. It cannot edit `hex.toml`, `verdict.json`, `model_card.md`, `fetch_data.py`, `runs/`, `.hex/`, `data/`, `haunted/`, `.kiro/` or the hexperiment package. If it cannot fix a finding honestly, it reports the finding and stops.
 
 ## MCP tools
 
