@@ -53,10 +53,10 @@ def test_the_real_kiro_event_gives_its_absolute_path():
 def test_the_real_event_text_with_escaped_backslashes_round_trips():
     text = (
         '{"session_id": "sess_01HZ", "hook_event_name": "PostFileSave", '
-        '"cwd": "C:\\\\Users\\\\jegad\\\\p", '
-        '"file_path": "c:\\\\Users\\\\jegad\\\\p\\\\apps\\\\x\\\\train.py"}'
+        '"cwd": "C:\\\\Users\\\\user\\\\p", '
+        '"file_path": "c:\\\\Users\\\\user\\\\p\\\\apps\\\\x\\\\train.py"}'
     )
-    assert candidate_paths(text) == ("c:\\Users\\jegad\\p\\apps\\x\\train.py",)
+    assert candidate_paths(text) == ("c:\\Users\\user\\p\\apps\\x\\train.py",)
 
 
 @pytest.mark.parametrize(
