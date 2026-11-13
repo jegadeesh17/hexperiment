@@ -22,7 +22,7 @@
 
 ## Tasks
 
-- [ ] 1. The package, the line model and the model specs
+- [x] 1. The package, the line model and the model specs
   - In `hexperiment/pyproject.toml` add `src = ["src", "tests", "benchmark"]` to `[tool.ruff]` and `pythonpath = ["benchmark"]` to the existing `[tool.pytest.ini_options]`. Do not change `tests/conftest.py`, the dependency lists or `package-data`. Setuptools finds packages under `src/` only, so `hexbench` is never packaged (Requirement 6.2).
   - Create `hexperiment/benchmark/hexbench/__init__.py` (a docstring, no imports).
   - Create `hexbench/spec.py` (pure): `Side`, `MARK`, `Line` (self-validating: no line break in `text` or `note`; a `leaky` line has a non-empty `note`; `both` and `clean` lines contain no `# LEAK:`), `both`, `leak`, `clean`, `render`, `ModelSpec`, `DataSpec`, `Mechanism` and `Case`, with the signatures and the rendering rules of "`spec.py`" in `design.md` (a leaky line gets `"  # LEAK: " + note`; a line of spaces only becomes the comment `# LEAK: note` at that indentation).
@@ -32,7 +32,7 @@
   - Tests added: about 7 (2 Hypothesis). None starts a Python process.
   - Verify: `.venv/Scripts/python -m pytest hexperiment/tests/test_benchmark_spec.py -q`, then `.venv/Scripts/python -m pytest hexperiment/tests -q` and `.venv/Scripts/python -m ruff check hexperiment`.
 
-- [ ] 2. Mechanisms 1 to 7 (L1.1 to L1.4)
+- [x] 2. Mechanisms 1 to 7 (L1.1 to L1.4)
   - Create `hexbench/mechanisms.py` (pure) with the constant `LEAK_TYPE_NAMES`: the eight names, word for word, as the owner's answer to Question 11 lists them (`L1.1` No test set; `L1.2` Pre-processing on training and test set; `L1.3` Feature selection on training and test set; `L1.4` Duplicates in datasets; `L2` Model uses features that are not legitimate; `L3.1` Temporal leakage; `L3.2` Nonindependence between training and test samples; `L3.3` Sampling bias in test distribution).
   - In the same module define the first seven `Mechanism` values in the order of the design: `no-test-set`, `scaler-all-rows`, `imputer-all-rows`, `oversample-before-split`, `target-encoding-all-rows`, `univariate-selection-all-rows`, `duplicated-rows`. Each takes from "The 13 mechanisms" in `design.md`: the key, the leak type, the one-sentence mechanism, `designed_to_catch`, the `DataSpec` (generator name, parameters, `feature_expr`), the threshold, and the slots (the leaky and clean lines, one physical line each, every leaky line with its note). Copy the design's lines; do not improve them. `MECHANISMS` is a tuple that for now holds these seven.
   - Create `hexperiment/tests/test_benchmark_cases.py` with the mechanism-level tests that can pass now: keys are unique and match `^[a-z]+(-[a-z]+)*$`; every `leak_type` is a key of `LEAK_TYPE_NAMES`; `designed_to_catch` names are ghosts of `hexperiment.ghosts.CATALOG`; thresholds are 0.60 except `univariate-selection-all-rows` at 0.52; no mechanism has a `[checks]` or waiver line in its `toml_slots`; `LEAK_TYPE_NAMES` equals the eight names above (exact spelling).
@@ -40,7 +40,7 @@
   - Tests added: about 5. None starts a Python process.
   - Verify: `.venv/Scripts/python -m pytest hexperiment/tests/test_benchmark_cases.py hexperiment/tests/test_benchmark_spec.py -q`, then the two full commands.
 
-- [ ] 3. Mechanisms 8 to 13 (L2, L3.1, L3.2) and the not-measured list
+- [x] 3. Mechanisms 8 to 13 (L2, L3.1, L3.2) and the not-measured list
   - In `hexbench/mechanisms.py` add `post-outcome-copy`, `noisy-proxy`, `weak-proxy`, `random-split-in-script`, `time-column-undeclared` and `entity-leak`, taken from "The 13 mechanisms" in `design.md` (thresholds 0.60, except 0.55 for the two `L3.1` mechanisms). `time-column-undeclared` has no leaky line in `train.py`; its leak is the `split_extra` slot of `hex.toml`. `entity-leak` and `random-split-in-script` use the `entity_column` and `time_column` fields of `DataSpec`. `MECHANISMS` now holds 13 values in file order.
   - Add `NotMeasured` (a frozen dataclass: `leak_type`, `leak_type_name`, `reason`) and `NOT_MEASURED`: one entry, `L3.3`, with the reason of Requirement 1.2 ("It depends on the population a claim is about, which neither the code nor the data shows.").
   - Extend `test_benchmark_cases.py`: 13 mechanisms; the leakage types of Requirement 1.1 are covered (`L1.1`, four of `L1.2`, `L1.3`, `L1.4`, three of `L2`, two of `L3.1`, `L3.2`); `L3.3` is in `NOT_MEASURED` with a reason and in no mechanism; `designed_to_catch` is empty exactly for `weak-proxy` and `entity-leak` and lists The Prophet for `time-column-undeclared`; `time_column` is set in `DataSpec` for both `L3.1` mechanisms and `entity_column` for `entity-leak`; the thresholds are 0.60 except 0.52 and 0.55 as above. (The test of the 39 cases follows in task 4.)
