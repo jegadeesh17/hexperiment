@@ -132,7 +132,7 @@
   - Run the whole suite (`.venv/Scripts/python -m pytest hexperiment/tests -q --durations=10`) and `.venv/Scripts/python -m ruff check hexperiment`; both must report no problems.
   - _Requirements: 2.5, 3.1, 3.4, 3.6_
 
-- [ ] 13. **Owner:** the live headless check of the loop
+- [x] 13. **Owner:** the live headless check of the loop
   - Copy `apps/hotel-cancellations` to `apps/zz-check` without `runs/`, `verdict.json`, `model_card.md` and `.hex/`, and put its haunted script in place as `train.py`. Run `exorcise` on it headless with the trust list of "Headless runs" in `design.md` (no shell tool). Pass: the log shows `run_audit` calls and no shell tool, and the run ends with `apps/zz-check/verdict.json` APPROVED. Delete `apps/zz-check` afterwards.
 
 - [ ] 14. The stop check
