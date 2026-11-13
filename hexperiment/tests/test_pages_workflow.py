@@ -378,13 +378,29 @@ def test_a_changed_command_is_caught() -> None:
         check_command(text, benchmark_exists=False)
 
 
+FLAG_LINE = "\n          --benchmark hexperiment/benchmark/results.json"
+
+
+def workflow_without_flag() -> str:
+    return read_workflow().replace(FLAG_LINE, "")
+
+
+def workflow_with_flag() -> str:
+    text = workflow_without_flag()
+    old = '"$REPO_URL"\n'
+    assert old in text, f"The test needs {old!r} in the workflow to add the flag."
+    return text.replace(old, '"$REPO_URL"' + FLAG_LINE + "\n", 1)
+
+
 def test_missing_benchmark_flag_is_caught_when_the_file_exists() -> None:
+    text = workflow_without_flag()
+    check_command(text, benchmark_exists=False)
     with pytest.raises(AssertionError):
-        check_command(read_workflow(), benchmark_exists=True)
+        check_command(text, benchmark_exists=True)
 
 
 def test_benchmark_flag_without_the_file_is_caught() -> None:
-    text = mutate('"$REPO_URL"', '"$REPO_URL"' + BENCHMARK_FLAG)
+    text = workflow_with_flag()
     with pytest.raises(AssertionError):
         check_command(text, benchmark_exists=False)
     check_command(text, benchmark_exists=True)
