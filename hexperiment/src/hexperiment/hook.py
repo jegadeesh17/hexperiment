@@ -11,15 +11,33 @@ argument and does not import ``cli``.
 
 from __future__ import annotations
 
+import contextlib
+import json
 import os
+from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from hexperiment.hook_event import candidate_paths
+from hexperiment.hook_event import candidate_paths, session_id
 from hexperiment.models import RunOutcome
-from hexperiment.workspace import RunApp, find_app_for_file, relative_posix
+
+if TYPE_CHECKING:
+    from hexperiment.workspace import RunApp
 
 HOOK_TIMEOUT_SECONDS = 120  # the `timeout` of the hook in .kiro/hooks/hexperiment.json
 HOOK_RUN_CAP_SECONDS = 100  # per execution; leaves 20 s for start-up and writing
+
+SESSION_FILE = "agent-session"  # inside the app's .hex/ folder
+STATE_FOLDER = ".hex"
+MAX_SESSION_FILE_BYTES = 256
+# The stop check must not load pandas, NumPy or scikit-learn (Requirement 9.6), and
+# `workspace` imports `canary`, which does. So this module repeats the three names
+# it needs from `config`/`canary`/`workspace`; test_hook.py pins them to the originals.
+CONFIG_NAME = "hex.toml"
+SCRIPT_NAME = "train.py"
+VENV_MARKER = "pyvenv.cfg"
+SKIPPED_FOLDERS = frozenset({"node_modules", "__pycache__"})
+APPROVED = "APPROVED"
 
 FULL_CHECK_NOTICE = (
     "Fast check only: the canary test did not run, so this result can never be "
@@ -36,8 +54,11 @@ def handle_hook(event_text: str, *, workspace: Path, run: RunApp) -> str:
     existing file and sits below an app (Requirements 1.2, 1.4). The first such
     path starts exactly one fast run, capped so that it ends within the hook
     timeout (Requirement 1.6). The run is an ordinary run, so it is recorded in
-    the history and counts as a test-set use (Requirement 1.7).
+    the history and counts as a test-set use (Requirement 1.7). Before the run the
+    session of the event is written to the app (Requirement 9.2).
     """
+    from hexperiment.workspace import find_app_for_file, relative_posix
+
     for raw in candidate_paths(event_text):
         absolute = _path_inside_workspace(raw, workspace)
         if absolute is None or not absolute.is_file():
@@ -45,9 +66,126 @@ def handle_hook(event_text: str, *, workspace: Path, run: RunApp) -> str:
         app = find_app_for_file(absolute, workspace)
         if app is None:
             continue
+        session = session_id(event_text)
+        if session is not None:
+            record_session(app, session)
         outcome = run(app, full=False, timeout_cap=HOOK_RUN_CAP_SECONDS)
         return format_hook_output(outcome, relative_posix(app, workspace))
     return ""
+
+
+def record_session(app: Path, session: str) -> None:
+    """Write ``session`` to ``<app>/.hex/agent-session``; a failure is ignored."""
+    with contextlib.suppress(OSError):
+        folder = app / STATE_FOLDER
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / SESSION_FILE).write_bytes(f"{session}\n".encode())
+
+
+def handle_stop(event_text: str, *, workspace: Path) -> str:
+    """The message for the agent about its unapproved apps, or ``""`` (Requirement 9).
+
+    An app is named when its ``.hex/agent-session`` holds the session of the event
+    and its ``verdict.json`` is missing or does not say ``APPROVED``. Nothing is
+    run or written.
+    """
+    session = session_id(event_text)
+    if session is None:
+        return ""
+    pending = []
+    for app, relative in _find_apps(workspace):
+        if _read_session(app) != session:
+            continue
+        status = _read_status(app)
+        if status != APPROVED:
+            pending.append((relative, status))
+    return format_stop_message(sorted(pending)) if pending else ""
+
+
+def format_stop_message(pending: Sequence[tuple[str, str | None]]) -> str:
+    """The text for the agent: one line per app, then what not to do (Requirement 9.4).
+
+    ``pending`` holds ``(app path, status)``; the status is ``None`` when the app
+    has no verdict. ``REJECTED`` asks for a fix or a plain report; every other
+    status, including an unknown one, asks for the full audit.
+    """
+    lines = ["Hexperiment: not approved yet."]
+    for app, status in pending:
+        lines.append(f"- {app}: {_stop_line(app, status)}")
+    lines.append(
+        "Do not call the work done until each app above is APPROVED or "
+        "reported as not approved."
+    )
+    return "\n".join(lines)
+
+
+def _stop_line(app: str, status: str | None) -> str:
+    audit = (
+        "Run the full audit: the hexperiment MCP tool run_audit with app "
+        f"{app} and mode full (or: hexperiment run {app})."
+    )
+    if status is None:
+        return f"changed in this session and has no verdict. {audit}"
+    if status == "REJECTED":
+        return (
+            "changed in this session; its last full audit is REJECTED. Fix the "
+            f"findings at their cause, or tell the user plainly that {app} is "
+            "REJECTED and why."
+        )
+    return (
+        f"changed in this session; its verdict is UNVERIFIED (fast check only). {audit}"
+    )
+
+
+def _find_apps(workspace: Path) -> list[tuple[Path, str]]:
+    """The apps below ``workspace`` as ``(folder, relative path)``, without pandas.
+
+    The same walk as ``workspace.discover_apps`` (links are not followed, hidden
+    folders, ``node_modules``, ``__pycache__`` and virtual environments are
+    skipped, an app is not entered), but without reading ``hex.toml``.
+    """
+    root = workspace.resolve()
+    found: list[tuple[Path, str]] = []
+    for folder, names, files in os.walk(root, followlinks=False):
+        here = Path(folder)
+        if CONFIG_NAME in files and SCRIPT_NAME in files:
+            found.append((here, _relative(here, root)))
+            names[:] = []
+            continue
+        names[:] = [n for n in names if not _skipped(here / n)]
+    return found
+
+
+def _skipped(folder: Path) -> bool:
+    name = folder.name
+    return (
+        name.startswith(".")
+        or name in SKIPPED_FOLDERS
+        or (folder / VENV_MARKER).exists()
+    )
+
+
+def _relative(folder: Path, root: Path) -> str:
+    parts = folder.relative_to(root).parts
+    return "/".join(parts) if parts else "."
+
+
+def _read_session(app: Path) -> str | None:
+    try:
+        with open(app / STATE_FOLDER / SESSION_FILE, "rb") as handle:
+            data = handle.read(MAX_SESSION_FILE_BYTES)
+        return data.decode("utf-8").strip()
+    except (OSError, ValueError):
+        return None
+
+
+def _read_status(app: Path) -> str | None:
+    try:
+        verdict = json.loads((app / "verdict.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError):
+        return None
+    status = verdict.get("status") if isinstance(verdict, dict) else None
+    return status if isinstance(status, str) else None
 
 
 def _path_inside_workspace(raw: str, workspace: Path) -> Path | None:

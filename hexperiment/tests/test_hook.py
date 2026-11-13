@@ -5,16 +5,25 @@ A stub runner stands in for ``cli.run_app``, so no test here starts a training r
 
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
+from hexperiment import canary, config
+from hexperiment import hook as hook_module
+from hexperiment import workspace as workspace_module
 from hexperiment.hook import (
     FULL_CHECK_NOTICE,
     HOOK_RUN_CAP_SECONDS,
     HOOK_TIMEOUT_SECONDS,
+    SESSION_FILE,
     format_hook_output,
+    format_stop_message,
     handle_hook,
+    handle_stop,
+    record_session,
 )
 from hexperiment.models import RunOutcome, Status
 
@@ -465,3 +474,230 @@ def test_handle_hook_formats_a_rejected_run_for_the_agent(workspace):
         run=StubRun(REJECTED),
     )
     assert output == f"{REJECTED_TEXT}\n{notice('apps/churn')}"
+
+
+# --- the stop check (Requirement 9) ---------------------------------------------------
+
+SESSION = "sess_01HZ"
+OTHER_SESSION = "sess_other"
+STOP_EVENT = json.dumps(
+    {"session_id": SESSION, "hook_event_name": "Stop", "cwd": "C:\\work"}
+)
+
+
+def session_app(folder: Path, *, session: str | None = SESSION, status=None) -> Path:
+    """An app with a session file and, when ``status`` is given, a verdict."""
+    make_app(folder)
+    if session is not None:
+        record_session(folder, session)
+    if status is not None:
+        (folder / "verdict.json").write_text(
+            json.dumps({"status": status}), encoding="utf-8"
+        )
+    return folder
+
+
+def tree(root: Path) -> dict[str, bytes | None]:
+    return {
+        str(p.relative_to(root)): (p.read_bytes() if p.is_file() else None)
+        for p in sorted(root.rglob("*"))
+    }
+
+
+def test_the_names_copied_for_the_light_import_equal_the_originals():
+    assert hook_module.CONFIG_NAME == config.CONFIG_FILENAME
+    assert hook_module.SCRIPT_NAME == canary.SCRIPT_NAME
+    assert hook_module.VENV_MARKER == workspace_module.VENV_MARKER
+    assert hook_module.SKIPPED_FOLDERS == workspace_module.SKIPPED_FOLDERS
+
+
+def test_record_session_writes_the_id_with_a_final_newline(tmp_path):
+    app = make_app(tmp_path / "app")
+    record_session(app, SESSION)
+    assert (app / ".hex" / SESSION_FILE).read_bytes() == SESSION.encode() + b"\n"
+    assert SESSION_FILE == "agent-session"
+
+
+def test_record_session_replaces_an_earlier_id(tmp_path):
+    app = make_app(tmp_path / "app")
+    record_session(app, SESSION)
+    record_session(app, OTHER_SESSION)
+    assert (app / ".hex" / SESSION_FILE).read_text() == OTHER_SESSION + "\n"
+
+
+def test_record_session_ignores_a_failed_write(tmp_path):
+    app = make_app(tmp_path / "app")
+    (app / ".hex").write_text("not a folder", encoding="utf-8")
+    record_session(app, SESSION)  # must not raise
+
+
+def test_the_hook_records_the_session_before_the_run(workspace):
+    app = make_app(workspace / "apps" / "churn")
+    seen: list[str] = []
+
+    def run(app_dir, *, full, timeout_cap=None):
+        seen.append((app_dir / ".hex" / SESSION_FILE).read_text(encoding="utf-8"))
+        return UNVERIFIED
+
+    text = event(file_path=str(app / "train.py"), session_id=SESSION)
+    handle_hook(text, workspace=workspace, run=run)
+    assert seen == [SESSION + "\n"]
+
+
+def test_an_event_without_a_session_id_records_nothing(workspace):
+    app = make_app(workspace / "apps" / "churn")
+    handle_hook(
+        event(file_path=str(app / "train.py")), workspace=workspace, run=StubRun()
+    )
+    assert not (app / ".hex" / SESSION_FILE).exists()
+
+
+def test_a_failed_session_write_does_not_change_the_hook_output(workspace):
+    app = make_app(workspace / "apps" / "churn")
+    text = event(file_path=str(app / "train.py"), session_id=SESSION)
+    clean = handle_hook(text, workspace=workspace, run=StubRun())
+    (app / ".hex" / SESSION_FILE).unlink()
+    (app / ".hex").rmdir()
+    (app / ".hex").write_text("not a folder", encoding="utf-8")
+    run = StubRun()
+    assert handle_hook(text, workspace=workspace, run=run) == clean
+    assert len(run.calls) == 1
+
+
+def test_no_session_file_gives_no_message(workspace):
+    session_app(workspace / "apps" / "churn", session=None)
+    assert handle_stop(STOP_EVENT, workspace=workspace) == ""
+
+
+def test_another_session_gives_no_message(workspace):
+    session_app(workspace / "apps" / "churn", session=OTHER_SESSION)
+    assert handle_stop(STOP_EVENT, workspace=workspace) == ""
+
+
+def test_an_approved_app_of_this_session_gives_no_message(workspace):
+    session_app(workspace / "apps" / "churn", status="APPROVED")
+    assert handle_stop(STOP_EVENT, workspace=workspace) == ""
+
+
+def test_an_unverified_app_of_this_session_is_named_with_the_audit_instruction(
+    workspace,
+):
+    session_app(workspace / "apps" / "churn", status="UNVERIFIED")
+    message = handle_stop(STOP_EVENT, workspace=workspace)
+    assert message == format_stop_message([("apps/churn", "UNVERIFIED")])
+    assert "run_audit with app apps/churn and mode full" in message
+
+
+def test_a_rejected_app_of_this_session_is_named_with_the_fix_instruction(workspace):
+    session_app(workspace / "apps" / "churn", status="REJECTED")
+    message = handle_stop(STOP_EVENT, workspace=workspace)
+    assert message == format_stop_message([("apps/churn", "REJECTED")])
+    assert "tell the user plainly that apps/churn is REJECTED" in message
+
+
+def test_an_app_without_a_verdict_is_named(workspace):
+    session_app(workspace / "apps" / "churn")
+    message = handle_stop(STOP_EVENT, workspace=workspace)
+    assert message == format_stop_message([("apps/churn", None)])
+    assert "has no verdict" in message
+
+
+@pytest.mark.parametrize("content", ["{not json", "[]", "null", '{"status": 3}', ""])
+def test_an_unusable_verdict_counts_as_no_verdict(workspace, content):
+    app = session_app(workspace / "apps" / "churn")
+    (app / "verdict.json").write_text(content, encoding="utf-8")
+    assert handle_stop(STOP_EVENT, workspace=workspace) == format_stop_message(
+        [("apps/churn", None)]
+    )
+
+
+def test_an_unknown_status_is_treated_like_unverified(workspace):
+    session_app(workspace / "apps" / "churn", status="MAYBE")
+    message = handle_stop(STOP_EVENT, workspace=workspace)
+    assert "its verdict is UNVERIFIED (fast check only)" in message
+
+
+def test_two_apps_are_listed_sorted_by_path(workspace):
+    session_app(workspace / "apps" / "zeta", status="REJECTED")
+    session_app(workspace / "apps" / "alpha")
+    session_app(workspace / "apps" / "mid", status="APPROVED")
+    lines = handle_stop(STOP_EVENT, workspace=workspace).splitlines()
+    assert [line.split(":")[0] for line in lines[1:-1]] == [
+        "- apps/alpha",
+        "- apps/zeta",
+    ]
+
+
+def test_an_event_without_a_valid_session_id_gives_no_message(workspace):
+    session_app(workspace / "apps" / "churn")
+    for text in ("", "{}", "{not json", json.dumps({"session_id": "a b"})):
+        assert handle_stop(text, workspace=workspace) == ""
+
+
+def test_apps_in_hidden_and_environment_folders_are_not_looked_at(workspace):
+    session_app(workspace / ".hidden" / "churn")
+    session_app(workspace / "node_modules" / "churn")
+    venv = workspace / "venv"
+    venv.mkdir()
+    (venv / "pyvenv.cfg").write_text("", encoding="utf-8")
+    session_app(venv / "churn")
+    assert handle_stop(STOP_EVENT, workspace=workspace) == ""
+
+
+def test_the_stop_check_names_an_app_at_the_workspace_root_with_a_dot(workspace):
+    session_app(workspace)
+    assert "- .: " in handle_stop(STOP_EVENT, workspace=workspace)
+
+
+def test_the_stop_check_runs_nothing_and_writes_nothing(workspace):
+    session_app(workspace / "apps" / "churn", status="UNVERIFIED")
+    before = tree(workspace)
+    handle_stop(STOP_EVENT, workspace=workspace)
+    assert tree(workspace) == before
+
+
+def test_the_message_lines_are_exactly_as_designed():
+    message = format_stop_message(
+        [("apps/churn", "UNVERIFIED"), ("apps/fraud", "REJECTED"), ("apps/new", None)]
+    )
+    assert message.splitlines() == [
+        "Hexperiment: not approved yet.",
+        "- apps/churn: changed in this session; its verdict is UNVERIFIED (fast "
+        "check only). Run the full audit: the hexperiment MCP tool run_audit with "
+        "app apps/churn and mode full (or: hexperiment run apps/churn).",
+        "- apps/fraud: changed in this session; its last full audit is REJECTED. "
+        "Fix the findings at their cause, or tell the user plainly that "
+        "apps/fraud is REJECTED and why.",
+        "- apps/new: changed in this session and has no verdict. Run the full "
+        "audit: the hexperiment MCP tool run_audit with app apps/new and mode "
+        "full (or: hexperiment run apps/new).",
+        "Do not call the work done until each app above is APPROVED or reported "
+        "as not approved.",
+    ]
+
+
+def test_importing_the_hook_module_loads_no_data_science_library():
+    code = (
+        "import sys, hexperiment.hook; "
+        "bad = [m for m in ('pandas', 'numpy', 'sklearn') if m in sys.modules]; "
+        "print(','.join(bad)); sys.exit(1 if bad else 0)"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_the_stop_check_loads_no_data_science_library(workspace):
+    session_app(workspace / "apps" / "churn", status="UNVERIFIED")
+    code = (
+        "import sys; from pathlib import Path; from hexperiment.hook import "
+        f"handle_stop; handle_stop({STOP_EVENT!r}, "
+        f"workspace=Path({str(workspace)!r})); "
+        "bad = [m for m in ('pandas', 'numpy', 'sklearn') if m in sys.modules]; "
+        "print(','.join(bad)); sys.exit(1 if bad else 0)"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

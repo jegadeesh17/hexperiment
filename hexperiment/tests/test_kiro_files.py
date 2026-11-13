@@ -68,17 +68,40 @@ def read_kiro_json(relative: str) -> dict[str, Any]:
 # --- the hook (Requirement 1.1) ------------------------------------------------------
 
 
-def hook_entry() -> dict[str, Any]:
+def hook_entry(name: str = "hexperiment-check-on-save") -> dict[str, Any]:
     config = read_kiro_json(HOOK_FILE)
     assert config["version"] == "v1"
-    assert len(config["hooks"]) == 1
-    return config["hooks"][0]
+    assert [h["name"] for h in config["hooks"]] == [
+        "hexperiment-check-on-save",
+        "hexperiment-check-on-stop",
+    ]
+    return next(h for h in config["hooks"] if h["name"] == name)
 
 
-def test_the_hook_file_has_version_v1_and_one_named_hook():
+def stop_entry() -> dict[str, Any]:
+    return hook_entry("hexperiment-check-on-stop")
+
+
+def test_the_hook_file_has_version_v1_and_two_named_hooks():
+    for name in ("hexperiment-check-on-save", "hexperiment-check-on-stop"):
+        entry = hook_entry(name)
+        assert isinstance(entry["description"], str) and entry["description"].strip()
+
+
+def test_the_stop_hook_runs_the_stop_check_with_a_30_second_timeout():
+    entry = stop_entry()
+    assert entry["trigger"] == "Stop"
+    assert entry["action"] == {"type": "command", "command": "hexperiment hook --stop"}
+    assert entry["timeout"] == 30
+    assert "matcher" not in entry
+
+
+def test_the_stop_hook_leaves_the_save_hook_unchanged():
     entry = hook_entry()
-    assert isinstance(entry["name"], str) and entry["name"].strip()
-    assert isinstance(entry["description"], str) and entry["description"].strip()
+    assert entry["trigger"] == EXPECTED_TRIGGER
+    assert entry["action"] == {"type": "command", "command": "hexperiment hook"}
+    assert entry["timeout"] == 120
+    assert entry["matcher"] == ".*\\.py$"
 
 
 def test_the_hook_fires_when_the_agent_saves_a_file():

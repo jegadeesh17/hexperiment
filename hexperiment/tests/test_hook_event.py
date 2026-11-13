@@ -17,6 +17,7 @@ from hexperiment.hook_event import (
     MAX_PATH_LENGTH,
     PATH_KEYS,
     candidate_paths,
+    session_id,
 )
 
 # The real event: a flat object; the path is absolute with backslashes and a
@@ -329,3 +330,77 @@ def planted_events(draw):
 def test_a_planted_path_is_found_at_any_depth_up_to_eight(planted):
     path, event = planted
     assert path in candidate_paths(json.dumps(event))
+
+
+# --- session_id (Requirement 9) -------------------------------------------------------
+
+STOP_EVENT = {"session_id": "sess_01HZ", "hook_event_name": "Stop", "cwd": REAL_CWD}
+
+
+def test_the_real_stop_event_gives_its_session_id():
+    assert session_id(json.dumps(STOP_EVENT)) == "sess_01HZ"
+
+
+def test_the_save_event_gives_its_session_id_too():
+    assert session_id(json.dumps(REAL_EVENT)) == "sess_01HZ"
+
+
+@pytest.mark.parametrize("value", ["a", "A-b_9", "x" * 128])
+def test_valid_session_ids_are_returned(value):
+    assert session_id(json.dumps({"session_id": value})) == value
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        {"hook_event_name": "Stop"},
+        {"session_id": None},
+        {"session_id": 7},
+        {"session_id": ["sess_1"]},
+        {"session_id": ""},
+        {"session_id": "x" * 129},
+        {"session_id": "has space"},
+        {"session_id": "a/b"},
+        {"session_id": "..\\x"},
+        {"session_id": "sess_1\n"},
+        {"session_id": "sess_\u00e9"},
+        {"event": {"session_id": "sess_1"}},
+        ["sess_1"],
+        [{"session_id": "sess_1"}],
+        "sess_1",
+        None,
+        7,
+    ],
+)
+def test_other_session_ids_give_none(event):
+    assert session_id(json.dumps(event)) is None
+
+
+@pytest.mark.parametrize("text", ["", "   ", "{not json", "null", "[]", "\x00"])
+def test_text_that_is_not_an_event_gives_no_session_id(text):
+    assert session_id(text) is None
+
+
+def test_a_deeply_nested_text_gives_none_without_raising():
+    assert session_id("[" * 100_000) is None
+
+
+@given(st.text(max_size=300))
+def test_session_id_never_raises_and_returns_none_or_a_valid_id(text):
+    result = session_id(text)
+    assert result is None or (0 < len(result) <= 128 and result.isascii())
+
+
+@given(
+    st.recursive(
+        st.none() | st.text(max_size=20),
+        lambda c: (
+            st.lists(c, max_size=3)
+            | st.dictionaries(st.text(max_size=8), c, max_size=3)
+        ),
+        max_leaves=20,
+    )
+)
+def test_session_id_never_raises_on_any_json_value(value):
+    result = session_id(json.dumps(value))
+    assert result is None or isinstance(result, str)

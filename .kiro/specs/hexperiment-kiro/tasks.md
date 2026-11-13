@@ -135,7 +135,7 @@
 - [x] 13. **Owner:** the live headless check of the loop
   - Copy `apps/hotel-cancellations` to `apps/zz-check` without `runs/`, `verdict.json`, `model_card.md` and `.hex/`, and put its haunted script in place as `train.py`. Run `exorcise` on it headless with the trust list of "Headless runs" in `design.md` (no shell tool). Pass: the log shows `run_audit` calls and no shell tool, and the run ends with `apps/zz-check/verdict.json` APPROVED. Delete `apps/zz-check` afterwards.
 
-- [ ] 14. The stop check
+- [x] 14. The stop check
   - In `hexperiment/src/hexperiment/hook_event.py` add `session_id(event_text)` as in `design.md` ("The stop check"). It stays pure and never raises.
   - In `hexperiment/src/hexperiment/hook.py` add `SESSION_FILE`, `record_session`, `handle_stop` and `format_stop_message`; `handle_hook` calls `record_session` before the run when the event has a session id. `hook.py` must not import `canary`, `auditor`, pandas, NumPy or scikit-learn at module level.
   - In `hexperiment/src/hexperiment/cli.py` add the flag `--stop` to the `hook` subcommand and `_stop_command`: message on standard error and exit `1` when `handle_stop` returns text; otherwise no output and exit `0`, also on any exception.

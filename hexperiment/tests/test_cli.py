@@ -1149,3 +1149,113 @@ def test_run_help_describes_the_command_and_lists_the_four_exit_codes(capsys):
     for code, meaning in codes.items():
         line = next(ln for ln in text.splitlines() if ln.startswith(f"  {code}  "))
         assert meaning in line
+
+
+# --- hexperiment hook --stop (Requirement 9) ------------------------------------------
+
+STOP_SESSION = "sess_01HZ"
+
+
+def stop_event(session: str = STOP_SESSION) -> str:
+    return json.dumps(
+        {"session_id": session, "hook_event_name": "Stop", "cwd": "C:\\work"}
+    )
+
+
+def test_the_parser_accepts_the_stop_flag_only_on_hook():
+    parser = build_parser()
+    assert parser.parse_args(["hook", "--stop"]).stop is True
+    assert parser.parse_args(["hook"]).stop is False
+    with pytest.raises(SystemExit) as stop:
+        parser.parse_args(["run", "app", "--stop"])
+    assert stop.value.code == 2
+
+
+def test_stop_names_an_unapproved_app_of_the_session_on_stderr_and_exits_1(
+    project, monkeypatch, capsys
+):
+    app = make_app(project)
+    (app / "verdict.json").write_text('{"status": "UNVERIFIED"}', encoding="utf-8")
+    (app / ".hex").mkdir()
+    (app / ".hex" / "agent-session").write_text(STOP_SESSION + "\n", encoding="utf-8")
+    feed_stdin(monkeypatch, stop_event())
+    assert main(["hook", "--stop"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    lines = captured.err.splitlines()
+    assert lines[0] == "Hexperiment: not approved yet."
+    assert lines[1].startswith(
+        "- app: changed in this session; its verdict is UNVERIFIED"
+    )
+
+
+def test_stop_exits_0_without_output_for_another_session(project, monkeypatch, capsys):
+    app = make_app(project)
+    (app / ".hex").mkdir()
+    (app / ".hex" / "agent-session").write_text("sess_other\n", encoding="utf-8")
+    feed_stdin(monkeypatch, stop_event())
+    assert main(["hook", "--stop"]) == 0
+    captured = capsys.readouterr()
+    assert (captured.out, captured.err) == ("", "")
+
+
+@pytest.mark.parametrize("data", ["", "   ", "{not json", "{}", "[]"])
+def test_stop_exits_0_without_output_for_an_empty_event(
+    data, project, monkeypatch, capsys
+):
+    make_app(project)
+    feed_stdin(monkeypatch, data)
+    assert main(["hook", "--stop"]) == 0
+    captured = capsys.readouterr()
+    assert (captured.out, captured.err) == ("", "")
+
+
+def test_stop_exits_0_without_output_when_the_handler_raises(
+    project, monkeypatch, capsys
+):
+    def explode(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(cli, "handle_stop", explode)
+    feed_stdin(monkeypatch, stop_event())
+    assert main(["hook", "--stop"]) == 0
+    captured = capsys.readouterr()
+    assert (captured.out, captured.err) == ("", "")
+
+
+def test_stop_exits_0_without_output_for_an_invalid_workspace_variable(
+    project, monkeypatch, capsys
+):
+    monkeypatch.setenv("HEXPERIMENT_WORKSPACE", str(project / "nowhere"))
+    feed_stdin(monkeypatch, stop_event())
+    assert main(["hook", "--stop"]) == 0
+    captured = capsys.readouterr()
+    assert (captured.out, captured.err) == ("", "")
+
+
+def test_stop_starts_no_run(project, run_with, fake_runner, monkeypatch, capsys):
+    app = make_app(project)
+    (app / "verdict.json").unlink()
+    (app / ".hex").mkdir()
+    (app / ".hex" / "agent-session").write_text(STOP_SESSION + "\n", encoding="utf-8")
+    runner = run_with(**passing_plans(fake_runner))
+    feed_stdin(monkeypatch, stop_event())
+    assert main(["hook", "--stop"]) == 1
+    assert runner.calls == []
+    assert not (app / "runs").exists()
+    capsys.readouterr()
+
+
+def test_a_save_hook_then_a_stop_hook_name_the_app(
+    project, run_with, fake_runner, monkeypatch, capsys
+):
+    app = make_app(project)
+    run_with(**passing_plans(fake_runner))
+    feed_stdin(monkeypatch, hook_event_for(app))
+    assert main(["hook"]) == 0
+    capsys.readouterr()
+    feed_stdin(monkeypatch, stop_event("sess_01HZ"))
+    assert main(["hook", "--stop"]) == 1
+    assert "- app: changed in this session; its verdict is UNVERIFIED" in (
+        capsys.readouterr().err
+    )

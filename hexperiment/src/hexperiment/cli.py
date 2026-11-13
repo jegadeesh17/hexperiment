@@ -18,7 +18,7 @@ from hexperiment.canary import SCRIPT_NAME, ExecutionFailed, run_executions
 from hexperiment.config import load_config
 from hexperiment.console import print_text
 from hexperiment.errors import HexInputError
-from hexperiment.hook import handle_hook
+from hexperiment.hook import handle_hook, handle_stop
 from hexperiment.init import InitReport, format_report, init_app, init_kiro
 from hexperiment.models import RunOutcome, Status, Verdict
 from hexperiment.runs import app_lock, clear_app_verdict, finalize_run, new_run_id
@@ -71,10 +71,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="also run the canary test (the default)",
     )
     run.set_defaults(full=True)
-    commands.add_parser(
+    hook = commands.add_parser(
         "hook",
         help="check the app that owns a file saved by an agent (reads a Kiro hook "
-        "event from standard input; always exits 0)",
+        "event from standard input; exits 0, or 1 with --stop)",
+    )
+    hook.add_argument(
+        "--stop",
+        action="store_true",
+        help="instead, name the apps this agent session changed that are not "
+        "APPROVED (message on standard error and exit 1; nothing is run)",
     )
     init = commands.add_parser(
         "init",
@@ -128,7 +134,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run a command, print its text and return the exit code (16.1 to 16.5)."""
     args = build_parser().parse_args(argv)
     if args.command == "hook":
-        return _hook_command()
+        return _stop_command() if args.stop else _hook_command()
     if args.command == "init":
         return _init_command(args.app_dir, kiro=args.kiro)
     if args.command == "gallery":
@@ -208,6 +214,24 @@ def _hook_command() -> int:
         with contextlib.suppress(Exception):
             print_text(output)
     return 0
+
+
+def _stop_command() -> int:
+    """``hexperiment hook --stop``: tell the agent which of its apps are not approved.
+
+    A message goes to standard error with exit code 1, which Kiro gives to the
+    agent; no message, or any failure, gives no output and exit code 0
+    (Requirement 9.4, 9.5).
+    """
+    try:
+        message = handle_stop(_read_event_text(), workspace=resolve_workspace())
+    except Exception:
+        return 0
+    if not message:
+        return 0
+    with contextlib.suppress(Exception):
+        print_text(message, sys.stderr)
+    return 1
 
 
 def _init_command(app_dir: str | None, *, kiro: bool) -> int:

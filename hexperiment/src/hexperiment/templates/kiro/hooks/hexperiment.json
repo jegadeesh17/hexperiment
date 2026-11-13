@@ -11,6 +11,16 @@
         "command": "hexperiment hook"
       },
       "timeout": 120
+    },
+    {
+      "name": "hexperiment-check-on-stop",
+      "description": "When the agent ends its turn, names the apps it changed in this session that are not APPROVED and tells it to run the full audit or to say plainly that the work is not done. Exits 1 only then; Kiro gives the agent the message of a Stop hook that exits 1.",
+      "trigger": "Stop",
+      "action": {
+        "type": "command",
+        "command": "hexperiment hook --stop"
+      },
+      "timeout": 30
     }
   ]
 }

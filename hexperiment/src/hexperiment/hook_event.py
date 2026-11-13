@@ -9,6 +9,7 @@ workspace or belongs to an app is the caller's job.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 from urllib.parse import urlparse
 from urllib.request import url2pathname
@@ -30,6 +31,7 @@ MAX_EVENT_DEPTH = 12  # the event itself is depth 0; deeper values are ignored
 MAX_CANDIDATES = 20
 MAX_PATH_LENGTH = 1024
 PYTHON_SUFFIX = ".py"
+_SESSION_ID = re.compile(r"[A-Za-z0-9_-]{1,128}", re.ASCII)
 
 
 def candidate_paths(event_text: str) -> tuple[str, ...]:
@@ -55,6 +57,25 @@ def candidate_paths(event_text: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(primary if has_path_value else secondary))[
         :MAX_CANDIDATES
     ]
+
+
+def session_id(event_text: str) -> str | None:
+    """The agent session of a hook event, or ``None`` (Requirement 9).
+
+    The event must be a JSON object whose top-level ``session_id`` is a string of
+    1 to 128 letters, digits, ``_`` or ``-``. Anything else, including text that
+    is not JSON, gives ``None``. It never raises.
+    """
+    try:
+        event = json.loads(event_text)
+    except (ValueError, TypeError, RecursionError):
+        return None
+    if not isinstance(event, dict):
+        return None
+    value = event.get("session_id")
+    if isinstance(value, str) and _SESSION_ID.fullmatch(value):
+        return value
+    return None
 
 
 def _collect(
