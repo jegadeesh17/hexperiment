@@ -66,11 +66,25 @@ For each mechanism the results file also records the check it was designed to ca
 - **Thresholds differ between mechanisms.** The metric threshold in `hex.toml` is lower for the cases whose honest score is expected to be low (`univariate-selection-all-rows`, and the two temporal mechanisms). It is the same in the leaky app and its twin, and it is not chosen from a verdict.
 - **A leak has to move the score.** After each case the runner compares the leaky and the clean score. If they are equal to four decimals it prints `NO EFFECT`, and it lists the cases whose effect could not be checked because a score is missing. This is a report for the maintainer, not a failure.
 
+## What we expected before the first run
+
+We wrote these predictions into the benchmark's design before any case was run (commit `8dd6b24`, 2026-11-12). The numbers refer to the list of mechanisms above.
+
+| Mechanisms | Predicted rejected | By |
+|---|---|---|
+| 1, 4, 7 | 9 of 9 | The Doppelganger |
+| 2, 3, 5, 6 | 12 of 12 | The Peeking Spirit (6 is the least certain) |
+| 8, 9 | 6 of 6 | The Possession |
+| 11 | 3 of 3 | The Prophet |
+| 10, 12, 13 | 0 of 9 | none: misses by design or by construction |
+
+Predicted 30 of 39 leaky apps rejected, 0 of 39 clean twins rejected. These are predictions, not targets: nothing in the cases was adjusted toward them. Before the complete run we ran each mechanism once to check that its scripts run and that its leak moves the score; no case needed a change, and those runs are not the result.
+
 ## How to run it
 
 Run all commands from the repository root with the project's virtual environment.
 
-The whole benchmark takes about 15 to 25 minutes. It runs one case at a time, so that no run competes with another for the processor. It writes each case to a temporary folder, deletes the folder after the case, and writes the results file only at the end, so an interrupted run leaves no partial file.
+The whole benchmark takes about 40 minutes on a 2019 four-core laptop on a power-saving plan, and less on a faster machine. It runs one case at a time, so that no run competes with another for the processor. It writes each case to a temporary folder, deletes the folder after the case, and writes the results file only at the end, so an interrupted run leaves no partial file.
 
 ```powershell
 .venv/Scripts/python hexperiment/benchmark/run_benchmark.py --out hexperiment/benchmark/results.json
