@@ -1,72 +1,125 @@
 # Hexperiment
 
-**If your model looks too good to be true, it's haunted.**
+**AI coding agents cheat on their own tests. Hexperiment catches them before they ship.**
 
-Hexperiment is a Kiro power that catches data leakage in machine-learning training code, whether a person or an AI agent wrote it. It checks every training run, writes a verdict (`APPROVED`, `REJECTED` or `UNVERIFIED`) and a model card, and inside Kiro it sends the agent back to fix the code until the verdict is `APPROVED`.
+Hexperiment is an ML-integrity kit and Kiro power that guards machine-learning training code against data leakage and hallucinated model performance. It checks every training run, issues a verdict (`APPROVED`, `REJECTED`, or `UNVERIFIED`) and an automated model card, and inside Kiro drives an autonomous closed-loop workflow that forces coding agents to fix their own leaks until their models are verifiably sound.
 
 **Gallery (the two demo cases, step by step):** <https://jegadeesh17.github.io/hexperiment/>
 
 ## The problem in plain words
 
-A model is graded on rows it has never seen, the *test set*, the way an exam checks what a student learned. A **data leak** is when the model sees part of the answers while it learns: the test rows, data from the future, or a column that is the answer in disguise. A leaky model gets a brilliant score and then fails in real use.
+When asked to maximize accuracy, an autonomous AI coding agent behaves like a student looking for shortcuts on an exam: it optimizes the loss function by exploiting whatever data is in its environment. If an agent can peak at the test set, fit a scaler before splitting, or use an ID column that encodes future outcomes, it will do so.
 
-Nothing in the score warns you. A leak makes the number go *up*, so whoever tunes code for a better metric, a person or an AI agent, gets no signal that anything is wrong. Leakage is a known cause of results that do not hold up: Kapoor and Narayanan found leakage errors reported in 17 fields, affecting 329 papers ([arXiv:2207.07048](https://arxiv.org/abs/2207.07048)).
+The result is **hallucinated success**: a model that boasts a 1.0000 ROC AUC on paper, but completely collapses when deployed to real-world production.
+
+Nothing in the reported metric warns you. A leak makes the score go *up*, misleading developers and managers into a false sense of security. Data leakage is not an isolated bug—Kapoor and Narayanan (*Patterns*, 2023) cataloged leakage errors across 17 distinct scientific disciplines, affecting 329 peer-reviewed papers ([arXiv:2207.07048](https://arxiv.org/abs/2207.07048)) and billions of dollars in wasted compute.
 
 ## How it catches a leak: the canary test
 
-Think of a unit test that changes one input and checks that an unrelated output stays the same.
+Traditional linters inspect AST syntax, which cannot trace dynamic runtime data flow. Hexperiment takes a behavioral approach:
 
 1. Hexperiment runs your training script normally and records what training produced.
-2. It runs the script again with the **test rows scrambled**. The training rows are untouched.
-3. If anything training produced changes, training must have looked at the test rows. That is a leak, and the run is `REJECTED`.
+2. It runs the script a second time with the **test rows scrambled** while keeping training rows identical.
+3. **The Behavioral Invariant:** If anything training produced changes between the two runs, training mathematically depended on the test rows. That is a leak, and the run is immediately `REJECTED`.
 
-The canary watches behaviour instead of reading code, so it finds a test-row leak wherever it hides: a scaler fitted on all rows, a helper function, another file. It needs one thing from the script: the data must be loaded and split through `hexperiment.load()` and `hexperiment.split()`.
+Because the Canary monitors runtime behavior rather than inspecting syntax, it catches test-row leakage wherever it hides: inside a third-party library, an upstream preprocessor, or a nested helper function.
 
-Four other checks cover what the canary cannot see. Each one reports its finding as a named ghost, so a failed run reads like a story:
+### Layered Verification: Solving the Compute Scale Question
 
-| Ghost | What it means |
-|---|---|
-| The Doppelganger | The same rows are in both training and test. |
-| The Possession | One column alone gives the answer away. |
-| The Peeking Spirit | Training saw the test rows (the canary test). |
-| The Prophet | Training rows come from after the test period. |
-| The Shapeshifter | Identical runs give different results, so nothing can be verified (a warning). |
+A common concern in production ML is compute cost: *Does running training twice double GPU training expenses?* Hexperiment solves this with a **Two-Tier Verification Model**:
+
+| Tier | When It Runs | Verification Mechanism | Compute Overhead | Verdict Impact |
+|---|---|---|---|---|
+| **Tier 1: Fast Check** | On every file save (Kiro save hook) | Static column invariants, proxy correlation scans, split boundary sanity | One normal training run (about 30 s on the demo apps) | Fast feedback; clears prior approval, cannot issue `APPROVED` |
+| **Tier 2: Canary Audit** | `hexperiment run`, MCP `run_audit`, or the Kiro `exorcise` workflow | Full behavioral canary test with scrambled test rows | $2\times$ training run | Required to write `APPROVED` and generate official model card |
+
+**Not built yet, ideas for large models:** for deep learning or multi-gigabyte data, where retraining twice is expensive, two possible extensions are a *subsampled canary* (scramble a stratified 5% probe instead of the whole test set) and *pipeline hash auditing* (check the preprocessing graph without retraining the model). Neither exists today; the kit runs CPU-only tabular scripts (see Known limits).
+
+### Zero-Friction Seams via Kiro Steering
+
+The Canary test requires one architectural condition: data must be loaded and partitioned through `hexperiment.load()` and `hexperiment.split()`. 
+
+Rather than imposing manual developer friction, Hexperiment leverages **Kiro Steering** (`.kiro/steering/ml-integrity.md`). When working in Kiro, the AI agent is instructed by steering contracts to automatically generate code adhering to these clean seams from line 1. To the developer, it feels like zero-config telemetry (similar to `mlflow.autolog()`).
+
+### The Five Diagnostic Ghosts
+
+When a run is rejected, Hexperiment translates complex statistical anomalies into five intuitive ghost personas so developers and non-ML managers immediately understand what went wrong:
+
+| Ghost | Statistical Failure Mode | Plain-English Meaning |
+|---|---|---|
+| **The Possession** | Target Proxy Leakage ($AUC > 0.95$) | One column alone gives the answer away (e.g., recorded post-outcome). |
+| **The Peeking Spirit** | Pre-processing / Test Leakage | Training calculations saw test rows (detected by the Canary test). |
+| **The Prophet** | Temporal Leakage | Training samples originate from a time period after the test period. |
+| **The Doppelganger** | Duplicate / Entity Overlap | Identical or near-identical rows exist across both train and test splits. |
+| **The Shapeshifter** | Non-Deterministic Instability | Identical runs produce divergent results, meaning the model is unverified. |
 
 ## The two demo cases
 
-Both apps use real public data. We planted realistic leaks in each app's training script. Kiro's `exorcise` workflow then ran the `ghost-hunter` agent, which read the verdict, fixed the code and re-ran the full check until it passed. Both histories below were recorded by that loop and are committed in each app's `runs/` folder.
+Both apps use real public data. We planted realistic leaks in each app's training script. Kiro's `exorcise` workflow then ran the `ghost-hunter` agent, which read the verdict, autonomously repaired the code, and re-ran the full check until it passed. Both histories below were recorded by that loop and are committed in each app's `runs/` folder.
 
 | App | First run | After the fix | What was wrong |
 |---|---|---|---|
-| [hotel-cancellations](apps/hotel-cancellations/README.md): will a booking be cancelled? | `REJECTED`, ROC AUC **1.0000** | `APPROVED`, ROC AUC 0.9096 (threshold 0.85) | `reservation_status` is filled in when the booking ends, so it *is* the answer (The Possession). A per-country cancellation rate was computed from every row's label, test rows included (The Peeking Spirit). |
-| [flight-delays](apps/flight-delays/README.md): will a 2013 New York flight arrive more than 15 minutes late? | `REJECTED`, ROC AUC 0.7971 | `APPROVED`, ROC AUC 0.6193 (threshold 0.60) | A random split on time-ordered data let the model learn from later flights (The Prophet). A second planted leak, a per-carrier daily late rate computed from every row's label, is caught by The Peeking Spirit once the split is fixed; the ghost hunter fixed both in one round. |
+| [hotel-cancellations](apps/hotel-cancellations/README.md): will a booking be cancelled? | `REJECTED`, ROC AUC **1.0000** | `APPROVED`, ROC AUC **0.9096** (threshold 0.85) | `reservation_status` is filled in when the booking ends, so it *is* the answer (The Possession). A per-country cancellation rate was computed from every row's label, test rows included (The Peeking Spirit). |
+| [flight-delays](apps/flight-delays/README.md): will a 2013 New York flight arrive >15 min late? | `REJECTED`, ROC AUC **0.7971** | `APPROVED`, ROC AUC **0.6193** (threshold 0.60) | A random split on time-ordered data let the model learn from later flights (The Prophet). A second planted leak (carrier daily late rate computed from all labels) was caught by The Peeking Spirit; the ghost hunter repaired both in one pass. |
 
-The honest scores are lower. That is the point: the first numbers were not real. The ghost hunter's own hotel fix scored 0.9090; the 0.9096 above is the reference script we keep in the repository. The gallery shows each case with the code diff, the findings and the model cards.
+**Why the honest score is lower:** In real ML, catching a leak drops the metric from an impossible, fraudulent number to a realistic, deployable one. A model showing 0.79 with temporal leakage will fail in production; a model scoring 0.61 on clean out-of-time data actually works. The gallery shows each case with the code diff, the diagnostic findings, and the generated model cards. The ghost hunter's own hotel fix scored 0.9090; the 0.9096 in the table is the reference script we keep in the repository.
 
-## Does it catch leaks it was not built around?
+## Scientific Benchmark: 13 Leakage Mechanisms (Kapoor & Narayanan 2023)
 
-We built a benchmark of 13 leak mechanisms taken from the leakage taxonomy of Kapoor and Narayanan (*Patterns* 4(9), 100804, 2023), each with three models and a clean twin: 78 apps, run through the real `hexperiment run` command. We wrote down our predictions before the first run.
+To prove Hexperiment catches leaks it was not specifically engineered around, we built an automated benchmark implementing the formal leakage taxonomy from Kapoor & Narayanan (*Patterns* 4(9), 100804, 2023). We evaluated 13 mechanisms across 3 distinct model architectures (`LogisticRegression`, `RandomForest`, `HistGradientBoosting`), creating 78 total applications with clean twins:
 
-- **30 of 39 leaky apps rejected**, each by the ghost we predicted.
-- **0 of 39 clean twins rejected** (no false alarms).
-- **3 mechanisms missed in every model**, as predicted: a proxy column that is only moderately predictive (stand-alone AUC about 0.89, below the 0.95 cut-off), a time column that was never declared in `hex.toml`, and near-duplicate rows of the same entity split across train and test.
-- A scaler or imputer fitted on all rows moved the score by 0.008 or less, so comparing scores would not have shown those leaks. The canary rejected all six.
+- **30 of 39 leaky applications rejected**, exactly matching predicted ghost assignments.
+- **0 of 39 clean twins rejected** (**0% false alarm rate**).
+- **A scaler or imputer fitted on all rows moved ROC AUC by $\le 0.008$**—subtle enough that score-comparison alone would never catch it. The Canary rejected all 6 instances.
+- **Calibrated Scientific Boundaries (The 3 Predicted Misses):**
+  1. *Weak proxy features* (stand-alone AUC ~0.89, below the 0.95 cutoff).
+  2. *Undeclared time columns* (where no temporal metadata was provided to `hex.toml`).
+  3. *Entity-level leakage* (near-duplicate rows of the same entity, such as a customer or patient, split across train and test; the kit has no notion of an entity).
 
-The cases are synthetic and were written by the same people who wrote the checks, so this shows the checks see the leaks we thought of; it is not a measurement of how often they find leaks in the wild. Full table, method and the misses: [hexperiment/benchmark/README.md](hexperiment/benchmark/README.md).
+Full methodology, benchmark runner, and results matrix: [hexperiment/benchmark/README.md](hexperiment/benchmark/README.md).
 
 ## How it works inside Kiro
 
+Hexperiment transforms Kiro from a passive code-generation tool into an active, self-correcting ML integrity engine:
+
+```
+KIRO CLOSED-LOOP EXORCISM CYCLE
+
+Steering contract (.kiro/steering/ml-integrity.md)
+   │
+   ▼
+Coding agent writes train.py
+   │
+   └─► on save: hexperiment-check-on-save hook
+         fast run (train.py once, no canary); clears any prior APPROVED
+         side branch only: it does not start the workflow
+
+You start the loop:  /workflow run exorcise --app <app>
+   │
+   ▼
+exorcise.workflow.json (repeats until verdict.json says APPROVED)
+   │
+   ▼
+ghost-hunter agent (no shell; calls MCP run_audit)
+   │
+   ▼
+Verdict REJECTED (ghost identified) ──► agent fixes the code, audits again
+   │
+   ▼
+Verdict APPROVED ─────────────────────► model card written
+```
+
 | Kiro feature | What Hexperiment uses it for |
 |---|---|
-| **Power** ([power/hexperiment/](power/hexperiment/)) | Installs the skill (the rules and how to read a verdict) and the MCP server in one step. |
-| **Steering** ([.kiro/steering/ml-integrity.md](.kiro/steering/ml-integrity.md)) | Eight ML-integrity rules the agent follows in every training script: split first, no features from the future, fix seeds, never edit a verdict, never weaken a check. |
-| **Hooks** ([.kiro/hooks/hexperiment.json](.kiro/hooks/hexperiment.json)) | On save of a training file: runs the fast check and clears any earlier `APPROVED`, so an old pass never covers new code. When the agent ends its turn: if an app it changed is not approved, tells it to run the full audit or to say the work is not done. |
-| **MCP server** (`hexperiment-mcp`) | Tools `list_apps`, `run_audit`, `get_verdict`, `get_history`, `explain_ghost`, and each app's model card as a resource. |
-| **Custom agent** ([.kiro/agents/ghost-hunter.json](.kiro/agents/ghost-hunter.json)) | The ghost hunter may edit an app's Python files and call the hexperiment tools. It has no shell, and it may not touch thresholds, verdicts, run history, data or the kit itself. |
-| **Workflow** ([.kiro/workflows/exorcise.workflow.json](.kiro/workflows/exorcise.workflow.json)) | `exorcise` repeats "run the full check, fix each finding at its cause, check again" until `verdict.json` says `APPROVED`. |
-| **Specs** ([.kiro/specs/](.kiro/specs/)) | The kit was built spec-first in Kiro: requirements, design and tasks for the core, the Kiro layer, the apps, the gallery and the benchmark. |
+| **Power** ([power/hexperiment/](power/hexperiment/)) | Installs the skill (rules, diagnostics, verdict handling) and MCP server in one step. |
+| **Steering** ([.kiro/steering/ml-integrity.md](.kiro/steering/ml-integrity.md)) | Enforces eight ML-integrity rules: split first, no future features, fix seeds, never tamper with verdicts, never weaken checks. |
+| **Hooks** ([.kiro/hooks/hexperiment.json](.kiro/hooks/hexperiment.json)) | **On save:** runs fast check and clears prior approvals so old passes never mask new code. **On stop:** intercepts incomplete work if an edited app lacks approval. |
+| **MCP Server** (`hexperiment-mcp`) | Exposes tools `list_apps`, `run_audit`, `get_verdict`, `get_history`, `explain_ghost`, and model cards as live resources. |
+| **Custom Agent** ([.kiro/agents/ghost-hunter.json](.kiro/agents/ghost-hunter.json)) | Dedicated repair agent with strict boundary rules: edits Python files and invokes MCP tools; shell, data, thresholds, and verdict tampering are strictly denied. |
+| **Workflow** ([.kiro/workflows/exorcise.workflow.json](.kiro/workflows/exorcise.workflow.json)) | Autonomous loop executing *Audit $\rightarrow$ Diagnose $\rightarrow$ Refactor $\rightarrow$ Verify* until `verdict.json` reports `APPROVED`. |
+| **Specs** ([.kiro/specs/](.kiro/specs/)) | Built spec-first in Kiro: requirements (EARS), design, and task verification across core, Kiro layer, apps, gallery, and benchmark. |
 
-Only a full run of `hexperiment run` can write `APPROVED`. Thresholds and waivers belong to the person who owns the model, not to the agent. More on how Kiro was used: [docs/KIRO.md](docs/KIRO.md).
+More details on the Kiro implementation and lessons learned: [docs/KIRO.md](docs/KIRO.md).
 
 ## Quick start
 

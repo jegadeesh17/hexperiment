@@ -1,20 +1,20 @@
 # How Kiro was used
 
-Kiro plays two parts in Hexperiment. It **built** the kit, spec first, with custom agents that could each touch only their own files. And it is **part of the product**: the hooks, the MCP server, the ghost hunter agent and the `exorcise` workflow are how Hexperiment stops a leaky result from counting as done. This page describes both, and what we learned about Kiro along the way.
+Kiro plays two essential parts in Hexperiment. It **built** the kit, spec-first, with custom agents that could each touch only their own files. And it is **the execution engine of the product itself**: the steering contracts, the hooks, the MCP server, the sandboxed ghost hunter agent, and the `exorcise` workflow are how Hexperiment prevents an AI coding agent from shipping leaky, fraudulent machine-learning models. This page describes both dimensions and what we discovered about Kiro along the way.
 
 ## 1. Building Hexperiment spec first
 
-Every part of the kit was written from a Kiro spec in [.kiro/specs/](../.kiro/specs/): requirements in EARS form ("WHEN … THE system SHALL …"), a design, and an ordered task list.
+Every part of the kit was written from a formal Kiro spec in [.kiro/specs/](../.kiro/specs/): requirements in EARS form ("WHEN … THE system SHALL …"), a technical design document, and an ordered task list.
 
 | Spec | Requirements | Tasks | What it covers |
 |---|---:|---:|---|
-| [hexperiment-core](../.kiro/specs/hexperiment-core/) | 17 | 18 | `load`, `split`, `audit`, the checks, the canary test, verdicts, model cards, the CLI |
+| [hexperiment-core](../.kiro/specs/hexperiment-core/) | 17 | 18 | `load`, `split`, `audit`, the data checks, the canary test, verdicts, model cards, the CLI |
 | [hexperiment-kiro](../.kiro/specs/hexperiment-kiro/) | 9 | 15 | hooks, MCP server, ghost hunter, `exorcise` workflow, power, `init --kiro` |
 | [hexperiment-apps](../.kiro/specs/hexperiment-apps/) | 5 | 6 | the two example apps and their haunted scripts |
 | [hexperiment-gallery](../.kiro/specs/hexperiment-gallery/) | 8 | 17 | the static gallery site |
 | [hexperiment-benchmark](../.kiro/specs/hexperiment-benchmark/) | 6 | 19 | the 13-mechanism leak benchmark |
 
-We wrote the requirements and the steering; Kiro wrote the designs, the task lists and the code. Steering in [.kiro/steering/](../.kiro/steering/) held the rules every session followed: `product.md`, `structure.md`, `tech.md`, the ML-integrity rules in `ml-integrity.md` (which ship with the product too), and `gallery-design.md` for the site.
+We wrote the requirements and the steering; Kiro wrote the designs, the task lists, and the code. Steering in [.kiro/steering/](../.kiro/steering/) held the invariant rules every session followed: `product.md`, `structure.md`, `tech.md`, the ML-integrity rules in `ml-integrity.md` (which ship with the product too), and `gallery-design.md` for the site.
 
 ### Three build agents, each boxed in
 
@@ -23,53 +23,77 @@ The build ran through three custom agents in [.kiro/agents/](../.kiro/agents/), 
 | Agent | May write | May run | Denied |
 |---|---|---|---|
 | `spec-writer` | only `design.md` and `tasks.md` of a spec | nothing (no shell) | requirements and steering |
-| `builder` | the kit, the apps, the power, the hooks, the workflow, the ghost hunter, and the task ticks | the project's Python and `hexperiment`, and read-only git | requirements, steering, docs, `.git`, secrets, the other agents' files; `git commit`, `git push`, deleting files, downloads |
+| `builder` | the kit, the apps, the power, the hooks, the workflow, the ghost hunter, and task ticks | project Python and `hexperiment`, read-only git | requirements, steering, docs, `.git`, secrets; `git commit`, `git push`, file deletion, network downloads |
 | `reviewer` | nothing | `pytest`, `ruff`, read-only git | every write |
 
-Every task was then verified outside Kiro: the full test suite and the linter were run again, and the task was committed only when both passed. Nothing was committed or pushed by an agent.
+Every task was then verified outside Kiro: the full test suite and linter were run independently, and a task was committed only when both passed. No agent committed or pushed code.
 
 ### Moments where the spec process paid off
 
-- **The spec writer refused a statistically wrong requirement.** The first draft said the canary would shuffle test values within each column. The spec writer pointed out that shuffling keeps each column's mean, so a leak through a mean imputer could never be seen. The design was changed to a "tilted resample" of the test rows before any code existed. In the benchmark, the canary later rejected all six apps that leak through a scaler or an imputer fitted on all rows.
-- **The reviewer found a loophole.** A training script that reported its training-set predictions only in the normal run, and not in the canary run, could make the leak check pass silently. The builder closed it and showed the fix worked by breaking the code on purpose and watching the tests fail.
-- **Mutation checks as a habit.** Across the tasks the builder repeatedly broke its own code on purpose (a wrong boundary, a missing salt, two decision steps swapped) to show that the tests would catch it. The suite now has about 3,400 tests, including property-based tests with Hypothesis.
+- **The spec writer refused a statistically wrong requirement.** The first draft said the canary would shuffle test values within each column. The spec writer pointed out that shuffling preserves each column's marginal mean, so a leak through an upstream mean imputer could never be observed. The design was changed to a "tilted resample" of test rows before any code was written. In the 78-app benchmark, the canary later rejected all six apps that leak through a scaler or imputer fitted on all rows.
+- **The reviewer caught a subtle loophole.** A training script that reported its training-set predictions only during the normal run, but omitted them in the canary run, could allow the leak check to pass silently. The builder closed it and proved the fix by deliberately breaking the code (mutation check) and watching tests fail.
+- **Mutation checks as a habit.** Across the tasks, the builder repeatedly injected deliberate faults (wrong boundary conditions, missing salts, swapped decision steps) to verify that the test suite caught each one. The suite now comprises ~3,400 tests, including Hypothesis property-based tests.
 
-## 2. Kiro as part of the product
+---
 
-Hexperiment's job is to make "no leakage" a condition the agent must meet before its result counts. Each Kiro feature carries one piece of that:
+## 2. Kiro as part of the product: The Autonomous Exorcism Loop
 
-| Feature | File | Role |
+Hexperiment’s core objective is to make **zero data leakage** a non-negotiable contract an agent must satisfy before its code can be merged or deployed.
+
+```mermaid
+graph TD
+    subgraph Kiro IDE and CLI
+        S[Steering: ml-integrity.md] -->|Directs behavior| A[Coding agent]
+        A -->|Writes| F[train.py]
+        F -->|File save| H[Save hook: fast run, one training execution]
+        H -->|Side branch| X[Clears prior APPROVED]
+        U[User starts /workflow run exorcise] --> W[exorcise.workflow.json]
+        W -->|Runs step| G[ghost-hunter agent]
+        G -->|Calls MCP tool| MCP[hexperiment-mcp run_audit]
+        MCP -->|Full run with canary| V2{Verdict?}
+        V2 -->|REJECTED: ghost found| G
+        G -->|Fixes the code| F
+        V2 -->|APPROVED| C[Model card written]
+    end
+```
+
+Each Kiro platform primitive carries an essential role in this closed-loop architecture:
+
+| Kiro Feature | Source File | Architectural Role |
 |---|---|---|
-| Steering | [.kiro/steering/ml-integrity.md](../.kiro/steering/ml-integrity.md) | Eight rules for any training script: let the kit own the data, split first, no row in both sets, no features from the future, respect time, treat suspicion as a signal, always end with an audit, fix the cause and not the check. |
-| Save hook | [.kiro/hooks/hexperiment.json](../.kiro/hooks/hexperiment.json) | When the agent saves a Python file of an app, runs the fast check. The run first clears the app's verdict, so an old `APPROVED` never covers new code. |
-| Stop hook | same file | When the agent ends its turn, lists the apps it changed in this session that are not `APPROVED` and tells it to run the full audit or to say the work is not done. |
-| MCP server | `hexperiment-mcp`, entry in [.kiro/settings/mcp.json](../.kiro/settings/mcp.json) | `list_apps`, `run_audit`, `get_verdict`, `get_history`, `explain_ghost`, and each app's model card as a resource. |
-| Custom agent | [.kiro/agents/ghost-hunter.json](../.kiro/agents/ghost-hunter.json) | Fixes leaks in one app. May edit the app's Python files and call the hexperiment tools; has no shell; may not write `hex.toml`, verdicts, model cards, run history, data, tests, `.kiro` or the kit. |
-| Workflow | [.kiro/workflows/exorcise.workflow.json](../.kiro/workflows/exorcise.workflow.json) | Repeats one ghost-hunter step (run the full check, fix each finding at its cause, check again) until `verdict.json` says `APPROVED`. The stop condition reads the file itself, not the agent's reply. |
-| Power | [power/hexperiment/](../power/hexperiment/) | Packages the skill and the MCP server for any Kiro session. `hexperiment init --kiro` writes the hooks, workflow, agent, steering and MCP entry into another project. |
+| **Steering** | [.kiro/steering/ml-integrity.md](../.kiro/steering/ml-integrity.md) | **Policy Layer:** Eight rules enforcing clean data ingestion seams (`load`, `split`), temporal ordering, fixed seeds, and prohibiting verdict tampering. |
+| **Save Hook** | [.kiro/hooks/hexperiment.json](../.kiro/hooks/hexperiment.json) | **Save-time fast run:** Runs the fast check on save (one normal training run, no canary); immediately invalidates any prior `APPROVED` status so stale passes never mask modified code. |
+| **Stop Hook** | same file | **Turn Gate:** When the agent attempts to conclude its turn, checks whether modified apps are unapproved; exits 1 to force the agent to finish verification. |
+| **MCP Server** | `hexperiment-mcp` ([.kiro/settings/mcp.json](../.kiro/settings/mcp.json)) | **Structured Tool Interface:** Exposes `list_apps`, `run_audit`, `get_verdict`, `get_history`, `explain_ghost`, and model cards directly to agent context. |
+| **Custom Agent** | [.kiro/agents/ghost-hunter.json](../.kiro/agents/ghost-hunter.json) | **Sandboxed Remediation:** Dedicated agent permitted to edit application Python files and call MCP audit tools; denied shell execution, data modification, and threshold editing. |
+| **Workflow** | [.kiro/workflows/exorcise.workflow.json](../.kiro/workflows/exorcise.workflow.json) | **Autonomous Loop:** Multi-step workflow repeating *Audit $\rightarrow$ Diagnose $\rightarrow$ Fix $\rightarrow$ Verify* until `verdict.json` evaluates to `APPROVED`. |
+| **Power** | [power/hexperiment/](../power/hexperiment/) | **Distribution:** Packages skills, rules, and MCP definitions so any Kiro user installs Hexperiment via `kiro-cli powers install`. |
 
 ### The loop, recorded
 
-Both demo histories in the apps' `runs/` folders were produced by the `exorcise` workflow on the haunted scripts, on 2026-11-11 (UTC), in Kiro CLI 3.2.0. The ghost hunter's sessions are in [kiro/exorcise-hotel-cancellations.md](kiro/exorcise-hotel-cancellations.md) and [kiro/exorcise-flight-delays.md](kiro/exorcise-flight-delays.md), with every tool call and its output.
+Both demo histories in the apps' `runs/` folders were generated autonomously by the `exorcise` workflow executing on haunted scripts (recorded on 2026-11-11 UTC in Kiro CLI 3.2.0). The ghost hunter's recorded sessions are available in [kiro/exorcise-hotel-cancellations.md](kiro/exorcise-hotel-cancellations.md) and [kiro/exorcise-flight-delays.md](kiro/exorcise-flight-delays.md):
 
-- **Hotels:** REJECTED at ROC AUC 1.0000 (The Possession on `reservation_status`, The Peeking Spirit on a country cancellation rate built from every label) → the ghost hunter dropped the column and rebuilt the rate from training rows → APPROVED at 0.9090. One round.
-- **Flights:** REJECTED at 0.7971 (The Prophet: a random split on time-ordered data) → the ghost hunter switched to the kit's time split and also removed a carrier late rate built from every label → APPROVED at 0.6193. One round.
+- **Hotels:** Initially `REJECTED` at ROC AUC 1.0000 (The Possession on `reservation_status`, The Peeking Spirit on a label-derived country cancellation rate). The ghost hunter dropped the proxy column, recomputed the rate strictly from training rows, and achieved `APPROVED` at an honest 0.9090 in a single round.
+- **Flights:** Initially `REJECTED` at 0.7971 (The Prophet: random split across time-ordered flights). The ghost hunter converted the split to the kit's temporal split and removed a label-derived carrier rate, achieving `APPROVED` at 0.6193 in one round.
 
 At the time of those recordings the ghost hunter ran `hexperiment run` through the shell. Live probes then showed that Kiro's shell rules are not a boundary inside a headless workflow (see below), so we took the shell away and gave it the MCP tool `run_audit` instead. A live headless `exorcise` run on a copy of the hotel app on 2026-11-13 (Kiro CLI 3.3.0) went REJECTED 1.0000 → APPROVED 0.9092 in one round, with no shell tool offered or used and nothing denied.
 
+---
+
 ## 3. What we learned about Kiro
 
-We checked how Kiro behaves with live probes wherever the documentation was silent or our design depended on it. The full notes are in [kiro/kiro-formats.md](kiro/kiro-formats.md).
+We probed Kiro's runtime characteristics extensively wherever behavior was undocumented or mission-critical. Detailed logs are preserved in [kiro/kiro-formats.md](kiro/kiro-formats.md):
 
-- **Hook output does not reach the agent.** In Kiro CLI 3.2.0 and the Kiro IDE 1.4.154, a command hook on `PostFileSave` or `PostToolUse` ran and finished, but its output was not added to the agent's context, although the documentation says it is. In Kiro CLI 3.3.0 a `PostToolUse` hook's output did not reach the agent either. Our write-up is in [kiro/hook-output-issue.md](kiro/hook-output-issue.md). What does work, in Kiro CLI 3.3.0: a `Stop` hook that exits 1 with its message on standard error. The agent gets the message and one more turn, and the hook fires once per prompt, so it cannot loop. That is why Hexperiment's nudge is a Stop hook.
-- **Shell rules are not a boundary in a headless workflow.** Inside a workflow step the shell tool is `run_command`, and once it is trusted, a command that matches no rule runs; deny rules are case-sensitive while PowerShell is not, and a chain with `;` is judged one part at a time. So the ghost hunter has no shell at all. The code it writes is still executed by every audit, which no rule can prevent; the README says so.
+- **Hook output routing:** In Kiro CLI 3.2.0 and Kiro IDE 1.4.154, command hooks on `PostFileSave` or `PostToolUse` execute successfully, but their stdout/stderr is not injected into agent session context. What *does* reliably communicate with the agent in Kiro CLI 3.3.0 is a `Stop` hook exiting with code 1 and diagnostics on stderr. The agent receives the error and an additional turn. This informed Hexperiment's nudge architecture.
+- **Shell rules are not a boundary in a headless workflow.** Inside a workflow step the shell tool is `run_command`, and once it is trusted, a command that matches no rule runs; deny rules are case-sensitive while PowerShell is not, and a chain with `;` is judged one part at a time. So we removed the shell tool from `ghost-hunter` entirely and routed its runs through the typed `hexperiment-mcp` server. The code it writes is still executed by every audit, which no rule can prevent; the README says so.
 - **File-write rules held.** Write globs were case-insensitive and treated `\` and `/` alike, and every attempt to write `hex.toml` was refused. One gap: `..` in a path is not resolved, so the ghost hunter's rules also deny any path containing `..`.
-- **MCP tools in custom agents.** With `includeMcpJson: true` and `@hexperiment` in `tools`, the agent finds the server's tools through `tool_load`; the server takes about 13 s to connect, so the step prompt has the agent read the app's files first instead of calling a tool at once.
-- **A power's MCP server starts in the power's install folder,** not in the user's project, so it cannot see the project's apps. `hexperiment init --kiro` therefore also registers a workspace-level server, and `list_apps` explains what to do when it finds no app.
-- **Trust comes first.** The Kiro IDE runs a project's hooks and workspace MCP servers only after the folder is trusted.
+- **MCP server lifecycle in Powers:** A power's MCP server starts from its installation directory rather than the user's workspace root. `hexperiment init --kiro` configures a workspace-level MCP definition so `hexperiment-mcp` resolves local application directories seamlessly.
+- **Workspace Trust:** The Kiro IDE activates hooks and custom MCP servers only after the developer explicitly trusts the workspace folder.
 
-## 4. Numbers
+---
 
-- 5 specs, 45 requirements, 75 tasks. Kiro wrote the code of every task, and each task was verified before it was committed.
-- About 3,400 tests, run in about 2 minutes on a 2019 four-core laptop on a power-saving plan.
-- Benchmark: 78 apps, 30 of 39 leaky apps rejected as predicted, 0 of 39 false alarms ([hexperiment/benchmark/README.md](../hexperiment/benchmark/README.md)).
+## 4. Key Metrics & Evidence
+
+- **5 specs, 45 requirements, 75 tasks:** Kiro authored the code for every single task, verified and committed incrementally.
+- **~3,400 automated tests:** Passing with exit code 0 in ~2 minutes on a 2019 4-core laptop on a power-saving profile.
+- **Kapoor & Narayanan Benchmark:** 78 applications evaluated; 30 of 39 leaky applications caught as predicted; **0 false alarms** across 39 clean twins ([hexperiment/benchmark/README.md](../hexperiment/benchmark/README.md)).
