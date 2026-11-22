@@ -67,14 +67,14 @@ The haunted AUC is 0.0904 higher than the honest one, and it is not a better mod
 
 ## Recorded history
 
-The committed `runs/` folder holds the runs of one `exorcise` workflow on the haunted script (2026-11-11), followed by one run of the honest script. The ghost hunter's session is in [docs/kiro/exorcise-hotel-cancellations.md](../../docs/kiro/exorcise-hotel-cancellations.md).
+The committed `runs/` folder holds the runs of one `exorcise` workflow on the haunted script (2026-11-22), followed by one run of the honest script. The ghost hunter's session is in [docs/kiro/exorcise-hotel-cancellations.md](../../docs/kiro/exorcise-hotel-cancellations.md).
 
 | Run | Started by | Mode | Verdict | AUC | Error findings |
 |---|---|---|---|---|---|
-| `20261111-194957-38a52f` | the ghost hunter, on the haunted script | full | `REJECTED` | 1.0000 | The Possession, The Peeking Spirit |
-| `20261111-195114-c55aa8` | the save hook, after the ghost hunter's edit | fast | `UNVERIFIED` | 0.9090 | none |
-| `20261111-195154-f34364` | the ghost hunter, on its fix | full | `APPROVED` | 0.9090 | none |
-| `20261111-195610-68b4d6` | a manual run, on the honest script restored | full | `APPROVED` | 0.9096 | none |
+| `20261122-132039-ec97c0` | the ghost hunter, on the haunted script | full | `REJECTED` | 1.0000 | The Possession, The Peeking Spirit |
+| `20261122-132145-0cd94e` | the save hook, after the ghost hunter's edit | fast | `UNVERIFIED` | 0.9090 | none |
+| `20261122-132210-dec65b` | the ghost hunter, on its fix | full | `APPROVED` | 0.9090 | none |
+| `20261122-132422-bfb52c` | a manual run, on the honest script restored | full | `APPROVED` | 0.9096 | none |
 
 The ghost hunter fixed both leaks in one round. Its script differs from the honest one, so the honest script was put back and run last, and that run is the current `verdict.json`.
 

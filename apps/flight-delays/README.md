@@ -68,14 +68,14 @@ The haunted AUC is 0.1778 higher than the honest one. The honest model is only 0
 
 ## Recorded history
 
-The committed `runs/` folder holds the runs of one `exorcise` workflow on the haunted script (2026-11-11), followed by one run of the honest script. The ghost hunter's session is in [docs/kiro/exorcise-flight-delays.md](../../docs/kiro/exorcise-flight-delays.md).
+The committed `runs/` folder holds the runs of one `exorcise` workflow on the haunted script (2026-11-22), followed by one run of the honest script. The ghost hunter's session is in [docs/kiro/exorcise-flight-delays.md](../../docs/kiro/exorcise-flight-delays.md).
 
 | Run | Started by | Mode | Verdict | AUC | Error findings |
 |---|---|---|---|---|---|
-| `20261111-195811-190e10` | the ghost hunter, on the haunted script | full | `REJECTED` | 0.7971 | The Prophet |
-| `20261111-195934-464b02` | the save hook, after the ghost hunter's edit | fast | `UNVERIFIED` | 0.6193 | none |
-| `20261111-200013-a6caaf` | the ghost hunter, on its fix | full | `APPROVED` | 0.6193 | none |
-| `20261111-200257-5f6e81` | a manual run, on the honest script restored | full | `APPROVED` | 0.6193 | none |
+| `20261122-131518-e8db31` | the ghost hunter, on the haunted script | full | `REJECTED` | 0.7971 | The Prophet |
+| `20261122-131620-2ed225` | the save hook, after the ghost hunter's edit | fast | `UNVERIFIED` | 0.6193 | none |
+| `20261122-131642-1933a1` | the ghost hunter, on its fix | full | `APPROVED` | 0.6193 | none |
+| `20261122-131840-3eec70` | a manual run, on the honest script restored | full | `APPROVED` | 0.6193 | none |
 
 The ghost hunter fixed the split and removed `carrier_day_late_rate` in one round, so the recorded history never shows The Peeking Spirit; the "split fixed" row of the results table shows that stage. The honest script was put back and run last, and that run is the current `verdict.json`.
 
