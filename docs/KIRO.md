@@ -1,6 +1,6 @@
 # How Kiro was used
 
-Kiro plays two essential parts in Hexperiment. It **built** the kit, spec-first, with custom agents that could each touch only their own files. And it is **the execution engine of the product itself**: the steering contracts, the hooks, the MCP server, the sandboxed ghost hunter agent, and the `exorcise` workflow are how Hexperiment prevents an AI coding agent from shipping leaky, fraudulent machine-learning models. This page describes both dimensions and what we discovered about Kiro along the way.
+Kiro plays two essential parts in Hexperiment. It **built** the kit, spec-first, with custom agents that could each touch only their own files. And it is **the execution engine of the product itself**: the steering contracts, the hooks, the MCP server, the permission-restricted ghost hunter agent (no shell; executed code is not sandboxed), and the `exorcise` workflow are how Hexperiment prevents an AI coding agent from shipping leaky machine-learning models. This page describes both dimensions and what we discovered about Kiro along the way.
 
 ## 1. Building Hexperiment spec first
 
@@ -8,10 +8,10 @@ Every part of the kit was written from a formal Kiro spec in [.kiro/specs/](../.
 
 | Spec | Requirements | Tasks | What it covers |
 |---|---:|---:|---|
-| [hexperiment-core](../.kiro/specs/hexperiment-core/) | 17 | 18 | `load`, `split`, `audit`, the data checks, the canary test, verdicts, model cards, the CLI |
-| [hexperiment-kiro](../.kiro/specs/hexperiment-kiro/) | 9 | 15 | hooks, MCP server, ghost hunter, `exorcise` workflow, power, `init --kiro` |
-| [hexperiment-apps](../.kiro/specs/hexperiment-apps/) | 5 | 6 | the two example apps and their haunted scripts |
-| [hexperiment-gallery](../.kiro/specs/hexperiment-gallery/) | 8 | 17 | the static gallery site |
+| [hexperiment-core](../.kiro/specs/hexperiment-core/) | 17 | 20 | `load`, `split`, `audit`, the data checks, the canary test, verdicts, model cards, the CLI |
+| [hexperiment-kiro](../.kiro/specs/hexperiment-kiro/) | 9 | 17 | hooks, MCP server, ghost hunter, `exorcise` workflow, power, `init --kiro` |
+| [hexperiment-apps](../.kiro/specs/hexperiment-apps/) | 5 | 9 | the two example apps and their haunted scripts |
+| [hexperiment-gallery](../.kiro/specs/hexperiment-gallery/) | 8 | 22 | the static gallery site |
 | [hexperiment-benchmark](../.kiro/specs/hexperiment-benchmark/) | 6 | 19 | the 13-mechanism leak benchmark |
 
 We wrote the requirements and the steering; Kiro wrote the designs, the task lists, and the code. Steering in [.kiro/steering/](../.kiro/steering/) held the invariant rules every session followed: `product.md`, `structure.md`, `tech.md`, the ML-integrity rules in `ml-integrity.md` (which ship with the product too), and `gallery-design.md` for the site.
@@ -38,7 +38,7 @@ Every task was then verified outside Kiro: the full test suite and linter were r
 
 ## 2. Kiro as part of the product: The Autonomous Exorcism Loop
 
-Hexperiment’s core objective is to make **zero data leakage** a non-negotiable contract an agent must satisfy before its code can be merged or deployed.
+Hexperiment’s core objective is to make **zero data leakage** a non-negotiable contract an agent must satisfy before its code can produce an approved verdict.
 
 ```mermaid
 graph TD
@@ -65,7 +65,7 @@ Each Kiro platform primitive carries an essential role in this closed-loop archi
 | **Save Hook** | [.kiro/hooks/hexperiment.json](../.kiro/hooks/hexperiment.json) | **Save-time fast run:** Runs the fast check on save (one normal training run, no canary); immediately invalidates any prior `APPROVED` status so stale passes never mask modified code. |
 | **Stop Hook** | same file | **Turn Gate:** When the agent attempts to conclude its turn, checks whether modified apps are unapproved; if so, exits 1 with the findings on stderr, and the agent gets the message and one more turn. It fires once per prompt, so it cannot loop and does not guarantee an approved verdict. |
 | **MCP Server** | `hexperiment-mcp` ([.kiro/settings/mcp.json](../.kiro/settings/mcp.json)) | **Structured Tool Interface:** Exposes `list_apps`, `run_audit`, `get_verdict`, `get_history`, `explain_ghost`, and model cards directly to agent context. |
-| **Custom Agent** | [.kiro/agents/ghost-hunter.json](../.kiro/agents/ghost-hunter.json) | **Sandboxed Remediation:** Dedicated agent permitted to edit application Python files and call MCP audit tools; denied shell execution, data modification, and threshold editing. |
+| **Custom Agent** | [.kiro/agents/ghost-hunter.json](../.kiro/agents/ghost-hunter.json) | **Permission-Restricted Remediation:** Dedicated agent permitted to edit application Python files and call MCP audit tools (no shell; executed code is not sandboxed); denied shell execution, data modification, and threshold editing. |
 | **Workflow** | [.kiro/workflows/exorcise.workflow.json](../.kiro/workflows/exorcise.workflow.json) | **Autonomous Loop:** Multi-step workflow repeating *Audit $\rightarrow$ Diagnose $\rightarrow$ Fix $\rightarrow$ Verify* until `verdict.json` evaluates to `APPROVED`. |
 | **Power** | [power/hexperiment/](../power/hexperiment/) | **Distribution:** Packages the hexperiment skill and the MCP server for any Kiro session (`kiro-cli powers install`). `hexperiment init --kiro` writes the hooks, workflow, agent, steering and MCP entry into another project. |
 
@@ -94,6 +94,6 @@ We probed Kiro's runtime characteristics extensively wherever behavior was undoc
 
 ## 4. Key Metrics & Evidence
 
-- **5 specs, 45 requirements, 75 tasks:** Kiro authored the code for every single task, verified and committed incrementally.
+- **5 specs, 45 requirements, 87 tasks (85 automated by Kiro):** Kiro authored the code for every automated task, verified and committed incrementally.
 - **~3,400 automated tests:** Passing with exit code 0 in ~2 minutes on a 2019 4-core laptop on a power-saving profile.
 - **Kapoor & Narayanan Benchmark:** 78 applications evaluated; 30 of 39 leaky applications caught as predicted; **0 false alarms** across 39 clean twins ([hexperiment/benchmark/README.md](../hexperiment/benchmark/README.md)).

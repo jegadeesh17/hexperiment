@@ -9,7 +9,7 @@ Hexperiment is a spec-driven ML kit for Kiro that catches data leakage before a 
 - **Also served:** the reviewer who signs off the model, and the people who rely on its predictions.
 
 ## Why it matters
-Data leakage is a common cause of ML results that do not reproduce: a survey by Kapoor & Narayanan found leakage errors in 17 fields, affecting 329 papers ([arXiv:2207.07048](https://arxiv.org/abs/2207.07048)). A leak raises the score, so whoever tunes for the metric, a person or an agent, gets no signal that something is wrong. Existing leakage tools lint notebooks after a human wrote them; Hexperiment makes "no leakage" a contract the agent must satisfy before its result counts.
+Data leakage is a common cause of ML results that do not reproduce: a survey by Kapoor & Narayanan found leakage errors in 17 fields, affecting 294–329 papers (329 in the 2022 preprint, 294 in the published version; [arXiv:2207.07048](https://arxiv.org/abs/2207.07048)). A leak raises the score, so whoever tunes for the metric, a person or an agent, gets no signal that something is wrong. Existing leakage tools lint notebooks after a human wrote them; Hexperiment makes "no leakage" a contract the agent must satisfy before its result counts.
 
 ## The ghosts (the checks)
 Each check reports its finding as a named ghost, so a failed run reads like a story:
