@@ -8,11 +8,11 @@ Hexperiment is an ML-integrity kit and Kiro power that guards machine-learning t
 
 ## The problem in plain words
 
-When asked to maximize accuracy, an autonomous AI coding agent behaves like a student looking for shortcuts on an exam: it optimizes the loss function by exploiting whatever data is in its environment. If an agent can peak at the test set, fit a scaler before splitting, or use an ID column that encodes future outcomes, it will do so.
+When asked to maximize accuracy, an autonomous AI coding agent behaves like a student looking for shortcuts on an exam: it optimizes the loss function by exploiting whatever data is in its environment. If an agent can peek at the test set, fit a scaler before splitting, or use an ID column that encodes future outcomes, it will do so.
 
 The result is **hallucinated success**: a model that boasts a 1.0000 ROC AUC on paper, but completely collapses when deployed to real-world production.
 
-Nothing in the reported metric warns you. A leak makes the score go *up*, misleading developers and managers into a false sense of security. Data leakage is not an isolated bug—Kapoor and Narayanan (*Patterns*, 2023) cataloged leakage errors across 17 distinct scientific disciplines, affecting 329 peer-reviewed papers ([arXiv:2207.07048](https://arxiv.org/abs/2207.07048)) and billions of dollars in wasted compute.
+Nothing in the reported metric warns you. A leak makes the score go *up*, misleading developers and managers into a false sense of security. Data leakage is not an isolated bug—Kapoor and Narayanan (*Patterns*, 2023) cataloged leakage errors across 17 distinct scientific disciplines, affecting 294–329 papers (329 in the 2022 preprint, 294 in the published version; [arXiv:2207.07048](https://arxiv.org/abs/2207.07048)).
 
 ## How it catches a leak: the canary test
 
@@ -50,7 +50,7 @@ When a run is rejected, Hexperiment translates complex statistical anomalies int
 | **The Possession** | Target Proxy Leakage ($AUC > 0.95$) | One column alone gives the answer away (e.g., recorded post-outcome). |
 | **The Peeking Spirit** | Pre-processing / Test Leakage | Training calculations saw test rows (detected by the Canary test). |
 | **The Prophet** | Temporal Leakage | Training samples originate from a time period after the test period. |
-| **The Doppelganger** | Duplicate / Entity Overlap | Identical or near-identical rows exist across both train and test splits. |
+| **The Doppelganger** | Duplicate Rows | The exact same rows are in both training and test. |
 | **The Shapeshifter** | Non-Deterministic Instability | Identical runs produce divergent results, meaning the model is unverified. |
 
 ## The two demo cases

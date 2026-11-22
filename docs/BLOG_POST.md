@@ -104,38 +104,21 @@ The run is immediately rejected, assigned a deterministic `REJECTED` verdict, an
 
 ---
 
-## 4. When Kiro Pushed Back: The Tilted Resample Discovery
+## 4. The Design Question That Changed the Canary
 
-One of the most remarkable moments of building Hexperiment occurred during initial specification generation inside Kiro.
+Our first idea for the canary was simple: in the canary run, permute the values within each column of the test rows.
 
-In our earliest architectural sketch, our proposed Canary algorithm was simple: in the Canary execution, randomly permute the values within each column of the test dataset. 
+Writing the design spec in Kiro turned that idea into an open question, and the design records why it fails: *"Permuting test values within a column leaves every column-level statistic unchanged, so mean imputation or a scaler fitted on all rows would not change training and would escape the canary."* ([design.md](../.kiro/specs/hexperiment-core/design.md), Resolved question 1)
 
-We delegated the task to Kiro using a custom `spec-writer` agent operating under formal EARS requirements. The agent analyzed the requirement, paused, and **refused to approve the specification**.
+We had three options: permutation (A), a plain bootstrap (B), and a **tilted resample** (C). We chose C. Each column of the test rows is tilted on its own, in column order, with one seeded generator, and the time column is left alone. The rules, from `tilt_column` in [data.py](../hexperiment/src/hexperiment/data.py):
 
-It produced a rigorous mathematical critique:
-> *"Shuffling values column-wise within the test set preserves the marginal mean and marginal variance of every column. If an agent commits a preprocessor leak by imputing missing values with the global column mean before splitting, the column mean of the scrambled test set will remain identical to the original test set. The Canary test would pass silently, completely blind to mean-imputation leakage."*
+- Missing values keep their positions and are never drawn.
+- A column with one distinct value is unchanged.
+- A column with two distinct values has every occurrence of one swapped for the other (this covers a binary target).
+- A column with three or more distinct values gets draws, with replacement, from the upper half of its values (for numbers by value; for categories the more frequent half). If every draw is the same, one draw is replaced so the column never becomes constant.
+- Every written value is one the column already had in its test rows, so no new category or dtype can appear.
 
-This was a profound catch. If we had vibe-coded this feature with unstructured prompting, we would have shipped a broken leak detector.
-
-Because Kiro was operating in a disciplined, spec-first loop, we redesigned the mathematical perturbation from scratch: **The Tilted Resample**.
-
-```python
-def tilted_resample(df: pd.DataFrame, seed: int) -> pd.DataFrame:
-    """Resample test rows using non-uniform probability weights.
-    
-    By weighting rows by their distance from the feature centroid,
-    the resampled test partition deliberately shifts marginal means
-    and covariances while preserving column types and schemas.
-    """
-    rng = np.random.default_rng(seed)
-    n = len(df)
-    weights = np.linspace(0.5, 1.5, n)
-    weights /= weights.sum()
-    indices = rng.choice(n, size=n, replace=True, p=weights)
-    return df.iloc[indices].copy()
-```
-
-By substituting column-shuffling with tilted resampling, Hexperiment immediately caught 100% of preprocessor imputation leaks across our entire benchmark suite.
+Because the tilt moves column-level statistics on purpose, a statistic computed over all rows changes training in the canary run. In the benchmark, all 9 leaky apps that fit a scaler, a mean imputer or a target encoding on all rows were rejected ([benchmark README](../hexperiment/benchmark/README.md)).
 
 ---
 
@@ -150,7 +133,7 @@ To bridge the communication gap between statistical theory and human debugging, 
 | **The Possession** | Target Proxy Leakage | A column that is mathematically equivalent to the label (e.g., `refund_amount > 0` predicting `is_canceled`). |
 | **The Peeking Spirit** | Preprocessor / Feature Leakage | Fitting scalers, PCA, or target encodings on the full dataset before partitioning. |
 | **The Prophet** | Temporal Inversion | Using future information to predict past events (e.g., training on October data to predict August outcomes). |
-| **The Doppelganger** | Entity / Duplicate Leakage | Identical or near-identical entity rows split across both train and test partitions. |
+| **The Doppelganger** | Duplicate Rows | The exact same rows are in both the training and the test partition. |
 | **The Shapeshifter** | Non-Deterministic Variance | Code that changes predictions across identical runs due to unseeded random states or race conditions. |
 
 When an audit fails, Hexperiment does not dump an unreadable stack trace; it issues an actionable case file detailing which Ghost haunted the run, the exact line of code responsible, and the recommended refactoring path.
@@ -173,7 +156,7 @@ We achieved this using five native Kiro capabilities:
 │                            │                                           │
 │                            ▼                                           │
 │  [2. Agent Generation]                                                 │
-│  AI Agent drafts train.py (Exploits leak: ROC AUC 0.998)               │
+│  AI Agent drafts train.py (Exploits leak: ROC AUC 1.0000)              │
 │                            │                                           │
 │                            ▼                                           │
 │  [3. Event Hook Interception]                                          │
@@ -192,7 +175,7 @@ We achieved this using five native Kiro capabilities:
 │                            │                                           │
 │                            ▼                                           │
 │  [Remediation Loop]                                                    │
-│  Agent refactors pipeline ──► Re-audits ──► Verdict: APPROVED (0.812)  │
+│  Agent refactors pipeline ──► Re-audits ──► Verdict: APPROVED (0.9090) │
 │                                                                        │
 └────────────────────────────────────────────────────────────────────────┘
 ```
@@ -246,32 +229,34 @@ We evaluated three separate model architectures:
 
 This created a comprehensive benchmark matrix of **78 total applications** (39 deliberately leaky applications paired with 39 clean, leak-free twins):
 
-```text
-======================= HEXPERIMENT BENCHMARK RESULTS =======================
-Kapoor & Narayanan (2023) Taxonomy Validation
-Evaluated across 78 total application pipelines
+| Leak type | Mechanism | Designed to catch | Rejected |
+|---|---|---|---|
+| L1.1 No test set | The model is scored on the rows it was trained on | The Doppelganger | 3 of 3 |
+| L1.2 Pre-processing | A standard scaler is fitted on all rows before the split | The Peeking Spirit | 3 of 3 |
+| L1.2 Pre-processing | A mean imputer is fitted on all rows before the split | The Peeking Spirit | 3 of 3 |
+| L1.2 Pre-processing | The rare class is over-sampled before the split | The Doppelganger | 3 of 3 |
+| L1.2 Pre-processing | A category's mean label is computed from all rows | The Peeking Spirit | 3 of 3 |
+| L1.3 Feature selection | The 15 best columns are chosen with all rows' labels | The Peeking Spirit | 3 of 3 |
+| L1.4 Duplicates | Part of the rows appear twice, and the split is random | The Doppelganger | 3 of 3 |
+| L2 Illegitimate features | A column recorded after the outcome copies the label | The Possession | 3 of 3 |
+| L2 Illegitimate features | A noisy measurement of the label is a feature | The Possession | 3 of 3 |
+| L2 Illegitimate features | A weaker proxy of the label (AUC about 0.89) is a feature | no check | 0 of 3 |
+| L3.1 Temporal leakage | Time-ordered data is split at random by the script | The Prophet | 3 of 3 |
+| L3.1 Temporal leakage | The time column is not declared in `hex.toml` | The Prophet | 0 of 3 |
+| L3.2 Nonindependence | Rows of one entity, differing by small noise, are split at random | no check | 0 of 3 |
 
-Mechanism                             LR      RF      HGB     Result
------------------------------------------------------------------------------
-1.  Global Scaler Preprocessing       REJECT  REJECT  REJECT  CAUGHT (3/3)
-2.  Global Mean Imputation            REJECT  REJECT  REJECT  CAUGHT (3/3)
-3.  Target Encoding Leakage           REJECT  REJECT  REJECT  CAUGHT (3/3)
-4.  Helper Function Scoping Leak      REJECT  REJECT  REJECT  CAUGHT (3/3)
-5.  Temporal Split Inversion          REJECT  REJECT  REJECT  CAUGHT (3/3)
-6.  Near-Duplicate Row Overlap        REJECT  REJECT  REJECT  CAUGHT (3/3)
-7.  Direct Target Proxy Feature       REJECT  REJECT  REJECT  CAUGHT (3/3)
-8.  Non-Contiguous Time Leakage       REJECT  REJECT  REJECT  CAUGHT (3/3)
-...
------------------------------------------------------------------------------
-Total Leaks Caught:         30 of 39 leaky applications (77.0%)
-Total False Alarms:         0 of 39 clean applications (0.0% FALSE POSITIVES)
------------------------------------------------------------------------------
-Overall Integrity Score:    VERIFIED SOUND
-```
+**30 of 39 leaky apps rejected (76.9%), each by the ghost designed for it. 0 of 39 clean twins rejected.**
+
+Three mechanisms were missed in all three models, and we report them as results:
+- **Weak proxy:** The Possession fires only at a stand-alone AUC of 0.95 or more (configurable), so a 0.89 proxy passes.
+- **Undeclared time column:** The Prophet can only compare dates when `split.time_column` is declared; the kit cannot find a time column it has not been told about.
+- **Entity leak:** no row is identical, so The Doppelganger does not fire, and the kit has no notion of an entity or a group split.
+
+Full table, scores and method: [hexperiment/benchmark/README.md](../hexperiment/benchmark/README.md).
 
 Crucially, across all 39 clean twin applications, Hexperiment registered **zero false alarms**. In production machine learning, a safety harness that blocks legitimate models is quickly discarded; 0% false positives is the difference between an academic toy and an enterprise-grade developer tool.
 
-In addition, our test suite runs **3,365 automated tests** (including extensive property-based fuzzing with Hypothesis) with 100% exit code 0 in approximately 45 seconds.
+In addition, our test suite runs **3,365 automated tests** (including extensive property-based fuzzing with Hypothesis) with exit code 0 in about 2.5 minutes.
 
 ---
 

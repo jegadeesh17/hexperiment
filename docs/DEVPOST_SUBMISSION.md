@@ -36,7 +36,7 @@ Hexperiment combines dynamic behavioral auditing with Kiro’s agent workflow to
    - **The Possession:** Target proxy features (a single column that predicts the label with $AUC > 0.95$).
    - **The Peeking Spirit:** Upstream preprocessing or feature engineering that saw test rows (Canary finding).
    - **The Prophet:** Temporal leakage (training samples originating from after the test period).
-   - **The Doppelganger:** Duplicate or near-identical rows split across training and test partitions.
+   - **The Doppelganger:** The exact same rows are in both the training and the test partition.
    - **The Shapeshifter:** Non-deterministic variance across identical runs.
 3. **Verified Verdicts & Model Cards:** Every audit produces an automated verdict (`APPROVED`, `REJECTED`, or `UNVERIFIED`) with reproducible data hashes and generates an official Markdown model card documenting thresholds, data hashes, and audit history.
 4. **The Autonomous Exorcism Loop:** Inside Kiro, if an agent writes leaky code, the `exorcise` workflow activates a sandboxed `ghost-hunter` agent. The agent inspects the diagnostic findings via MCP tools, refactors the data pipeline, and re-audits until the run earns an official `APPROVED` verdict.

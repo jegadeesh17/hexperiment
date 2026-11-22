@@ -108,7 +108,7 @@ To ensure your video looks like a top-tier hackathon submission:
 
 **Voiceover Narration:**
 > *"This isn't just a toy demo.*  
-> *We benchmarked Hexperiment against the formal leakage taxonomy from Kapoor & Narayanan's landmark 2023 survey in Nature Patterns.*  
+> *We benchmarked Hexperiment against the formal leakage taxonomy from Kapoor & Narayanan's landmark 2023 survey in the Cell Press journal Patterns.*  
 > *We evaluated 13 distinct leakage mechanisms across three different machine learning models—running 78 applications in total.*  
 > *Hexperiment caught 30 of 39 leaky applications as predicted, and rejected **zero clean twins**—delivering a zero percent false alarm rate.*  
 > *Even subtle preprocessing leaks that only shifted accuracy by 0.008—which human reviewers easily miss—were caught by the Canary."*
