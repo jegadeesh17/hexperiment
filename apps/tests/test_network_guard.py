@@ -85,3 +85,29 @@ def test_a_datagram_send_in_an_apps_test_is_refused() -> None:
 def test_a_host_name_lookup_in_an_apps_test_is_refused() -> None:
     with pytest.raises(RuntimeError, match="a test tried to use the network"):
         socket.getaddrinfo("example.com", 80)
+
+
+def test_a_gethostbyname_lookup_in_an_apps_test_is_refused() -> None:
+    with pytest.raises(RuntimeError, match="a test tried to use the network"):
+        socket.gethostbyname("example.com")
+
+
+def test_a_gethostbyname_ex_lookup_in_an_apps_test_is_refused() -> None:
+    with pytest.raises(RuntimeError, match="a test tried to use the network"):
+        socket.gethostbyname_ex("example.com")
+
+
+def test_a_getnameinfo_lookup_in_an_apps_test_is_refused() -> None:
+    with pytest.raises(RuntimeError, match="a test tried to use the network"):
+        socket.getnameinfo(("127.0.0.1", 80), 0)
+
+
+@pytest.mark.skipif(
+    not hasattr(socket.socket, "sendmsg"), reason="this platform has no socket.sendmsg"
+)
+def test_a_sendmsg_datagram_in_an_apps_test_is_refused() -> None:
+    with (
+        socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock,
+        pytest.raises(RuntimeError, match="a test tried to use the network"),
+    ):
+        sock.sendmsg([b"ping"], [], 0, ("127.0.0.1", 9))

@@ -32,7 +32,9 @@ from apps_helpers import (
 def no_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """Fail any apps test that tries to use the network (Requirements 5.1, 5.6).
 
-    Connecting, sending a datagram and looking up a host name are refused. Only
+    Connecting, sending a datagram (``sendto``, ``sendmsg``) and looking up a host
+    name or address (``getaddrinfo``, ``gethostbyname``, ``gethostbyname_ex``,
+    ``getnameinfo``) are refused. Only
     tests under this folder are guarded. Pytest's root folder can lie outside
     ``apps/`` (``hexperiment/`` when both test folders are run), and then this
     autouse fixture would also reach tests that are not ours.
@@ -47,6 +49,12 @@ def no_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(socket.socket, "connect_ex", refuse)
     monkeypatch.setattr(socket.socket, "sendto", refuse)
     monkeypatch.setattr(socket, "getaddrinfo", refuse)
+    monkeypatch.setattr(socket, "gethostbyname", refuse)
+    monkeypatch.setattr(socket, "gethostbyname_ex", refuse)
+    monkeypatch.setattr(socket, "getnameinfo", refuse)
+    # Not every platform has sendmsg (Windows sockets do not).
+    if hasattr(socket.socket, "sendmsg"):
+        monkeypatch.setattr(socket.socket, "sendmsg", refuse)
 
 
 @pytest.fixture(scope="session")
