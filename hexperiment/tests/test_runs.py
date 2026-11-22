@@ -673,11 +673,19 @@ def test_normalize_data_path_makes_an_absolute_path_inside_the_app_relative(tmp_
     assert normalize_data_path(tmp_path, absolute) == "data/churn.csv"
 
 
-def test_normalize_data_path_keeps_a_path_outside_the_app_absolute(tmp_path):
+def test_normalize_data_path_gives_a_path_outside_the_app_relative_to_the_app(tmp_path):
     app = tmp_path / "app"
     app.mkdir()
-    result = normalize_data_path(app, "../shared/churn.csv")
-    assert result == (tmp_path / "shared" / "churn.csv").resolve().as_posix()
+    assert normalize_data_path(app, "../shared/churn.csv") == "../shared/churn.csv"
+
+
+def test_normalize_data_path_turns_an_absolute_path_outside_the_app_relative(tmp_path):
+    app = tmp_path / "app"
+    app.mkdir()
+    absolute = str(tmp_path / "shared" / "churn.csv")
+    result = normalize_data_path(app, absolute)
+    assert result == "../shared/churn.csv"
+    assert not Path(result).is_absolute()
 
 
 def test_normalize_data_path_never_contains_a_backslash(tmp_path):

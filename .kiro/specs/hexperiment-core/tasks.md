@@ -159,7 +159,8 @@
   - _Requirements: 10.6, 10.7_
   - Result: `Snapshot` now carries `test_columns`, `test_column_hashes` and `test_column_varies` (files and `build_snapshot` updated, `auditor.py` passes `split.time_column`); `_missed_columns` replaces `_scramble_missed`. New scenarios `partial_load_bypass` (UNVERIFIED, warning names `x1`, `x2`, not the target) and `constant_column` (APPROVED, canary applied). A constant test *target* cannot be built, because the audit rejects a single-class test target as an input error, so the second scenario uses a constant feature instead. 3201 tests pass in 158 s; ruff reports no problems.
 
-- [ ] 22. Relative data paths in the use count, and the MCP pin
+- [x] 22. Relative data paths in the use count, and the MCP pin
   - In `hexperiment/src/hexperiment/runs.py`, give a data file outside the app folder as `os.path.relpath` to the app folder, so the key never holds an absolute path. Add a test.
   - Add `mcp` at its installed version to `hexperiment/constraints.txt`.
+  - Result: `normalize_data_path` uses `os.path.relpath` (POSIX separators); a file on another Windows drive has no relative path and stays absolute. The old test that expected an absolute path outside the app now expects `../shared/churn.csv`; a second test covers an absolute input. `mcp==2.3.0` added to `constraints.txt`.
   - _Requirements: 12.1_

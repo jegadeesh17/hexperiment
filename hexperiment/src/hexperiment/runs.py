@@ -74,15 +74,18 @@ def normalize_data_path(app_dir: str | os.PathLike[str], data_path: str) -> str:
     """``data_path`` resolved against ``app_dir`` as a normalized POSIX string.
 
     ``data/x.csv``, ``./data/x.csv`` and ``data/../data/x.csv`` all give
-    ``data/x.csv``. A path inside the app folder is made relative to it; one outside
-    stays absolute. This is the path ``hexperiment.load`` reads, so two spellings of
-    one file count as one test set (Requirement 12.1).
+    ``data/x.csv``. The path is made relative to the app folder, so a file outside it
+    reads ``../shared/x.csv`` and the key never holds an absolute path (a file on
+    another Windows drive has no relative path and stays absolute). This is the path
+    ``hexperiment.load`` reads, so two spellings of one file count as one test set
+    (Requirement 12.1).
     """
     base = Path(app_dir).resolve()
     resolved = (base / data_path).resolve()
     try:
-        return resolved.relative_to(base).as_posix()
+        return Path(os.path.relpath(resolved, base)).as_posix()
     except ValueError:
+        # Windows: a file on another drive has no relative path to the app folder.
         return resolved.as_posix()
 
 
