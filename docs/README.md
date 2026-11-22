@@ -10,6 +10,7 @@ Where to find what in Hexperiment.
 | [HOW_IT_WORKS_MASTER_GUIDE.md](HOW_IT_WORKS_MASTER_GUIDE.md) | Complete educational masterclass: leakage math, the Canary test, the 5 ghosts, Kiro primitives, and judge Q&A defenses |
 | [VIDEO_SCRIPT.md](VIDEO_SCRIPT.md) | 3-minute video recording script and storyboard (Crime -> Detection -> Autonomous Exorcism -> Scientific Proof) |
 | [DEVPOST_SUBMISSION.md](DEVPOST_SUBMISSION.md) | Devpost submission text mapped to the 5 judging criteria |
+| [BLOG_POST.md](BLOG_POST.md) | Long-form write-up: why coding agents leak, the canary design, the Kiro loop, and the benchmark results |
 | [DECISIONS.md](DECISIONS.md) | Decisions taken during the build and why |
 | [../hexperiment/benchmark/README.md](../hexperiment/benchmark/README.md) | The leak benchmark: method, results and misses |
 | [kiro/](kiro/) | Kiro notes: the ghost hunter's recorded sessions on the two apps, the Kiro file formats as checked live, and the hook-output issue |
