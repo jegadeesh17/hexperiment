@@ -140,7 +140,7 @@
   - Confirm that each check module has example-based tests for a leaking and a clean case and at least one Hypothesis test, that the clean-data test passes, and that no runtime dependency beyond `pandas`, `numpy` and `scikit-learn` was added.
   - _Requirements: 17.1, 17.2, 17.3, 17.4, 17.5, 17.6_
 
-- [ ] 19. Canary target check against bypass
+- [x] 19. Canary target check against bypass
   - In `hexperiment/src/hexperiment/canary.py`, record the hash of `test[target]` in each snapshot.
   - In `decide_canary`, when the canary execution's test-target hash equals the normal execution's test-target hash, mark the canary outcome as `not applied` with a finding that the scramble did not reach the audited frames.
   - Add a scenario test in `hexperiment/tests/test_canary_scripts.py` next to Scenario 7: a script calls `load()`, discards it, reads the CSV directly, and fits a scaler on train+test. It must end `UNVERIFIED`, never `APPROVED`.

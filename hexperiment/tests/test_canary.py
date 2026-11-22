@@ -70,6 +70,7 @@ def make_snapshot(
     scores=(0.1, 0.2, 0.3, 0.4),
     test_ids=(4, 5),
     mode=ExecMode.NORMAL,
+    test_target_hash=None,
 ) -> Snapshot:
     ids = np.asarray(train_ids, dtype=np.int64)
     if hashes is None:
@@ -82,6 +83,7 @@ def make_snapshot(
         test_ids=np.asarray(test_ids, dtype=np.int64),
         train_row_hash=np.asarray(hashes, dtype=np.uint64),
         y_score_train=None if scores is None else np.asarray(scores, dtype=float),
+        test_target_hash=test_target_hash,
     )
 
 
@@ -91,6 +93,7 @@ def with_scores(snapshot: Snapshot, scores) -> Snapshot:
         hashes=snapshot.train_row_hash,
         scores=scores,
         test_ids=snapshot.test_ids,
+        test_target_hash=snapshot.test_target_hash,
     )
 
 
@@ -100,6 +103,7 @@ def with_hashes(snapshot: Snapshot, hashes) -> Snapshot:
         hashes=hashes,
         scores=snapshot.y_score_train,
         test_ids=snapshot.test_ids,
+        test_target_hash=snapshot.test_target_hash,
     )
 
 
@@ -369,6 +373,108 @@ def test_step_2_scrambled_ids_in_train():
     assert "hexperiment.split" in finding.fix
     assert control.calls == 0
     assert_unwaivable(outcome)
+
+
+def test_step_2b_equal_test_target_hash_means_the_scramble_missed():
+    normal = make_snapshot(test_target_hash="abc")
+    canary = make_snapshot(test_target_hash="abc")  # equal frames, rows unchanged
+    control = ControlRunner(normal)
+    outcome = decide_canary(normal, canary, clean_marker(), control, ())
+    assert (outcome.outcome, outcome.determinism) == (
+        Outcome.NOT_APPLIED,
+        Outcome.SKIPPED,
+    )
+    (finding,) = outcome.findings
+    assert finding.check == "canary"
+    assert finding.ghost is None
+    assert finding.severity is Severity.WARNING
+    assert "scramble did not reach the audited frames" in finding.message
+    assert control.calls == 0
+    assert_unwaivable(outcome)
+
+
+def test_step_2b_applies_even_when_the_training_rows_also_differ():
+    normal = make_snapshot(test_target_hash="abc")
+    canary = with_hashes(
+        make_snapshot(test_target_hash="abc"), normal.train_row_hash + np.uint64(1)
+    )
+    outcome = decide_canary(normal, canary, clean_marker(), ControlRunner(normal), ())
+    assert outcome.outcome is Outcome.NOT_APPLIED
+
+
+def test_a_different_test_target_hash_goes_on_to_the_comparison():
+    normal = make_snapshot(test_target_hash="abc")
+    canary = make_snapshot(test_target_hash="xyz")
+    outcome = decide_canary(normal, canary, clean_marker(), ControlRunner(normal), ())
+    assert outcome == CanaryOutcome(Outcome.PASSED, Outcome.PASSED, ())
+
+
+@pytest.mark.parametrize(
+    ("normal_hash", "canary_hash"), [(None, None), ("abc", None), (None, "abc")]
+)
+def test_a_missing_test_target_hash_never_counts_as_equal(normal_hash, canary_hash):
+    normal = make_snapshot(test_target_hash=normal_hash)
+    canary = make_snapshot(test_target_hash=canary_hash)
+    outcome = decide_canary(normal, canary, clean_marker(), ControlRunner(normal), ())
+    assert outcome == CanaryOutcome(Outcome.PASSED, Outcome.PASSED, ())
+
+
+def test_build_snapshot_hashes_the_test_target_in_row_id_order():
+    test = make_frame(ids=(4, 2, 3))
+    reordered = test.loc[[2, 3, 4]]
+    train = make_frame()
+    a = build_snapshot(ExecMode.NORMAL, None, train, test, FEATURES, None, "target")
+    b = build_snapshot(
+        ExecMode.NORMAL, None, train, reordered, FEATURES, None, "target"
+    )
+    assert a.test_target_hash == b.test_target_hash
+    assert len(a.test_target_hash) == 64
+
+
+def test_build_snapshot_test_target_hash_follows_the_target_values():
+    test = make_frame(ids=(4, 5))
+    flipped = test.assign(target=1 - test["target"])
+    train = make_frame()
+    args = (ExecMode.NORMAL, None, train)
+    a = build_snapshot(*args, test, FEATURES, None, "target")
+    b = build_snapshot(*args, flipped, FEATURES, None, "target")
+    other_column = build_snapshot(*args, test.assign(age=0.0), FEATURES, None, "target")
+    assert a.test_target_hash != b.test_target_hash
+    assert a.test_target_hash == other_column.test_target_hash
+
+
+def test_build_snapshot_has_no_test_target_hash_without_a_target_column():
+    train, test = make_frame(), make_frame(ids=(4, 5))
+    no_name = build_snapshot(ExecMode.NORMAL, None, train, test, FEATURES, None)
+    no_column = build_snapshot(
+        ExecMode.CANARY,
+        None,
+        train,
+        test.drop(columns="target"),
+        FEATURES,
+        None,
+        "target",
+    )
+    assert no_name.test_target_hash is None
+    assert no_column.test_target_hash is None
+
+
+def test_the_test_target_hash_survives_the_snapshot_files(tmp_path):
+    written = make_snapshot(test_target_hash="f" * 64)
+    write_snapshot(tmp_path, written)
+    read = read_snapshot(tmp_path, ExecMode.NORMAL, RUN)
+    assert read.test_target_hash == "f" * 64
+    assert_same_snapshot(read, written)
+
+
+def test_read_snapshot_rejects_meta_without_the_test_target_hash(tmp_path):
+    write_snapshot(tmp_path, make_snapshot())
+    path = hex_dir(tmp_path, ExecMode.NORMAL) / "meta.json"
+    meta = read_json(path)
+    del meta["test_target_hash"]
+    path.write_text(json.dumps(meta), encoding="utf-8")
+    with pytest.raises(ExecutionFailed, match="test_target_hash"):
+        read_snapshot(tmp_path, ExecMode.NORMAL, RUN)
 
 
 def test_step_3_id_sets_differ():
@@ -1088,6 +1194,7 @@ def assert_same_snapshot(actual: Snapshot, expected: Snapshot) -> None:
     assert actual.mode is expected.mode
     assert actual.run_id == expected.run_id
     assert actual.features == expected.features
+    assert actual.test_target_hash == expected.test_target_hash
     for name in ("train_ids", "test_ids", "train_row_hash", "y_score_train"):
         a, e = getattr(actual, name), getattr(expected, name)
         if e is None:
@@ -1199,6 +1306,7 @@ def test_snapshot_meta_json_describes_the_snapshot(tmp_path):
         "n_train",
         "run_id",
         "script",
+        "test_target_hash",
     }
     assert meta["format_version"] == 1
     assert meta["features"] == FEATURES

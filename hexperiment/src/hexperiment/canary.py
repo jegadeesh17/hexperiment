@@ -14,6 +14,7 @@ orchestrates the executions of one run (Requirements 10.1, 16.2, 16.3).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -90,6 +91,9 @@ class Snapshot:
     test_ids: NDArray[np.int64]  # sorted ascending
     train_row_hash: NDArray[np.uint64]
     y_score_train: NDArray[np.float64] | None
+    # Digest of ``test[target]`` in row-id order; ``None`` when the test frame has
+    # no target column or the caller gave no target name (Requirement 10.7).
+    test_target_hash: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,12 +142,15 @@ def build_snapshot(
     test: pd.DataFrame,
     features: Sequence[str],
     y_score_train: NDArray[np.float64] | None,
+    target: str | None = None,
 ) -> Snapshot:
     """Record what training saw, with rows sorted by id (Requirement 2.3).
 
     The hash of ``train[features]`` ignores the index, so it depends on values
     only. ``y_score_train`` is matched to ``train`` by position and reordered with
-    it, so reordering the training rows never changes the snapshot.
+    it, so reordering the training rows never changes the snapshot. With a
+    ``target`` name, the snapshot also holds a digest of ``test[target]``, which
+    shows whether the scramble reached the audited test frame (Requirement 10.7).
     """
     train_ids = _row_ids(train, "train")
     test_ids = _row_ids(test, "test")
@@ -169,6 +176,7 @@ def build_snapshot(
         test_ids=np.sort(test_ids, kind="stable"),
         train_row_hash=hashes.to_numpy(dtype=np.uint64)[order],
         y_score_train=scores,
+        test_target_hash=_test_target_hash(test, test_ids, target),
     )
 
 
@@ -242,6 +250,13 @@ def decide_canary(
     if scrambled_train_rows:
         warning = _scrambled_in_train_warning(scrambled_train_rows)
         return CanaryOutcome(Outcome.NOT_APPLIED, Outcome.SKIPPED, (warning,))
+    # Requirement 10.7: the scramble changes the test target of every audited
+    # test frame, so an equal digest shows that the audited frames did not come
+    # from the scrambled load, and the comparison below would prove nothing.
+    if _scramble_missed(normal, canary):
+        return CanaryOutcome(
+            Outcome.NOT_APPLIED, Outcome.SKIPPED, (_scramble_missed_warning(),)
+        )
     # Step 3: the training rows changed, so the split depends on data values
     # (Requirement 10.2).
     if not np.array_equal(normal.train_ids, canary.train_ids):
@@ -345,6 +360,30 @@ def _row_ids(frame: pd.DataFrame, name: str) -> NDArray[np.int64]:
             "before calling hexperiment.audit.",
         )
     return frame.index.to_numpy(dtype=np.int64)
+
+
+def _test_target_hash(
+    test: pd.DataFrame, test_ids: NDArray[np.int64], target: str | None
+) -> str | None:
+    """Digest of ``test[target]`` in row-id order, or ``None`` without a target.
+
+    The canary execution does not validate the test frame (Requirement 2.4), so a
+    missing target column gives ``None`` instead of an error.
+    """
+    if target is None or target not in test.columns:
+        return None
+    order = np.argsort(test_ids, kind="stable")
+    row_hashes = pd.util.hash_pandas_object(test[target], index=False)
+    ordered = row_hashes.to_numpy(dtype=np.uint64)[order]
+    return hashlib.sha256(ordered.tobytes()).hexdigest()
+
+
+def _scramble_missed(normal: Snapshot, canary: Snapshot) -> bool:
+    """True when both executions audited a test target with the same digest."""
+    return (
+        normal.test_target_hash is not None
+        and normal.test_target_hash == canary.test_target_hash
+    )
 
 
 def _require_unique_ids(train_ids: NDArray[np.int64]) -> None:
@@ -451,6 +490,17 @@ def _scrambled_in_train_warning(rows: int) -> Finding:
         "the training set",
         "split with hexperiment.split(df), not with your own split",
         {"scrambled_train_rows": rows},
+    )
+
+
+def _scramble_missed_warning() -> Finding:
+    return _warning(
+        "the canary test was not applied: the scramble did not reach the audited "
+        "frames, because the test target is the same in the normal and the canary "
+        "execution",
+        "build train and test from the frame returned by hexperiment.load() and "
+        "split it with hexperiment.split(df); do not read the data file yourself",
+        {},
     )
 
 
@@ -642,6 +692,7 @@ def write_snapshot(app_dir: Path, snapshot: Snapshot) -> None:
             "n_train": len(snapshot.train_ids),
             "run_id": snapshot.run_id,
             "script": SCRIPT_NAME,
+            "test_target_hash": snapshot.test_target_hash,
         },
     )
 
@@ -660,6 +711,7 @@ def read_snapshot(app_dir: Path, mode: ExecMode, run_id: str) -> Snapshot:
     try:
         features = tuple(_string_list(meta["features"]))
         has_scores = _boolean(meta["has_y_score_train"])
+        test_target_hash = _optional_string(meta["test_target_hash"])
     except (KeyError, TypeError) as error:
         raise _corrupt(
             meta_path, f"key {error} is missing or has the wrong type"
@@ -697,6 +749,7 @@ def read_snapshot(app_dir: Path, mode: ExecMode, run_id: str) -> Snapshot:
         test_ids=test_ids,
         train_row_hash=hashes,
         y_score_train=scores,
+        test_target_hash=test_target_hash,
     )
 
 
@@ -857,6 +910,12 @@ def _string_list(value: Any) -> list[str]:
 def _boolean(value: Any) -> bool:
     if not isinstance(value, bool):
         raise TypeError("expected a boolean")
+    return value
+
+
+def _optional_string(value: Any) -> str | None:
+    if value is not None and not isinstance(value, str):
+        raise TypeError("expected a string or null")
     return value
 
 

@@ -388,6 +388,39 @@ class TestDirectRead:
         assert not run.hex_dir("control").exists()
 
 
+class TestLoadBypass:
+    """Scenario 7b: ``load()`` is called and discarded, the CSV is read directly."""
+
+    @pytest.fixture(scope="class")
+    @classmethod
+    def run(cls, tmp_path_factory) -> ScenarioRun:
+        return run_scenario(tmp_path_factory, "load_bypass")
+
+    def test_the_run_is_unverified_and_never_approved(self, run):
+        assert run.code == 3
+        assert run.verdict["status"] == "UNVERIFIED"
+        assert errors_of(run.verdict) == []
+
+    def test_the_load_marker_was_written_so_only_the_target_hash_gives_it_away(
+        self, run
+    ):
+        assert run.scrambled_rows > 0
+
+    def test_the_canary_was_not_applied_and_determinism_was_skipped(self, run):
+        assert outcome_of(run.verdict, "canary") == "not applied"
+        assert outcome_of(run.verdict, "determinism") == "skipped"
+        (warning,) = findings_of(run.verdict, "canary")
+        assert warning["severity"] == "warning"
+        assert warning["ghost"] is None
+        assert "scramble did not reach the audited frames" in warning["message"]
+
+    def test_the_data_reader_hint_is_not_raised_for_the_csv_module(self, run):
+        assert findings_of(run.verdict, "split_order") == []
+
+    def test_no_control_execution_ran(self, run):
+        assert not run.hex_dir("control").exists()
+
+
 class TestRepeatRun:
     """Requirement 13.5: the same full run twice gives the same verdict content.
 
