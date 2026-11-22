@@ -27,7 +27,7 @@ jobs:
           cache: pip
           cache-dependency-path: hexperiment/pyproject.toml
       - name: Install the package
-        run: python -m pip install ./hexperiment
+        run: python -m pip install -c hexperiment/constraints.txt ./hexperiment
       - name: Build the gallery
         env:
           REPO_URL: ${{ github.server_url }}/${{ github.repository }}

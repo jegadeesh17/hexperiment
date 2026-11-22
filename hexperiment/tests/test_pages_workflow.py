@@ -316,7 +316,10 @@ def test_an_uppercase_or_short_sha_is_caught() -> None:
 
 
 def test_editable_install_is_caught() -> None:
-    text = mutate("pip install ./hexperiment", "pip install -e ./hexperiment")
+    text = mutate(
+        "pip install -c hexperiment/constraints.txt ./hexperiment",
+        "pip install -c hexperiment/constraints.txt -e ./hexperiment",
+    )
     with pytest.raises(AssertionError):
         check_pip_install(text)
 

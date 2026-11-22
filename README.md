@@ -134,7 +134,7 @@ You need Python 3.13 and git. The Kiro steps also need [Kiro](https://kiro.dev) 
    source .venv/Scripts/activate      # Windows, Git Bash
    # .venv\Scripts\Activate.ps1       # Windows, PowerShell
    # source .venv/bin/activate        # macOS and Linux
-   pip install -e "./hexperiment[mcp]"
+   pip install -c hexperiment/constraints.txt -e "./hexperiment[mcp]"
    ```
 
 2. Download the hotel data (about 17 MB; the script checks its checksum) and run the full check. It trains the model twice, once with the test rows scrambled, and prints the verdict:
@@ -203,7 +203,7 @@ An app is a folder with a `hex.toml` (target, metric, threshold, split), a `trai
 ## Running tests
 
 ```bash
-pip install -e "./hexperiment[dev]"
+pip install -c hexperiment/constraints.txt -e "./hexperiment[dev]"
 python -m pytest hexperiment/tests apps/tests -q      # about 3,400 tests, about 2 minutes: many start real training runs
 python -m pytest apps/tests -q                        # only the two apps: no network and no downloaded data, about 20 s
 python -m pytest hexperiment/tests/test_canary.py -q   # one file
