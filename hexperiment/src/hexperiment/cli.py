@@ -84,6 +84,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="instead, name the apps this agent session changed that are not "
         "APPROVED (message on standard error and exit 1; nothing is run)",
     )
+    commands.add_parser(
+        "guard-write",
+        help="allow or refuse a file write of the ghost hunter (reads a Kiro "
+        "preToolUse event from standard input; exits 0, or 2 to refuse)",
+    )
     init = commands.add_parser(
         "init",
         help="create an app from the templates and/or add the Kiro files to this "
@@ -137,6 +142,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "hook":
         return _stop_command() if args.stop else _hook_command()
+    if args.command == "guard-write":
+        from hexperiment.write_guard import main as guard_main
+
+        return guard_main()
     if args.command == "init":
         return _init_command(args.app_dir, kiro=args.kiro)
     if args.command == "gallery":

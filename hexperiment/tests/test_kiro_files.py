@@ -443,6 +443,43 @@ def test_no_write_or_shell_pattern_contains_a_control_character():
                     assert not bad, f"{capability} {effect} pattern {pattern!r}"
 
 
+REMOVED_DENY_PATTERNS = (
+    "*probe*",
+    "**/*probe*",
+    "**/zz_*",
+    "*zz_*",
+    "*abs_*",
+    "**/*abs_*",
+)
+GUARD_TOOLS = ["fs_write", "str_replace", "fs_append"]
+
+
+def test_the_agent_runs_the_write_guard_before_each_file_writing_tool():
+    assert agent()["hooks"] == {
+        "preToolUse": [
+            {"matcher": tool, "command": "hexperiment guard-write"}
+            for tool in GUARD_TOOLS
+        ]
+    }
+
+
+def test_the_guard_matchers_do_not_include_the_write_alias_that_runs_the_hook_twice():
+    matchers = [h["matcher"] for h in agent()["hooks"]["preToolUse"]]
+    assert "write" not in matchers
+    assert len(matchers) == len(set(matchers))
+
+
+def test_the_ghost_hunter_template_has_the_bytes_of_the_agent_file():
+    template = PACKAGE_DIR / "src" / "hexperiment" / "templates" / "kiro" / AGENT_FILE
+    assert template.read_bytes() == (KIRO_DIR / AGENT_FILE).read_bytes()
+
+
+def test_the_deny_list_has_no_pattern_that_names_a_probe_file():
+    denied = {p for rule in rules("fs_write", "deny") for p in rule["match"]}
+    for removed in REMOVED_DENY_PATTERNS:
+        assert removed not in denied, removed
+
+
 def test_the_agent_can_read_everything():
     reads = rules("fs_read", "allow")
     assert len(reads) == 1

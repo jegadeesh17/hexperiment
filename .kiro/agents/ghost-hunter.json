@@ -12,6 +12,22 @@
   "resources": [
     "file://.kiro/steering/ml-integrity.md"
   ],
+  "hooks": {
+    "preToolUse": [
+      {
+        "matcher": "fs_write",
+        "command": "hexperiment guard-write"
+      },
+      {
+        "matcher": "str_replace",
+        "command": "hexperiment guard-write"
+      },
+      {
+        "matcher": "fs_append",
+        "command": "hexperiment guard-write"
+      }
+    ]
+  },
   "permissions": {
     "rules": [
       {
@@ -59,10 +75,6 @@
           "**/hexperiment/**",
           "README*",
           "**/README*",
-          "*probe*",
-          "**/zz_*",
-          "*zz_*",
-          "*abs_*",
           "apps/verify.py",
           "**/apps/verify.py",
           "*.md",
@@ -92,8 +104,6 @@
           "**\\Temp\\**",
           "**/AppData/**",
           "**\\AppData\\**",
-          "**/*probe*",
-          "**/*abs_*",
           "*/scratchpad/**",
           "*\\scratchpad\\**",
           "**/tests/**",
