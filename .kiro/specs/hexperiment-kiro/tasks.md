@@ -173,6 +173,7 @@
   - _Requirements: 3.2, 3.3, 3.8_
   - **Result:** blocking works, so the guard case applies. `write_guard.py` and `hexperiment guard-write` (light route in `entry.py`) allow only a Python file inside `apps/<app>/` after resolving `..`, links, absolute paths and case; `ghost-hunter.json` (and its template, same bytes) has `preToolUse` hooks for `fs_write`, `str_replace` and `fs_append`, and the six probe-file deny patterns are gone. Tests: `test_write_guard.py`, plus pins in `test_kiro_files.py`.
 
-- [ ] 19. **Owner:** the write probe
+- [x] 19. **Owner:** the write probe
   - In a headless session with `ghost-hunter` and the file-writing tools trusted, try to create: `helper.py`, `pyproject.toml` and `.gitignore` at the root, `.github/x.yml`, `power/x.txt`, `docs/x.md`, `hexperiment/benchmark/x.py`, `Hexperiment/src/hexperiment/canary.py`, `apps/tests/x.py`, `apps/zz-guard/../x.py`, `apps/zz-guard/VERDICT.json`, an absolute path into a folder outside the workspace, and the allowed control `apps/zz-guard/model_utils.py`. Every write except the control must be refused. Commit the log; delete only the files the probe created.
   - _Requirements: 3.7_
+  - **Result:** 12 of 12 out-of-app writes refused by `hexperiment guard-write`; the control `apps/zz-guard/model_utils.py` was written and then deleted. Log: `docs/kiro/ghost-hunter-write-probe.md`.
