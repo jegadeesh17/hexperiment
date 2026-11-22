@@ -151,3 +151,14 @@
   - In `hexperiment/src/hexperiment/runs.py`, normalize the test-set use-count key so that `data.path` resolves relative to the app folder.
   - Add `hexperiment/constraints.txt` pinning tested exact versions, and add unit tests for `checks_overrides` and normalized path keys.
   - _Requirements: 12.1, 13.2, 14.1_
+
+- [ ] 21. Per-column scramble check
+  - In `hexperiment/src/hexperiment/canary.py`, replace `Snapshot.test_target_hash` with `test_columns` (the target plus the audited features, without the time column), `test_column_hashes` (uint64, one row per test row in sorted row-id order, one column per entry of `test_columns`, from `pd.util.hash_pandas_object(test[col], index=False)`) and `test_column_varies` (one bool per column: at least two distinct non-missing test values). `write_snapshot` and `read_snapshot` carry the new fields; `build_snapshot` takes `time_column`, and `auditor.py` passes `config.split.time_column` in every mode.
+  - Replace `_scramble_missed` with `_missed_columns(normal, canary)`: the columns present in both snapshots that vary in `normal` and hold equal hashes on every test row id present in both. In `decide_canary`, a non-empty list gives `not applied`, determinism `skipped`, and a warning naming the columns (at most five, then "and N more"). The warning cannot be waived.
+  - Tests: a scenario next to the load-bypass scenario in `hexperiment/tests/test_canary_scripts.py`, with a new template under `hexperiment/tests/fixtures/scripts/`: the target comes from `load()`, the features from the script's own CSV read, and a scaler is fitted on train+test; it must end `UNVERIFIED`. A second scenario with a constant test target and features from `load()` must have the canary applied. Unit tests in `hexperiment/tests/test_canary.py` for `_missed_columns`: varies and equal, varies and changed, constant, a column missing from one snapshot, and test-id subsets.
+  - _Requirements: 10.6, 10.7_
+
+- [ ] 22. Relative data paths in the use count, and the MCP pin
+  - In `hexperiment/src/hexperiment/runs.py`, give a data file outside the app folder as `os.path.relpath` to the app folder, so the key never holds an absolute path. Add a test.
+  - Add `mcp` at its installed version to `hexperiment/constraints.txt`.
+  - _Requirements: 12.1_

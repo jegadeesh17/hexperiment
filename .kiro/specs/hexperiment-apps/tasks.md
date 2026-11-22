@@ -143,3 +143,7 @@
   - _Requirements: 5.6, 5.7_
   - **Result (task 9):** helpers, constants, `App` and the synthetic frame builders moved to `apps/tests/apps_helpers.py`; `conftest.py` keeps the fixtures and imports from it; the 9 test files import from `apps_helpers`. `no_network` also refuses `socket.getaddrinfo` and `socket.socket.sendto` (same scope check, same message); two new tests in `test_network_guard.py` cover them.
     - `pytest apps/tests hexperiment/tests -q -p no:cacheprovider`: 3409 passed, exit 0, 158.7 s. `pytest hexperiment/tests apps/tests -q -p no:cacheprovider`: 3409 passed, exit 0, 152.2 s. `ruff check apps hexperiment`: clean (after one SIM117 fix in the new test). No mutation check was run for the two new patches. Only the Windows run was verified.
+
+- [ ] 10. Refuse the remaining name lookups and UDP sends
+  - In `apps/tests/conftest.py`, make `no_network` also refuse `socket.gethostbyname`, `socket.gethostbyname_ex`, `socket.getnameinfo` and `socket.socket.sendmsg`, with one regression test each in `apps/tests/test_network_guard.py`.
+  - _Requirements: 5.6_

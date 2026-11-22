@@ -143,7 +143,7 @@ Scope of this spec: data loading and splitting, configuration, the checks, the c
 4. IF the `control` snapshot also differs from `normal` THEN the system SHALL report a `warning` finding with ghost "The Shapeshifter" ("training is not deterministic; set random_state everywhere"), and record the canary as `inconclusive`.
 5. IF the `control` snapshot matches `normal` but the `canary` snapshot does not THEN the system SHALL report an `error` finding with ghost "The Peeking Spirit", with evidence giving the number of training rows whose predictions or features changed and the largest change, and the fix hint "test rows influenced training; fit preprocessing on training rows only, after the split". The fix hint SHALL list the line numbers reported by the split-order hint, if any.
 6. IF the script did not load its data through `hexperiment.load` THEN the system SHALL record the canary as `not applied` with a `warning`.
-7. WHEN the canary execution's test-target hash equals the normal execution's THEN the kit SHALL record the canary as `not applied`, with a `warning` finding that the scramble did not reach the audited frames.
+7. WHEN the test target, or any audited feature that has at least two distinct non-missing test values in the normal execution, holds the same values in the canary execution on every test row id present in both executions THEN the kit SHALL record the canary as `not applied`, with a `warning` finding that names those columns (at most five, then "and N more") and says the scramble did not reach the audited frames. The time column SHALL be excluded from this comparison.
 8. Findings from this requirement SHALL NOT be waivable.
 
 ### Requirement 11: Waivers

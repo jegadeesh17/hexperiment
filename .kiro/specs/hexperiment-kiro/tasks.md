@@ -159,3 +159,18 @@
   - Add deny rules to `.kiro/agents/ghost-hunter.json` and its template copy `hexperiment/src/hexperiment/templates/kiro/agents/ghost-hunter.json` for all paths that succeeded in the initial probe.
   - Re-run the probe to confirm all out-of-app writes are refused.
   - _Requirements: 3.4, 3.7_
+
+- [ ] 17. **Owner:** does a `preToolUse` hook block a write?
+  - In a headless session, give an untracked copy of the ghost hunter agent a `hooks.preToolUse` entry whose command exits 2 with a message on standard error. Ask it to write, replace in and append to `apps/zz-guard/x.py`. Record for each tool whether the call was refused and the hook's standard-input JSON. Delete the copy and `apps/zz-guard/` afterwards.
+  - _Requirements: 3.8_
+
+- [ ] 18. The write guard
+  - If task 17 showed blocking: add `hexperiment/src/hexperiment/write_guard.py` and the CLI subcommand `hexperiment guard-write`, which reads the hook event from standard input and applies Requirement 3.8 (exit 0 to allow; exit 2 with one line naming the path and the reason to refuse; exit 2 on input it cannot read). It must not import pandas, NumPy, scikit-learn or `mcp`. Add the `preToolUse` entry for every file-writing tool to `.kiro/agents/ghost-hunter.json` and the same bytes to `hexperiment/src/hexperiment/templates/kiro/agents/ghost-hunter.json`.
+  - If task 17 showed no blocking: add root-level deny rules (`*.py`, `*.toml`, `*.cfg`, `*.ini`, `.gitignore`, `.git/**`) and deny rules for absolute paths outside the workspace, after checking they do not refuse `apps/<app>/train.py`.
+  - Either way: remove the deny patterns that name probe files (`*probe*`, `**/*probe*`, `**/zz_*`, `*zz_*`, `*abs_*`, `**/*abs_*`), and pin the hook and deny list in `hexperiment/tests/test_kiro_files.py`.
+  - Tests in `hexperiment/tests/test_write_guard.py` (guard case only): every path of task 19, a non-Python file inside an app, a file under `haunted/`, and unreadable input.
+  - _Requirements: 3.2, 3.3, 3.8_
+
+- [ ] 19. **Owner:** the write probe
+  - In a headless session with `ghost-hunter` and the file-writing tools trusted, try to create: `helper.py`, `pyproject.toml` and `.gitignore` at the root, `.github/x.yml`, `power/x.txt`, `docs/x.md`, `hexperiment/benchmark/x.py`, `Hexperiment/src/hexperiment/canary.py`, `apps/tests/x.py`, `apps/zz-guard/../x.py`, `apps/zz-guard/VERDICT.json`, an absolute path into a folder outside the workspace, and the allowed control `apps/zz-guard/model_utils.py`. Every write except the control must be refused. Commit the log; delete only the files the probe created.
+  - _Requirements: 3.7_
