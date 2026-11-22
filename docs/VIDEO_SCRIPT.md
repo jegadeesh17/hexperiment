@@ -68,22 +68,26 @@ To ensure your video looks like a top-tier hackathon submission:
 ### Scene 3: Live Demo — The Kiro Autonomous Exorcism (`1:15 - 2:15` | 60s)
 
 **Visual Setup:**
-- [1:15 - 1:25] Kiro IDE: Open `apps/hotel-cancellations/haunted/train.py`. Point out the suspicious 1.0000 metric in the console.
+- **Before recording (off camera):** the committed `train.py` is the honest script and is `APPROVED`. Put the haunted script in its place first (Git Bash: `cp apps/hotel-cancellations/haunted/train.py apps/hotel-cancellations/train.py`; PowerShell: `Copy-Item apps/hotel-cancellations/haunted/train.py apps/hotel-cancellations/train.py`).
+- [1:15 - 1:25] Kiro IDE: Open `apps/hotel-cancellations/train.py` (now the haunted script). Point out the `# LEAK:` lines.
 - [1:25 - 1:40] Terminal in Kiro: Execute the audit:
   ```bash
-  hexperiment run apps/hotel-cancellations
+  .venv/Scripts/hexperiment run apps/hotel-cancellations
   ```
-  The screen shows the audit rejecting the run:
-  `REJECTED (full) roc_auc 1.0000`
-  `Ghosts found: The Possession (reservation_status), The Peeking Spirit (country_cancel_rate)`
+  The screen shows the audit rejecting the run (as recorded in `docs/kiro/exorcise-hotel-cancellations.md`):
+  `REJECTED (full)  roc_auc 1.0000 >= 0.8500`
+  `error    The Possession      reservation_status`
+  `error    The Peeking Spirit  train.py`
 - [1:40 - 2:00] Kiro Chat: Type the workflow command:
   ```bash
   /workflow run exorcise --app apps/hotel-cancellations
   ```
   Highlight the `ghost-hunter` agent activating. Show the agent reading the MCP findings, opening `train.py`, removing `reservation_status`, rebuilding `country_cancel_rate` strictly on training rows, and re-running the audit.
 - [2:00 - 2:15] Terminal in Kiro: The loop terminates with:
-  `APPROVED (full) roc_auc 0.9096 >= 0.8500`
+  `APPROVED (full)  roc_auc 0.9090 >= 0.8500`
+  (The recorded sessions scored 0.9090 and 0.9092; read the number off the screen. 0.9096 is the committed reference script, not the agent's fix.)
   Show the newly generated Markdown Model Card in `runs/`.
+- **After recording (off camera):** restore the committed script with `git checkout -- apps/hotel-cancellations/train.py`, and do not commit the new folders under `apps/hotel-cancellations/runs/`.
 
 **Voiceover Narration:**
 > *"Now watch how this works natively inside Kiro.*  
@@ -91,8 +95,8 @@ To ensure your video looks like a top-tier hackathon submission:
 > *When Hexperiment audits the run, it immediately rejects it: finding 'The Possession' on `reservation_status` and 'The Peeking Spirit' on a leaked target rate.*  
 > *Now, we launch Kiro’s `exorcise` workflow.*  
 > *Our custom `ghost-hunter` agent wakes up. Notice that the agent is securely sandboxed—it has no shell access and cannot alter thresholds.*  
-> *Using our MCP tools, it diagnoses the root causes, refactors the data pipeline into a proper transformer, and re-audits.*  
-> *In a single autonomous round, the workflow achieves an APPROVED verdict at an honest 0.9096 ROC AUC, and generates a reproducible model card."*
+> *Using our MCP tools, it diagnoses the root causes, drops `reservation_status`, recomputes the cancel rate from training rows only, and re-audits.*  
+> *In a single autonomous round, the workflow achieves an APPROVED verdict at an honest 0.909 ROC AUC, and generates a reproducible model card."*
 
 ---
 

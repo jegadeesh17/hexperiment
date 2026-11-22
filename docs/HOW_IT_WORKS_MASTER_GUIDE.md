@@ -114,8 +114,8 @@ Hexperiment is not just a Python script; it is a **Kiro Power** that transforms 
 │    (Policy)              │ Enforces the 8 ML rules in every session.   │
 ├──────────────────────────┼─────────────────────────────────────────────┤
 │ 2. Save Hook             │ .kiro/hooks/hexperiment.json                │
-│    (Fast Interception)   │ Runs 0-compute check on save; clears old    │
-│                          │ approvals so stale passes never mask code.  │
+│    (Fast Interception)   │ Runs a fast check on save (one training     │
+│                          │ run, no canary); clears stale approvals.    │
 ├──────────────────────────┼─────────────────────────────────────────────┤
 │ 3. Custom Agent          │ .kiro/agents/ghost-hunter.json              │
 │    (Sandboxed Exorcist)  │ Has MCP tool permissions; shell is denied;  │
@@ -138,8 +138,8 @@ Hexperiment is not just a Python script; it is a **Kiro Power** that transforms 
 4. The developer triggers `/workflow run exorcise`.
 5. The workflow executes the full Canary audit via `hexperiment-mcp`.
 6. Audit returns: `REJECTED: The Possession on reservation_status`.
-7. The `ghost-hunter` agent reads the finding, edits `train.py` to drop `reservation_status`, wraps feature transforms in a scikit-learn `Pipeline`, and triggers the audit again.
-8. Audit returns: `APPROVED: ROC AUC 0.9096`.
+7. The `ghost-hunter` agent reads the finding, edits `train.py` to drop `reservation_status` and to compute `country_cancel_rate` from training rows only, after the split, and triggers the audit again.
+8. Audit returns: `APPROVED: ROC AUC 0.9090`.
 9. The workflow completes, generating an official Markdown **Model Card**.
 
 ---
@@ -153,17 +153,17 @@ Hexperiment is not just a Python script; it is a **Kiro Power** that transforms 
   1. `reservation_status`: A column recording "Canceled" vs "Check-Out" filled at checkout (*The Possession*).
   2. `country_cancel_rate`: A feature computed by calculating the cancellation rate per country across **all rows**, including test rows (*The Peeking Spirit*).
 * **Initial Run:** `REJECTED`, ROC AUC **1.0000** (impossible perfection).
-* **Kiro's Autonomous Repair:** Dropped `reservation_status`, recalculated `country_cancel_rate` strictly on training rows using a cross-validated transformer.
-* **Final Run:** `APPROVED`, ROC AUC **0.9096** (honest, deployable performance).
+* **Kiro's Autonomous Repair:** Dropped `reservation_status`, recomputed `country_cancel_rate` from training rows only, after the split (a new helper, `add_country_cancel_rate`; countries not seen in training get NaN).
+* **Final Run:** `APPROVED`, ROC AUC **0.9090** (honest, deployable performance; the committed reference script scores 0.9096). Session: [docs/kiro/exorcise-hotel-cancellations.md](kiro/exorcise-hotel-cancellations.md).
 
 ### Demo App 2: Flight Delays (`apps/flight-delays`)
 * **Problem:** Predict whether a 2013 flight from NYC will arrive >15 minutes late.
 * **Dataset:** 336,776 real flights from JFK, LGA, EWR.
 * **The Planted Haunted Leaks:**
   1. Random train/test split across time-ordered data (*The Prophet*).
-  2. `carrier_late_rate`: A carrier delay metric calculated across all dates (*The Peeking Spirit*).
+  2. `carrier_day_late_rate`: each carrier's same-day late rate, computed over all rows, so it carries test labels into training (*The Peeking Spirit*).
 * **Initial Run:** `REJECTED`, ROC AUC **0.7971**.
-* **Kiro's Autonomous Repair:** Switched to temporal split (`hexperiment.split(df, time_column="time_hour")`), ensuring no training flight is later than any test flight; removed target leakage.
+* **Kiro's Autonomous Repair:** Replaced scikit-learn's `train_test_split` with `hexperiment.split(df)`, which splits by the time column declared in `hex.toml` (`split.time_column = "time_hour"`), so every training flight is earlier than every test flight; removed `carrier_day_late_rate`, which is built from the target. Session: [docs/kiro/exorcise-flight-delays.md](kiro/exorcise-flight-delays.md).
 * **Final Run:** `APPROVED`, ROC AUC **0.6193** (honest out-of-time predictive score).
 
 ---
@@ -195,7 +195,7 @@ A fake benchmark claims 100% detection. A real scientific tool has documented bo
 When judges or reviewers evaluate your submission, here are the exact answers to the toughest questions they could ask:
 
 #### Q1: "Why is your honest score lower than the initial score? Didn't the tool make the model worse?"
-> **Your Answer:** "No, the initial score was fraudulent. A model scoring 1.0000 on hotel cancellations was looking at `reservation_status`—a column only created at checkout. In real life, that model has 0% predictive power. Hexperiment dropped the score from an impossible 1.0000 to an honest, production-viable 0.9096."
+> **Your Answer:** "No, the initial score was fraudulent. A model scoring 1.0000 on hotel cancellations was looking at `reservation_status`—a column only created at checkout. In real life, that model has 0% predictive power. Hexperiment dropped the score from an impossible 1.0000 to an honest, production-viable 0.9090 (the agent's fix; the committed reference script scores 0.9096)."
 
 #### Q2: "Doesn't running the training script twice double GPU training costs?"
 > **Your Answer:** "In Hexperiment, we use a Two-Tier Verification Model. Tier 1 is a Fast Check that runs on save (one normal training run, no canary). Tier 2 is the Canary Test, which runs via hexperiment run, MCP run_audit, or Kiro workflows. For enterprise deep learning models, our architecture roadmap explores ideas like Subsampled Canaries on a 5% validation slice and DAG-hash pipeline auditing."
