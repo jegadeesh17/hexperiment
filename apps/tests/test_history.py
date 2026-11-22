@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from conftest import FLIGHTS, HOTELS, App
+from apps_helpers import FLIGHTS, HOTELS, App
 from hexperiment.models import (
     CheckSummary,
     Finding,

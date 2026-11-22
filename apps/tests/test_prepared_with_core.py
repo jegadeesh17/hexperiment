@@ -15,7 +15,7 @@ from typing import Any
 
 import pandas as pd
 import pytest
-from conftest import APPS_DIR, FLIGHTS, HOTELS
+from apps_helpers import APPS_DIR, FLIGHTS, HOTELS
 from hexperiment.config import ENV_MODE, ENV_RUN_ID
 
 import hexperiment

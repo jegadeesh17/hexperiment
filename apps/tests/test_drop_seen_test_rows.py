@@ -11,7 +11,7 @@ from collections.abc import Callable
 
 import pandas as pd
 import pytest
-from conftest import APP_NAMES, script_module
+from apps_helpers import APP_NAMES, script_module
 from hypothesis import given, settings
 from hypothesis import strategies as st
 

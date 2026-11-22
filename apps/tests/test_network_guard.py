@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from conftest import APPS_DIR
+from apps_helpers import APPS_DIR
 
 REPO_ROOT = APPS_DIR.parent
 OTHER_APPS_TEST = "apps/tests/test_hex_toml.py"
@@ -72,3 +72,16 @@ def test_a_connection_attempt_in_an_apps_test_is_refused() -> None:
             sock.connect(("127.0.0.1", 9))
         with pytest.raises(RuntimeError, match="a test tried to use the network"):
             sock.connect_ex(("127.0.0.1", 9))
+
+
+def test_a_datagram_send_in_an_apps_test_is_refused() -> None:
+    with (
+        socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock,
+        pytest.raises(RuntimeError, match="a test tried to use the network"),
+    ):
+        sock.sendto(b"ping", ("127.0.0.1", 9))
+
+
+def test_a_host_name_lookup_in_an_apps_test_is_refused() -> None:
+    with pytest.raises(RuntimeError, match="a test tried to use the network"):
+        socket.getaddrinfo("example.com", 80)

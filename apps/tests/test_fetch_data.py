@@ -15,7 +15,7 @@ from typing import Any
 
 import pandas as pd
 import pytest
-from conftest import FLIGHTS, HOTELS, App, make_raw_flights
+from apps_helpers import FLIGHTS, HOTELS, App, make_raw_flights
 from hypothesis import given, settings
 from hypothesis import strategies as st
 

@@ -12,7 +12,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
-from conftest import APPS_DIR, FLIGHTS, HOTELS
+from apps_helpers import APPS_DIR, FLIGHTS, HOTELS
 
 POSSESSION_LINE = (
     '    "reservation_status",  # LEAK: The Possession. Filled in at the end.\n'

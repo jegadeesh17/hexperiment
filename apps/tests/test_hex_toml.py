@@ -8,7 +8,7 @@ from __future__ import annotations
 import tomllib
 
 import pytest
-from conftest import FLIGHTS, HOTELS, App
+from apps_helpers import FLIGHTS, HOTELS, App
 from hexperiment.config import ChecksConfig, HexConfig, load_config
 
 EXPECTED = {

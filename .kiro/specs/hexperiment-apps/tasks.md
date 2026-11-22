@@ -136,8 +136,10 @@
     - Mutation check: with the scope check removed from `no_network`, the regression test failed (the probe hit "a test tried to use the network"; checked twice). Fixture restored; `git diff --stat apps/tests/conftest.py` is empty.
     - `pytest apps/tests -q --durations=5`: 225 passed, 18.87 s; the regression test took 5.94 s. `pytest hexperiment/tests apps/tests -q -p no:cacheprovider`: 3365 passed, 108.38 s. `ruff check hexperiment apps`: clean. Only the Windows run was verified; Linux and macOS were not run.
 
-- [ ] 9. Network guard DNS and UDP refusal, and order-independent test collection
+- [x] 9. Network guard DNS and UDP refusal, and order-independent test collection
   - Move shared helpers imported with `from conftest import ...` into `apps/tests/apps_helpers.py` and update the 9 test files to import from `apps_helpers`. Keep fixtures in `conftest.py`.
   - In `apps/tests/conftest.py`, patch `socket.getaddrinfo` and `socket.socket.sendto` inside `no_network` to refuse network access, with regression tests in `apps/tests/test_network_guard.py`.
   - Verify that `pytest apps/tests hexperiment/tests -q` and `pytest hexperiment/tests apps/tests -q` both pass with exit code 0.
   - _Requirements: 5.6, 5.7_
+  - **Result (task 9):** helpers, constants, `App` and the synthetic frame builders moved to `apps/tests/apps_helpers.py`; `conftest.py` keeps the fixtures and imports from it; the 9 test files import from `apps_helpers`. `no_network` also refuses `socket.getaddrinfo` and `socket.socket.sendto` (same scope check, same message); two new tests in `test_network_guard.py` cover them.
+    - `pytest apps/tests hexperiment/tests -q -p no:cacheprovider`: 3409 passed, exit 0, 158.7 s. `pytest hexperiment/tests apps/tests -q -p no:cacheprovider`: 3409 passed, exit 0, 152.2 s. `ruff check apps hexperiment`: clean (after one SIM117 fix in the new test). No mutation check was run for the two new patches. Only the Windows run was verified.

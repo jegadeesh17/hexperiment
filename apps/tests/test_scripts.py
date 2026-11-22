@@ -13,7 +13,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
-from conftest import APPS_DIR, FLIGHTS, HOTELS, script_module
+from apps_helpers import APPS_DIR, FLIGHTS, HOTELS, script_module
 
 HONEST_HOTELS = APPS_DIR / HOTELS / "train.py"
 HAUNTED_HOTELS = APPS_DIR / HOTELS / "haunted" / "train.py"

@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 
 import pytest
-from conftest import APPS_DIR, FLIGHTS, HOTELS, App
+from apps_helpers import APPS_DIR, FLIGHTS, HOTELS, App
 
 ATTRIBUTION = {
     HOTELS: (
