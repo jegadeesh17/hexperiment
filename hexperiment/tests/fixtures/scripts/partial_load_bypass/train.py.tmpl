@@ -1,0 +1,50 @@
+# Requirement 10.7: the target comes from hexperiment.load(), but the features are
+# read again with the csv module, so the canary scramble reaches only the target.
+import csv
+
+import hexperiment
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+
+NUMERIC = ["x1", "x2"]
+CATEGORIES = ["a", "b", "c"]
+FEATURES = NUMERIC + [f"category_{c}" for c in CATEGORIES]
+
+loaded = hexperiment.load()
+
+with open("data.csv", newline="", encoding="utf-8") as handle:
+    rows = list(csv.DictReader(handle))
+df = pd.DataFrame(
+    {
+        "x1": [float(r["x1"]) for r in rows],
+        "x2": [float(r["x2"]) if r["x2"] else np.nan for r in rows],
+        **{f"category_{c}": [float(r["category"] == c) for r in rows] for c in CATEGORIES},
+    }
+)
+df["target"] = loaded["target"]
+train, test = hexperiment.split(df)
+
+# The scaler and the fill values see the test rows too.
+everything = pd.concat([train, test])
+fill = everything[NUMERIC].mean()
+scaler = StandardScaler().fit(everything[NUMERIC].fillna(fill))
+
+
+def prepare(frame):
+    scaled = scaler.transform(frame[NUMERIC].fillna(fill))
+    return np.column_stack([scaled, frame[FEATURES[len(NUMERIC):]].to_numpy()])
+
+
+model = LogisticRegression(random_state=0)
+model.fit(prepare(train), train["target"])
+
+hexperiment.audit(
+    train,
+    test,
+    y_score=model.predict_proba(prepare(test))[:, 1],
+    features=FEATURES,
+    script=__file__,
+    y_score_train=model.predict_proba(prepare(train))[:, 1],
+)

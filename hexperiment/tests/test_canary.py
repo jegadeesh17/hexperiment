@@ -21,6 +21,7 @@ from hexperiment.canary import (
     ExecutionTimedOut,
     LoadMarker,
     Snapshot,
+    _missed_columns,
     build_snapshot,
     clear_mode_dir,
     compare_snapshots,
@@ -70,7 +71,6 @@ def make_snapshot(
     scores=(0.1, 0.2, 0.3, 0.4),
     test_ids=(4, 5),
     mode=ExecMode.NORMAL,
-    test_target_hash=None,
 ) -> Snapshot:
     ids = np.asarray(train_ids, dtype=np.int64)
     if hashes is None:
@@ -83,28 +83,33 @@ def make_snapshot(
         test_ids=np.asarray(test_ids, dtype=np.int64),
         train_row_hash=np.asarray(hashes, dtype=np.uint64),
         y_score_train=None if scores is None else np.asarray(scores, dtype=float),
-        test_target_hash=test_target_hash,
+        test_column_hashes=np.empty((len(test_ids), 0), dtype=np.uint64),
+    )
+
+
+def with_test_columns(snapshot: Snapshot, columns: dict, varies=None) -> Snapshot:
+    """Give ``snapshot`` test columns, each mapped to one hash per test row."""
+    names = tuple(columns)
+    hashes = np.column_stack(
+        [np.asarray(values, dtype=np.uint64) for values in columns.values()]
+    )
+    if varies is None:
+        varies = [True] * len(names)
+    return replace(
+        snapshot,
+        test_columns=names,
+        test_column_hashes=hashes,
+        test_column_varies=np.asarray(varies, dtype=bool),
     )
 
 
 def with_scores(snapshot: Snapshot, scores) -> Snapshot:
-    return make_snapshot(
-        train_ids=snapshot.train_ids,
-        hashes=snapshot.train_row_hash,
-        scores=scores,
-        test_ids=snapshot.test_ids,
-        test_target_hash=snapshot.test_target_hash,
-    )
+    scores = None if scores is None else np.asarray(scores, dtype=float)
+    return replace(snapshot, y_score_train=scores)
 
 
 def with_hashes(snapshot: Snapshot, hashes) -> Snapshot:
-    return make_snapshot(
-        train_ids=snapshot.train_ids,
-        hashes=hashes,
-        scores=snapshot.y_score_train,
-        test_ids=snapshot.test_ids,
-        test_target_hash=snapshot.test_target_hash,
-    )
+    return replace(snapshot, train_row_hash=np.asarray(hashes, dtype=np.uint64))
 
 
 def clean_marker(scrambled=(4, 5)) -> LoadMarker:
@@ -375,9 +380,9 @@ def test_step_2_scrambled_ids_in_train():
     assert_unwaivable(outcome)
 
 
-def test_step_2b_equal_test_target_hash_means_the_scramble_missed():
-    normal = make_snapshot(test_target_hash="abc")
-    canary = make_snapshot(test_target_hash="abc")  # equal frames, rows unchanged
+def test_equal_varying_column_means_the_scramble_missed():
+    normal = with_test_columns(make_snapshot(), {"target": [1, 2]})
+    canary = with_test_columns(make_snapshot(), {"target": [1, 2]})  # rows unchanged
     control = ControlRunner(normal)
     outcome = decide_canary(normal, canary, clean_marker(), control, ())
     assert (outcome.outcome, outcome.determinism) == (
@@ -389,37 +394,137 @@ def test_step_2b_equal_test_target_hash_means_the_scramble_missed():
     assert finding.ghost is None
     assert finding.severity is Severity.WARNING
     assert "scramble did not reach the audited frames" in finding.message
+    assert "target" in finding.message
+    assert finding.evidence == {"columns": ["target"]}
     assert control.calls == 0
     assert_unwaivable(outcome)
 
 
-def test_step_2b_applies_even_when_the_training_rows_also_differ():
-    normal = make_snapshot(test_target_hash="abc")
+def test_a_missed_column_applies_even_when_the_training_rows_also_differ():
+    normal = with_test_columns(make_snapshot(), {"target": [1, 2]})
     canary = with_hashes(
-        make_snapshot(test_target_hash="abc"), normal.train_row_hash + np.uint64(1)
+        with_test_columns(make_snapshot(), {"target": [1, 2]}),
+        normal.train_row_hash + np.uint64(1),
     )
     outcome = decide_canary(normal, canary, clean_marker(), ControlRunner(normal), ())
     assert outcome.outcome is Outcome.NOT_APPLIED
 
 
-def test_a_different_test_target_hash_goes_on_to_the_comparison():
-    normal = make_snapshot(test_target_hash="abc")
-    canary = make_snapshot(test_target_hash="xyz")
+def test_the_warning_names_at_most_five_columns_then_the_rest_as_a_count():
+    names = [f"c{i}" for i in range(8)]
+    columns = {name: [1, 2] for name in names}
+    normal = with_test_columns(make_snapshot(), columns)
+    canary = with_test_columns(make_snapshot(), columns)
+    outcome = decide_canary(normal, canary, clean_marker(), ControlRunner(normal), ())
+    (finding,) = outcome.findings
+    assert "c0, c1, c2, c3, c4 and 3 more" in finding.message
+    assert "c5" not in finding.message
+    assert finding.evidence == {"columns": names}
+
+
+def test_exactly_five_missed_columns_are_all_named():
+    names = [f"c{i}" for i in range(5)]
+    columns = {name: [1, 2] for name in names}
+    normal = with_test_columns(make_snapshot(), columns)
+    canary = with_test_columns(make_snapshot(), columns)
+    outcome = decide_canary(normal, canary, clean_marker(), ControlRunner(normal), ())
+    (finding,) = outcome.findings
+    assert "c0, c1, c2, c3, c4 have" in finding.message
+    assert "more" not in finding.message
+
+
+def test_changed_test_columns_go_on_to_the_comparison():
+    normal = with_test_columns(make_snapshot(), {"target": [1, 2], "age": [3, 4]})
+    canary = with_test_columns(make_snapshot(), {"target": [5, 6], "age": [7, 8]})
     outcome = decide_canary(normal, canary, clean_marker(), ControlRunner(normal), ())
     assert outcome == CanaryOutcome(Outcome.PASSED, Outcome.PASSED, ())
 
 
-@pytest.mark.parametrize(
-    ("normal_hash", "canary_hash"), [(None, None), ("abc", None), (None, "abc")]
-)
-def test_a_missing_test_target_hash_never_counts_as_equal(normal_hash, canary_hash):
-    normal = make_snapshot(test_target_hash=normal_hash)
-    canary = make_snapshot(test_target_hash=canary_hash)
+def test_snapshots_without_test_columns_go_on_to_the_comparison():
+    normal, canary = make_snapshot(), make_snapshot()
     outcome = decide_canary(normal, canary, clean_marker(), ControlRunner(normal), ())
     assert outcome == CanaryOutcome(Outcome.PASSED, Outcome.PASSED, ())
 
 
-def test_build_snapshot_hashes_the_test_target_in_row_id_order():
+# --- _missed_columns --------------------------------------------------------------
+
+
+def test_missed_columns_lists_a_varying_column_with_equal_hashes():
+    normal = with_test_columns(make_snapshot(), {"age": [1, 2], "plan": [3, 4]})
+    canary = with_test_columns(make_snapshot(), {"age": [1, 2], "plan": [9, 4]})
+    assert _missed_columns(normal, canary) == ["age"]
+
+
+def test_missed_columns_ignores_a_varying_column_that_changed_on_any_row():
+    normal = with_test_columns(make_snapshot(), {"age": [1, 2]})
+    canary = with_test_columns(make_snapshot(), {"age": [1, 3]})
+    assert _missed_columns(normal, canary) == []
+
+
+def test_missed_columns_ignores_a_constant_column():
+    normal = with_test_columns(make_snapshot(), {"age": [1, 1]}, varies=[False])
+    canary = with_test_columns(make_snapshot(), {"age": [1, 1]}, varies=[False])
+    assert _missed_columns(normal, canary) == []
+
+
+def test_missed_columns_uses_the_variation_of_the_normal_snapshot_only():
+    varies_in_canary = with_test_columns(make_snapshot(), {"age": [1, 2]})
+    constant = with_test_columns(make_snapshot(), {"age": [1, 2]}, varies=[False])
+    assert _missed_columns(constant, varies_in_canary) == []
+    assert _missed_columns(varies_in_canary, constant) == ["age"]
+
+
+@pytest.mark.parametrize("missing_from", ["normal", "canary"])
+def test_missed_columns_ignores_a_column_absent_from_either_snapshot(missing_from):
+    both = with_test_columns(make_snapshot(), {"age": [1, 2], "plan": [3, 4]})
+    only_age = with_test_columns(make_snapshot(), {"age": [1, 2]})
+    normal, canary = (only_age, both) if missing_from == "normal" else (both, only_age)
+    assert _missed_columns(normal, canary) == ["age"]
+
+
+def test_missed_columns_matches_columns_by_name_not_by_position():
+    normal = with_test_columns(make_snapshot(), {"age": [1, 2], "plan": [3, 4]})
+    canary = with_test_columns(make_snapshot(), {"plan": [5, 6], "age": [1, 2]})
+    assert _missed_columns(normal, canary) == ["age"]
+
+
+def test_missed_columns_compares_only_the_test_ids_present_in_both():
+    normal = with_test_columns(make_snapshot(test_ids=(4, 5, 6)), {"age": [1, 2, 3]})
+    canary = with_test_columns(make_snapshot(test_ids=(5, 6, 7)), {"age": [2, 3, 9]})
+    assert _missed_columns(normal, canary) == ["age"]
+    moved = with_test_columns(make_snapshot(test_ids=(5, 6, 7)), {"age": [2, 8, 9]})
+    assert _missed_columns(normal, moved) == []
+
+
+def test_missed_columns_needs_a_test_id_in_common():
+    normal = with_test_columns(make_snapshot(test_ids=(4, 5)), {"age": [1, 2]})
+    canary = with_test_columns(make_snapshot(test_ids=(6, 7)), {"age": [1, 2]})
+    assert _missed_columns(normal, canary) == []
+
+
+# --- build_snapshot: test columns -------------------------------------------------
+
+
+def test_build_snapshot_holds_the_target_and_the_features_without_the_time_column():
+    test = make_frame(ids=(4, 5)).assign(when=["2024-01-01", "2024-01-02"])
+    train = make_frame().assign(when="2023-12-31")
+    snapshot = build_snapshot(
+        ExecMode.NORMAL,
+        None,
+        train,
+        test,
+        [*FEATURES, "when"],
+        None,
+        "target",
+        "when",
+    )
+    assert snapshot.test_columns == ("target", "age", "plan")
+    assert snapshot.test_column_hashes.shape == (2, 3)
+    assert snapshot.test_column_hashes.dtype == np.uint64
+    assert snapshot.test_column_varies.tolist() == [True, True, True]
+
+
+def test_build_snapshot_hashes_test_columns_in_row_id_order():
     test = make_frame(ids=(4, 2, 3))
     reordered = test.loc[[2, 3, 4]]
     train = make_frame()
@@ -427,26 +532,42 @@ def test_build_snapshot_hashes_the_test_target_in_row_id_order():
     b = build_snapshot(
         ExecMode.NORMAL, None, train, reordered, FEATURES, None, "target"
     )
-    assert a.test_target_hash == b.test_target_hash
-    assert len(a.test_target_hash) == 64
+    assert a.test_column_hashes.tolist() == b.test_column_hashes.tolist()
+    expected = pd.util.hash_pandas_object(reordered["age"], index=False)
+    assert a.test_column_hashes[:, 1].tolist() == expected.tolist()
 
 
-def test_build_snapshot_test_target_hash_follows_the_target_values():
+def test_build_snapshot_test_column_hashes_follow_the_values_of_each_column():
     test = make_frame(ids=(4, 5))
     flipped = test.assign(target=1 - test["target"])
     train = make_frame()
     args = (ExecMode.NORMAL, None, train)
     a = build_snapshot(*args, test, FEATURES, None, "target")
     b = build_snapshot(*args, flipped, FEATURES, None, "target")
-    other_column = build_snapshot(*args, test.assign(age=0.0), FEATURES, None, "target")
-    assert a.test_target_hash != b.test_target_hash
-    assert a.test_target_hash == other_column.test_target_hash
+    assert not np.array_equal(a.test_column_hashes[:, 0], b.test_column_hashes[:, 0])
+    assert np.array_equal(a.test_column_hashes[:, 1:], b.test_column_hashes[:, 1:])
 
 
-def test_build_snapshot_has_no_test_target_hash_without_a_target_column():
+def test_build_snapshot_marks_columns_with_fewer_than_two_distinct_values():
+    test = make_frame(ids=(4, 5)).assign(
+        age=[7.0, 7.0], plan=["pro", None], target=[1, 1]
+    )
+    snapshot = build_snapshot(
+        ExecMode.NORMAL, None, make_frame(), test, FEATURES, None, "target"
+    )
+    assert snapshot.test_columns == ("target", "age", "plan")
+    assert snapshot.test_column_varies.tolist() == [False, False, False]
+    varying = test.assign(plan=["pro", "basic"])
+    snapshot = build_snapshot(
+        ExecMode.NORMAL, None, make_frame(), varying, FEATURES, None, "target"
+    )
+    assert snapshot.test_column_varies.tolist() == [False, False, True]
+
+
+def test_build_snapshot_leaves_out_columns_the_test_frame_lacks():
     train, test = make_frame(), make_frame(ids=(4, 5))
     no_name = build_snapshot(ExecMode.NORMAL, None, train, test, FEATURES, None)
-    no_column = build_snapshot(
+    no_target = build_snapshot(
         ExecMode.CANARY,
         None,
         train,
@@ -455,25 +576,45 @@ def test_build_snapshot_has_no_test_target_hash_without_a_target_column():
         None,
         "target",
     )
-    assert no_name.test_target_hash is None
-    assert no_column.test_target_hash is None
+    assert no_name.test_columns == ("age", "plan")
+    assert no_target.test_columns == ("age", "plan")
+    assert no_target.test_column_hashes.shape == (2, 2)
 
 
-def test_the_test_target_hash_survives_the_snapshot_files(tmp_path):
-    written = make_snapshot(test_target_hash="f" * 64)
+def test_the_test_columns_survive_the_snapshot_files(tmp_path):
+    written = with_test_columns(
+        make_snapshot(), {"target": [1, 2], "age": [3, 4]}, varies=[True, False]
+    )
     write_snapshot(tmp_path, written)
     read = read_snapshot(tmp_path, ExecMode.NORMAL, RUN)
-    assert read.test_target_hash == "f" * 64
+    assert read.test_columns == ("target", "age")
+    assert read.test_column_varies.tolist() == [True, False]
     assert_same_snapshot(read, written)
 
 
-def test_read_snapshot_rejects_meta_without_the_test_target_hash(tmp_path):
+def test_a_snapshot_without_test_columns_survives_the_snapshot_files(tmp_path):
+    written = make_snapshot()
+    write_snapshot(tmp_path, written)
+    assert_same_snapshot(read_snapshot(tmp_path, ExecMode.NORMAL, RUN), written)
+
+
+def test_read_snapshot_rejects_meta_without_the_test_columns(tmp_path):
     write_snapshot(tmp_path, make_snapshot())
     path = hex_dir(tmp_path, ExecMode.NORMAL) / "meta.json"
     meta = read_json(path)
-    del meta["test_target_hash"]
+    del meta["test_columns"]
     path.write_text(json.dumps(meta), encoding="utf-8")
-    with pytest.raises(ExecutionFailed, match="test_target_hash"):
+    with pytest.raises(ExecutionFailed, match="test_columns"):
+        read_snapshot(tmp_path, ExecMode.NORMAL, RUN)
+
+
+def test_read_snapshot_rejects_test_columns_that_do_not_match_the_arrays(tmp_path):
+    write_snapshot(tmp_path, with_test_columns(make_snapshot(), {"target": [1, 2]}))
+    path = hex_dir(tmp_path, ExecMode.NORMAL) / "meta.json"
+    meta = read_json(path)
+    meta["test_columns"] = ["target", "age"]
+    path.write_text(json.dumps(meta), encoding="utf-8")
+    with pytest.raises(ExecutionFailed, match="test column arrays"):
         read_snapshot(tmp_path, ExecMode.NORMAL, RUN)
 
 
@@ -1194,8 +1335,15 @@ def assert_same_snapshot(actual: Snapshot, expected: Snapshot) -> None:
     assert actual.mode is expected.mode
     assert actual.run_id == expected.run_id
     assert actual.features == expected.features
-    assert actual.test_target_hash == expected.test_target_hash
-    for name in ("train_ids", "test_ids", "train_row_hash", "y_score_train"):
+    assert actual.test_columns == expected.test_columns
+    for name in (
+        "train_ids",
+        "test_ids",
+        "train_row_hash",
+        "y_score_train",
+        "test_column_hashes",
+        "test_column_varies",
+    ):
         a, e = getattr(actual, name), getattr(expected, name)
         if e is None:
             assert a is None
@@ -1287,7 +1435,13 @@ def test_snapshot_round_trip_without_training_scores(tmp_path):
     write_snapshot(tmp_path, written)
     assert_same_snapshot(read_snapshot(tmp_path, ExecMode.CONTROL, RUN), written)
     with np.load(hex_dir(tmp_path, ExecMode.CONTROL) / "snapshot.npz") as npz:
-        assert sorted(npz.files) == ["test_ids", "train_ids", "train_row_hash"]
+        assert sorted(npz.files) == [
+            "test_column_hashes",
+            "test_column_varies",
+            "test_ids",
+            "train_ids",
+            "train_row_hash",
+        ]
     meta = read_json(hex_dir(tmp_path, ExecMode.CONTROL) / "meta.json")
     assert meta["has_y_score_train"] is False
 
@@ -1306,7 +1460,7 @@ def test_snapshot_meta_json_describes_the_snapshot(tmp_path):
         "n_train",
         "run_id",
         "script",
-        "test_target_hash",
+        "test_columns",
     }
     assert meta["format_version"] == 1
     assert meta["features"] == FEATURES
@@ -1603,6 +1757,19 @@ def written_snapshots(draw) -> Snapshot:
     hashes = draw(st.lists(st.integers(0, 2**64 - 1), min_size=n, max_size=n))
     has_scores = draw(st.booleans())
     scores = draw(st.lists(st.floats(), min_size=n, max_size=n)) if has_scores else None
+    columns = draw(st.lists(st.text(max_size=10), unique=True, max_size=3))
+    column_hashes = draw(
+        st.lists(
+            st.lists(
+                st.integers(0, 2**64 - 1),
+                min_size=len(columns),
+                max_size=len(columns),
+            ),
+            min_size=len(test_ids),
+            max_size=len(test_ids),
+        )
+    )
+    varies = draw(st.lists(st.booleans(), min_size=len(columns), max_size=len(columns)))
     return Snapshot(
         mode=draw(st.sampled_from(list(ExecMode))),
         run_id=draw(st.text(min_size=1, max_size=30)),
@@ -1611,6 +1778,11 @@ def written_snapshots(draw) -> Snapshot:
         test_ids=np.array(test_ids, dtype=np.int64),
         train_row_hash=np.array(hashes, dtype=np.uint64),
         y_score_train=None if scores is None else np.array(scores, dtype=np.float64),
+        test_columns=tuple(columns),
+        test_column_hashes=np.array(column_hashes, dtype=np.uint64).reshape(
+            len(test_ids), len(columns)
+        ),
+        test_column_varies=np.array(varies, dtype=np.bool_),
     )
 
 

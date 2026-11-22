@@ -118,6 +118,7 @@ def make_snapshot(hash_offset: int = 0, mode: ExecMode = ExecMode.NORMAL) -> Sna
         test_ids=np.array([4, 5], dtype=np.int64),
         train_row_hash=(ids + 1000 + hash_offset).astype(np.uint64),
         y_score_train=np.array([0.1, 0.2, 0.3, 0.4]),
+        test_column_hashes=np.empty((2, 0), dtype=np.uint64),
     )
 
 

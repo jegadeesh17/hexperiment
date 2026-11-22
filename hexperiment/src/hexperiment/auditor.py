@@ -88,6 +88,7 @@ def audit(
         snapshot_inputs.features,
         snapshot_inputs.y_score_train,
         config.target.column,
+        config.split.time_column,
     )
     write_snapshot(app_dir, snapshot)
     return None
@@ -116,6 +117,7 @@ def _audit_normal(
             validated.features,
             validated.y_score_train,
             config.target.column,
+            config.split.time_column,
         )
         write_snapshot(app_dir, snapshot)
         result = run_data_checks(

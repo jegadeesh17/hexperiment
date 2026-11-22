@@ -14,7 +14,6 @@ orchestrates the executions of one run (Requirements 10.1, 16.2, 16.3).
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import os
@@ -26,7 +25,7 @@ import sys
 import tempfile
 import zipfile
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib.metadata import version as package_version
 from pathlib import Path
 from typing import IO, Any
@@ -68,6 +67,7 @@ _PASS_SCORES_FIX = (
 )
 _LINE_LOCATION = re.compile(r".+:\d+")
 _EVIDENCE_DECIMALS = 6
+_MAX_NAMED_COLUMNS = 5
 
 # The .hex/ exchange protocol (Requirement 2.3). Every file carries a run id and
 # this format version; a reader rejects any other version.
@@ -91,9 +91,17 @@ class Snapshot:
     test_ids: NDArray[np.int64]  # sorted ascending
     train_row_hash: NDArray[np.uint64]
     y_score_train: NDArray[np.float64] | None
-    # Digest of ``test[target]`` in row-id order; ``None`` when the test frame has
-    # no target column or the caller gave no target name (Requirement 10.7).
-    test_target_hash: str | None = None
+    # The audited test columns (the target and the features, without the time
+    # column), one hash per test row and column in sorted row-id order, and
+    # whether each column has at least two distinct non-missing test values
+    # (Requirement 10.7).
+    test_columns: tuple[str, ...] = ()
+    test_column_hashes: NDArray[np.uint64] = field(
+        default_factory=lambda: np.empty((0, 0), dtype=np.uint64)
+    )
+    test_column_varies: NDArray[np.bool_] = field(
+        default_factory=lambda: np.empty(0, dtype=np.bool_)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,14 +151,16 @@ def build_snapshot(
     features: Sequence[str],
     y_score_train: NDArray[np.float64] | None,
     target: str | None = None,
+    time_column: str | None = None,
 ) -> Snapshot:
     """Record what training saw, with rows sorted by id (Requirement 2.3).
 
     The hash of ``train[features]`` ignores the index, so it depends on values
     only. ``y_score_train`` is matched to ``train`` by position and reordered with
-    it, so reordering the training rows never changes the snapshot. With a
-    ``target`` name, the snapshot also holds a digest of ``test[target]``, which
-    shows whether the scramble reached the audited test frame (Requirement 10.7).
+    it, so reordering the training rows never changes the snapshot. The snapshot
+    also holds one hash per test row for the ``target`` (when named) and each
+    feature, without the ``time_column``; these show whether the scramble reached
+    the audited test frame (Requirement 10.7).
     """
     train_ids = _row_ids(train, "train")
     test_ids = _row_ids(test, "test")
@@ -168,6 +178,7 @@ def build_snapshot(
                 "of train.",
             )
         scores = scores[order]
+    columns = _audited_test_columns(test, features, target, time_column)
     return Snapshot(
         mode=mode,
         run_id=run_id,
@@ -176,7 +187,11 @@ def build_snapshot(
         test_ids=np.sort(test_ids, kind="stable"),
         train_row_hash=hashes.to_numpy(dtype=np.uint64)[order],
         y_score_train=scores,
-        test_target_hash=_test_target_hash(test, test_ids, target),
+        test_columns=columns,
+        test_column_hashes=_test_column_hashes(test, test_ids, columns),
+        test_column_varies=np.array(
+            [test[name].dropna().nunique() >= 2 for name in columns], dtype=np.bool_
+        ),
     )
 
 
@@ -250,12 +265,14 @@ def decide_canary(
     if scrambled_train_rows:
         warning = _scrambled_in_train_warning(scrambled_train_rows)
         return CanaryOutcome(Outcome.NOT_APPLIED, Outcome.SKIPPED, (warning,))
-    # Requirement 10.7: the scramble changes the test target of every audited
-    # test frame, so an equal digest shows that the audited frames did not come
-    # from the scrambled load, and the comparison below would prove nothing.
-    if _scramble_missed(normal, canary):
+    # Requirement 10.7: the scramble changes every test column that has more than
+    # one value, so such a column with equal values shows that the audited frames
+    # did not come from the scrambled load, and the comparison below would prove
+    # nothing.
+    missed = _missed_columns(normal, canary)
+    if missed:
         return CanaryOutcome(
-            Outcome.NOT_APPLIED, Outcome.SKIPPED, (_scramble_missed_warning(),)
+            Outcome.NOT_APPLIED, Outcome.SKIPPED, (_scramble_missed_warning(missed),)
         )
     # Step 3: the training rows changed, so the split depends on data values
     # (Requirement 10.2).
@@ -362,28 +379,60 @@ def _row_ids(frame: pd.DataFrame, name: str) -> NDArray[np.int64]:
     return frame.index.to_numpy(dtype=np.int64)
 
 
-def _test_target_hash(
-    test: pd.DataFrame, test_ids: NDArray[np.int64], target: str | None
-) -> str | None:
-    """Digest of ``test[target]`` in row-id order, or ``None`` without a target.
+def _audited_test_columns(
+    test: pd.DataFrame,
+    features: Sequence[str],
+    target: str | None,
+    time_column: str | None,
+) -> tuple[str, ...]:
+    """The target and the features that the test frame holds, without the time column.
 
     The canary execution does not validate the test frame (Requirement 2.4), so a
-    missing target column gives ``None`` instead of an error.
+    name the frame lacks is left out instead of raising an error.
     """
-    if target is None or target not in test.columns:
-        return None
-    order = np.argsort(test_ids, kind="stable")
-    row_hashes = pd.util.hash_pandas_object(test[target], index=False)
-    ordered = row_hashes.to_numpy(dtype=np.uint64)[order]
-    return hashlib.sha256(ordered.tobytes()).hexdigest()
-
-
-def _scramble_missed(normal: Snapshot, canary: Snapshot) -> bool:
-    """True when both executions audited a test target with the same digest."""
-    return (
-        normal.test_target_hash is not None
-        and normal.test_target_hash == canary.test_target_hash
+    names = ([] if target is None else [target]) + list(features)
+    wanted = dict.fromkeys(
+        name for name in names if name != time_column and name in test.columns
     )
+    return tuple(wanted)
+
+
+def _test_column_hashes(
+    test: pd.DataFrame, test_ids: NDArray[np.int64], columns: Sequence[str]
+) -> NDArray[np.uint64]:
+    """One hash per test row (in row-id order) and column, ignoring the index."""
+    order = np.argsort(test_ids, kind="stable")
+    hashes = np.empty((len(test_ids), len(columns)), dtype=np.uint64)
+    for position, name in enumerate(columns):
+        row_hashes = pd.util.hash_pandas_object(test[name], index=False)
+        hashes[:, position] = row_hashes.to_numpy(dtype=np.uint64)[order]
+    return hashes
+
+
+def _missed_columns(normal: Snapshot, canary: Snapshot) -> list[str]:
+    """The test columns that the scramble should have changed but did not.
+
+    A column is missed when both snapshots hold it, it has at least two distinct
+    non-missing test values in ``normal``, and its hashes are equal on every test
+    row id present in both snapshots. Columns absent from either snapshot, and
+    snapshots with no test row id in common, give nothing to compare.
+    """
+    _, in_normal, in_canary = np.intersect1d(
+        normal.test_ids, canary.test_ids, return_indices=True
+    )
+    if in_normal.size == 0:
+        return []
+    canary_position = {name: i for i, name in enumerate(canary.test_columns)}
+    missed = []
+    for position, name in enumerate(normal.test_columns):
+        other = canary_position.get(name)
+        if other is None or not normal.test_column_varies[position]:
+            continue
+        before = normal.test_column_hashes[in_normal, position]
+        after = canary.test_column_hashes[in_canary, other]
+        if np.array_equal(before, after):
+            missed.append(name)
+    return missed
 
 
 def _require_unique_ids(train_ids: NDArray[np.int64]) -> None:
@@ -493,15 +542,22 @@ def _scrambled_in_train_warning(rows: int) -> Finding:
     )
 
 
-def _scramble_missed_warning() -> Finding:
+def _scramble_missed_warning(columns: Sequence[str]) -> Finding:
     return _warning(
         "the canary test was not applied: the scramble did not reach the audited "
-        "frames, because the test target is the same in the normal and the canary "
-        "execution",
+        f"frames, because {_name_columns(columns)} have the same values in the "
+        "normal and the canary execution",
         "build train and test from the frame returned by hexperiment.load() and "
         "split it with hexperiment.split(df); do not read the data file yourself",
-        {},
+        {"columns": list(columns)},
     )
+
+
+def _name_columns(columns: Sequence[str]) -> str:
+    """Name up to five columns, then "and N more"."""
+    shown = ", ".join(columns[:_MAX_NAMED_COLUMNS])
+    extra = len(columns) - _MAX_NAMED_COLUMNS
+    return f"{shown} and {extra} more" if extra > 0 else shown
 
 
 def _ids_differ_warning(normal: Snapshot, canary: Snapshot) -> Finding:
@@ -676,6 +732,8 @@ def write_snapshot(app_dir: Path, snapshot: Snapshot) -> None:
         "train_ids": np.asarray(snapshot.train_ids, dtype=np.int64),
         "test_ids": np.asarray(snapshot.test_ids, dtype=np.int64),
         "train_row_hash": np.asarray(snapshot.train_row_hash, dtype=np.uint64),
+        "test_column_hashes": np.asarray(snapshot.test_column_hashes, dtype=np.uint64),
+        "test_column_varies": np.asarray(snapshot.test_column_varies, dtype=np.bool_),
     }
     if snapshot.y_score_train is not None:
         arrays["y_score_train"] = np.asarray(snapshot.y_score_train, dtype=np.float64)
@@ -692,7 +750,7 @@ def write_snapshot(app_dir: Path, snapshot: Snapshot) -> None:
             "n_train": len(snapshot.train_ids),
             "run_id": snapshot.run_id,
             "script": SCRIPT_NAME,
-            "test_target_hash": snapshot.test_target_hash,
+            "test_columns": list(snapshot.test_columns),
         },
     )
 
@@ -711,7 +769,7 @@ def read_snapshot(app_dir: Path, mode: ExecMode, run_id: str) -> Snapshot:
     try:
         features = tuple(_string_list(meta["features"]))
         has_scores = _boolean(meta["has_y_score_train"])
-        test_target_hash = _optional_string(meta["test_target_hash"])
+        test_columns = tuple(_string_list(meta["test_columns"]))
     except (KeyError, TypeError) as error:
         raise _corrupt(
             meta_path, f"key {error} is missing or has the wrong type"
@@ -722,6 +780,10 @@ def read_snapshot(app_dir: Path, mode: ExecMode, run_id: str) -> Snapshot:
             train_ids = _array(npz, "train_ids", np.int64, arrays_path)
             test_ids = _array(npz, "test_ids", np.int64, arrays_path)
             hashes = _array(npz, "train_row_hash", np.uint64, arrays_path)
+            column_hashes = _array(
+                npz, "test_column_hashes", np.uint64, arrays_path, ndim=2
+            )
+            column_varies = _array(npz, "test_column_varies", np.bool_, arrays_path)
             has_array = "y_score_train" in npz.files
             scores = (
                 _array(npz, "y_score_train", np.float64, arrays_path)
@@ -741,6 +803,10 @@ def read_snapshot(app_dir: Path, mode: ExecMode, run_id: str) -> Snapshot:
         scores is not None and len(scores) != len(train_ids)
     ):
         raise _corrupt(arrays_path, "the training arrays have different lengths")
+    if column_hashes.shape != (len(test_ids), len(test_columns)) or (
+        column_varies.shape != (len(test_columns),)
+    ):
+        raise _corrupt(arrays_path, "the test column arrays do not match meta.json")
     return Snapshot(
         mode=mode,
         run_id=run_id,
@@ -749,7 +815,9 @@ def read_snapshot(app_dir: Path, mode: ExecMode, run_id: str) -> Snapshot:
         test_ids=test_ids,
         train_row_hash=hashes,
         y_score_train=scores,
-        test_target_hash=test_target_hash,
+        test_columns=test_columns,
+        test_column_hashes=column_hashes,
+        test_column_varies=column_varies,
     )
 
 
@@ -893,10 +961,13 @@ def _read_envelope(path: Path, run_id: str, missing: str) -> dict[str, Any]:
     return raw
 
 
-def _array(npz: Any, name: str, dtype: type, path: Path) -> NDArray[Any]:
+def _array(
+    npz: Any, name: str, dtype: type, path: Path, ndim: int = 1
+) -> NDArray[Any]:
     array = npz[name]
-    if array.dtype != dtype or array.ndim != 1:
-        wanted = f"a one-dimensional {np.dtype(dtype)} array"
+    if array.dtype != dtype or array.ndim != ndim:
+        shape = "one-dimensional" if ndim == 1 else f"{ndim}-dimensional"
+        wanted = f"a {shape} {np.dtype(dtype)} array"
         raise _corrupt(path, f"{name} is not {wanted}")
     return array
 
@@ -910,12 +981,6 @@ def _string_list(value: Any) -> list[str]:
 def _boolean(value: Any) -> bool:
     if not isinstance(value, bool):
         raise TypeError("expected a boolean")
-    return value
-
-
-def _optional_string(value: Any) -> str | None:
-    if value is not None and not isinstance(value, str):
-        raise TypeError("expected a string or null")
     return value
 
 

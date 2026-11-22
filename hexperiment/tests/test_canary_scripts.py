@@ -401,7 +401,7 @@ class TestLoadBypass:
         assert run.verdict["status"] == "UNVERIFIED"
         assert errors_of(run.verdict) == []
 
-    def test_the_load_marker_was_written_so_only_the_target_hash_gives_it_away(
+    def test_the_load_marker_was_written_so_only_the_test_columns_give_it_away(
         self, run
     ):
         assert run.scrambled_rows > 0
@@ -419,6 +419,58 @@ class TestLoadBypass:
 
     def test_no_control_execution_ran(self, run):
         assert not run.hex_dir("control").exists()
+
+
+class TestPartialLoadBypass:
+    """Scenario 7c: the target comes from ``load()``, the features from a CSV read."""
+
+    @pytest.fixture(scope="class")
+    @classmethod
+    def run(cls, tmp_path_factory) -> ScenarioRun:
+        return run_scenario(tmp_path_factory, "partial_load_bypass")
+
+    def test_the_run_is_unverified_and_never_approved(self, run):
+        assert run.code == 3
+        assert run.verdict["status"] == "UNVERIFIED"
+        assert errors_of(run.verdict) == []
+
+    def test_the_canary_was_not_applied_and_determinism_was_skipped(self, run):
+        assert outcome_of(run.verdict, "canary") == "not applied"
+        assert outcome_of(run.verdict, "determinism") == "skipped"
+
+    def test_the_warning_names_the_features_the_scramble_missed_but_not_the_target(
+        self, run
+    ):
+        (warning,) = findings_of(run.verdict, "canary")
+        assert warning["severity"] == "warning"
+        assert warning["ghost"] is None
+        assert "scramble did not reach the audited frames" in warning["message"]
+        columns = warning["evidence"]["columns"]
+        assert "target" not in columns
+        assert {"x1", "x2"} <= set(columns)
+        assert "x1, x2" in warning["message"]
+
+    def test_no_control_execution_ran(self, run):
+        assert not run.hex_dir("control").exists()
+
+
+class TestConstantColumn:
+    """Scenario 4b: a constant feature cannot be scrambled, and is not a miss."""
+
+    @pytest.fixture(scope="class")
+    @classmethod
+    def run(cls, tmp_path_factory) -> ScenarioRun:
+        return run_scenario(tmp_path_factory, "constant_column")
+
+    def test_the_run_is_approved_with_exit_code_0(self, run):
+        assert run.code == 0
+        assert run.verdict["status"] == "APPROVED"
+        assert run.verdict["findings"] == []
+
+    def test_the_canary_was_applied_and_passed(self, run):
+        assert outcome_of(run.verdict, "canary") == "passed"
+        assert outcome_of(run.verdict, "determinism") == "passed"
+        assert run.scrambled_rows > 0
 
 
 class TestRepeatRun:
