@@ -21,6 +21,7 @@ import pandas as pd
 from numpy.typing import NDArray
 
 from hexperiment.canary import LoadMarker, write_load_marker
+from hexperiment.child import own_read
 from hexperiment.config import (
     ExecMode,
     HexConfig,
@@ -414,7 +415,8 @@ def _read_csv(directory: Path, relative: str) -> pd.DataFrame:
     """Read the data file (Requirement 1.6); every failure names the resolved path."""
     path = (directory / relative).resolve()
     try:
-        df = pd.read_csv(path)
+        with own_read():
+            df = pd.read_csv(path)
     except FileNotFoundError:
         raise HexInputError(
             f'data.path "{relative}" does not exist (looked at {path}).',

@@ -1,0 +1,37 @@
+# A separate lookup CSV in the app folder is read next to the data file. Only the
+# data file is watched, so the canary still applies.
+from pathlib import Path
+
+import hexperiment
+import pandas as pd
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+
+NUMERIC = ["x1", "x2", "level"]
+FEATURES = NUMERIC
+
+Path("lookup.csv").write_text("category,level\na,0\nb,1\nc,2\n", encoding="utf-8")
+lookup = pd.read_csv("lookup.csv")
+
+df = hexperiment.load()
+df["level"] = df["category"].map(dict(zip(lookup["category"], lookup["level"])))
+train, test = hexperiment.split(df)
+
+numeric = Pipeline(
+    [("impute", SimpleImputer(strategy="mean")), ("scale", StandardScaler())]
+)
+preprocess = ColumnTransformer([("numeric", numeric, NUMERIC)])
+model = Pipeline([("prep", preprocess), ("model", LogisticRegression(random_state=0))])
+model.fit(train[FEATURES], train["target"])
+
+hexperiment.audit(
+    train,
+    test,
+    y_score=model.predict_proba(test[FEATURES])[:, 1],
+    features=FEATURES,
+    script=__file__,
+    y_score_train=model.predict_proba(train[FEATURES])[:, 1],
+)

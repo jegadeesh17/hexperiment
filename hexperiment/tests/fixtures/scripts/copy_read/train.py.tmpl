@@ -1,0 +1,36 @@
+# The data file is copied with shutil and the copy is read, which the scramble
+# never reaches; the fill values and the scaler come from that copy.
+import shutil
+
+import hexperiment
+import pandas as pd
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+
+NUMERIC = ["x1", "x2"]
+FEATURES = NUMERIC
+
+df = hexperiment.load()
+train, test = hexperiment.split(df)
+
+shutil.copy("data.csv", "data_copy.csv")
+everything = pd.read_csv("data_copy.csv")
+fill = everything[NUMERIC].mean()
+scaler = StandardScaler().fit(everything[NUMERIC].fillna(fill))
+
+
+def prepare(frame):
+    return scaler.transform(frame[NUMERIC].fillna(fill))
+
+
+model = LogisticRegression(random_state=0)
+model.fit(prepare(train), train["target"])
+
+hexperiment.audit(
+    train,
+    test,
+    y_score=model.predict_proba(prepare(test))[:, 1],
+    features=FEATURES,
+    script=__file__,
+    y_score_train=model.predict_proba(prepare(train))[:, 1],
+)

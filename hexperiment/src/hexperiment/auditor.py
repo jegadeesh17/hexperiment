@@ -22,6 +22,7 @@ from hexperiment.canary import (
     write_snapshot,
 )
 from hexperiment.checks import run_data_checks
+from hexperiment.child import data_reads_outside_load
 from hexperiment.config import (
     ExecMode,
     HexConfig,
@@ -89,6 +90,7 @@ def audit(
         snapshot_inputs.y_score_train,
         config.target.column,
         config.split.time_column,
+        data_reads_outside_load(),
     )
     write_snapshot(app_dir, snapshot)
     return None
@@ -118,6 +120,7 @@ def _audit_normal(
             validated.y_score_train,
             config.target.column,
             config.split.time_column,
+            data_reads_outside_load(),
         )
         write_snapshot(app_dir, snapshot)
         result = run_data_checks(

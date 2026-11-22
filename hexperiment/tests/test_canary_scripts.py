@@ -412,7 +412,8 @@ class TestLoadBypass:
         (warning,) = findings_of(run.verdict, "canary")
         assert warning["severity"] == "warning"
         assert warning["ghost"] is None
-        assert "scramble did not reach the audited frames" in warning["message"]
+        assert "data.csv was opened outside hexperiment.load" in warning["message"]
+        assert warning["evidence"]["data_file"] == "data.csv"
 
     def test_the_data_reader_hint_is_not_raised_for_the_csv_module(self, run):
         assert findings_of(run.verdict, "split_order") == []
@@ -438,20 +439,84 @@ class TestPartialLoadBypass:
         assert outcome_of(run.verdict, "canary") == "not applied"
         assert outcome_of(run.verdict, "determinism") == "skipped"
 
-    def test_the_warning_names_the_features_the_scramble_missed_but_not_the_target(
-        self, run
-    ):
+    def test_the_warning_names_the_data_file_that_was_read_outside_load(self, run):
         (warning,) = findings_of(run.verdict, "canary")
         assert warning["severity"] == "warning"
         assert warning["ghost"] is None
-        assert "scramble did not reach the audited frames" in warning["message"]
-        columns = warning["evidence"]["columns"]
-        assert "target" not in columns
-        assert {"x1", "x2"} <= set(columns)
-        assert "x1, x2" in warning["message"]
+        assert "data.csv was opened outside hexperiment.load" in warning["message"]
+        assert warning["evidence"]["data_file"] == "data.csv"
+        assert warning["evidence"]["reads"] > 0
 
     def test_no_control_execution_ran(self, run):
         assert not run.hex_dir("control").exists()
+
+
+class TestSideRead:
+    """Scenario 7d: the frames come from ``load()``, the statistics from a read."""
+
+    @pytest.fixture(scope="class")
+    @classmethod
+    def run(cls, tmp_path_factory) -> ScenarioRun:
+        return run_scenario(tmp_path_factory, "side_read")
+
+    def test_the_run_is_unverified_and_never_approved(self, run):
+        assert run.code == 3
+        assert run.verdict["status"] == "UNVERIFIED"
+        assert errors_of(run.verdict) == []
+
+    def test_the_canary_was_not_applied_and_determinism_was_skipped(self, run):
+        assert outcome_of(run.verdict, "canary") == "not applied"
+        assert outcome_of(run.verdict, "determinism") == "skipped"
+
+    def test_the_warning_names_the_data_file(self, run):
+        (warning,) = findings_of(run.verdict, "canary")
+        assert warning["severity"] == "warning"
+        assert "data.csv was opened outside hexperiment.load" in warning["message"]
+
+    def test_the_frames_were_scrambled_so_only_the_watch_gives_it_away(self, run):
+        assert run.scrambled_rows > 0
+        assert not run.hex_dir("control").exists()
+
+
+class TestCopyRead:
+    """Scenario 7e: the data file is copied and the copy is read."""
+
+    @pytest.fixture(scope="class")
+    @classmethod
+    def run(cls, tmp_path_factory) -> ScenarioRun:
+        return run_scenario(tmp_path_factory, "copy_read")
+
+    def test_the_run_is_unverified_and_never_approved(self, run):
+        assert run.code == 3
+        assert run.verdict["status"] == "UNVERIFIED"
+        assert errors_of(run.verdict) == []
+
+    def test_the_canary_was_not_applied_because_the_copy_was_made_from_the_file(
+        self, run
+    ):
+        assert outcome_of(run.verdict, "canary") == "not applied"
+        (warning,) = findings_of(run.verdict, "canary")
+        assert "data.csv was opened outside hexperiment.load" in warning["message"]
+
+
+class TestLookupRead:
+    """Scenario 4c: a separate lookup CSV is not the data file."""
+
+    @pytest.fixture(scope="class")
+    @classmethod
+    def run(cls, tmp_path_factory) -> ScenarioRun:
+        return run_scenario(tmp_path_factory, "lookup_read")
+
+    def test_the_run_is_approved_with_exit_code_0(self, run):
+        assert run.code == 0
+        assert run.verdict["status"] == "APPROVED"
+        assert errors_of(run.verdict) == []
+
+    def test_the_canary_was_applied_and_passed(self, run):
+        assert outcome_of(run.verdict, "canary") == "passed"
+        assert findings_of(run.verdict, "canary") == []
+        assert run.scrambled_rows > 0
+        assert (run.app / "lookup.csv").is_file()
 
 
 class TestConstantColumn:

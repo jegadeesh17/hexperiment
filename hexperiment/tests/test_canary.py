@@ -446,6 +446,89 @@ def test_snapshots_without_test_columns_go_on_to_the_comparison():
     assert outcome == CanaryOutcome(Outcome.PASSED, Outcome.PASSED, ())
 
 
+def test_the_count_of_reads_outside_load_survives_the_snapshot_files(tmp_path):
+    written = replace(make_snapshot(), data_reads_outside_load=3)
+    write_snapshot(tmp_path, written)
+    read = read_snapshot(tmp_path, ExecMode.NORMAL, RUN)
+    assert read.data_reads_outside_load == 3
+    assert_same_snapshot(read, written)
+
+
+def test_read_snapshot_rejects_meta_without_the_count_of_reads_outside_load(tmp_path):
+    write_snapshot(tmp_path, make_snapshot())
+    path = hex_dir(tmp_path, ExecMode.NORMAL) / "meta.json"
+    meta = read_json(path)
+    del meta["data_reads_outside_load"]
+    path.write_text(json.dumps(meta), encoding="utf-8")
+    with pytest.raises(ExecutionFailed, match="data_reads_outside_load"):
+        read_snapshot(tmp_path, ExecMode.NORMAL, RUN)
+
+
+@pytest.mark.parametrize("bad", [-1, 1.5, "2", True, None])
+def test_read_snapshot_rejects_a_count_that_is_not_a_natural_number(tmp_path, bad):
+    write_snapshot(tmp_path, make_snapshot())
+    path = hex_dir(tmp_path, ExecMode.NORMAL) / "meta.json"
+    meta = read_json(path)
+    meta["data_reads_outside_load"] = bad
+    path.write_text(json.dumps(meta), encoding="utf-8")
+    with pytest.raises(ExecutionFailed, match="wrong type"):
+        read_snapshot(tmp_path, ExecMode.NORMAL, RUN)
+
+
+def test_build_snapshot_records_the_count_of_reads_outside_load():
+    frame = make_frame()
+    snapshot = build_snapshot(
+        ExecMode.NORMAL, "run", frame, frame, FEATURES, None, None, None, 2
+    )
+    assert snapshot.data_reads_outside_load == 2
+
+
+def test_a_read_outside_load_in_any_execution_means_not_applied():
+    clean = make_snapshot()
+    read = replace(clean, data_reads_outside_load=1)
+    for normal, canary in ((read, clean), (clean, read)):
+        control = ControlRunner(clean)
+        outcome = decide_canary(
+            normal, canary, clean_marker(), control, (), data_file="data.csv"
+        )
+        assert outcome.outcome is Outcome.NOT_APPLIED
+        assert outcome.determinism is Outcome.SKIPPED
+        (finding,) = outcome.findings
+        assert finding.severity is Severity.WARNING
+        assert "data.csv was opened outside hexperiment.load" in finding.message
+        assert finding.evidence == {"data_file": "data.csv", "reads": 1}
+        assert control.calls == 0
+        assert_unwaivable(outcome)
+
+
+def test_a_read_outside_load_wins_over_missed_columns_and_changed_rows():
+    normal = with_test_columns(make_snapshot(), {"target": [1, 2]})
+    canary = with_test_columns(make_snapshot(), {"target": [1, 2]})
+    canary = changed_row(replace(canary, data_reads_outside_load=1))
+    control = ControlRunner(normal)
+    outcome = decide_canary(normal, canary, clean_marker(), control, ())
+    (finding,) = outcome.findings
+    assert "opened outside hexperiment.load" in finding.message
+    assert control.calls == 0
+
+
+def test_a_read_outside_load_in_the_control_execution_means_not_applied():
+    normal = make_snapshot()
+    canary = changed_row(make_snapshot())
+    control = ControlRunner(replace(make_snapshot(), data_reads_outside_load=2))
+    outcome = decide_canary(normal, canary, clean_marker(), control, ())
+    assert outcome.outcome is Outcome.NOT_APPLIED
+    assert outcome.determinism is Outcome.SKIPPED
+    assert outcome.findings[0].evidence["reads"] == 2
+    assert control.calls == 1
+
+
+def test_no_read_outside_load_leaves_the_decision_alone():
+    normal, canary = make_snapshot(), make_snapshot()
+    outcome = decide_canary(normal, canary, clean_marker(), ControlRunner(normal), ())
+    assert outcome == CanaryOutcome(Outcome.PASSED, Outcome.PASSED, ())
+
+
 # --- _missed_columns --------------------------------------------------------------
 
 
@@ -1336,6 +1419,7 @@ def assert_same_snapshot(actual: Snapshot, expected: Snapshot) -> None:
     assert actual.run_id == expected.run_id
     assert actual.features == expected.features
     assert actual.test_columns == expected.test_columns
+    assert actual.data_reads_outside_load == expected.data_reads_outside_load
     for name in (
         "train_ids",
         "test_ids",
@@ -1451,6 +1535,7 @@ def test_snapshot_meta_json_describes_the_snapshot(tmp_path):
     path = hex_dir(tmp_path, ExecMode.CANARY) / "meta.json"
     meta = read_json(path)
     assert set(meta) == {
+        "data_reads_outside_load",
         "features",
         "format_version",
         "has_y_score_train",
@@ -1770,6 +1855,7 @@ def written_snapshots(draw) -> Snapshot:
         )
     )
     varies = draw(st.lists(st.booleans(), min_size=len(columns), max_size=len(columns)))
+    reads = draw(st.integers(0, 2**40))
     return Snapshot(
         mode=draw(st.sampled_from(list(ExecMode))),
         run_id=draw(st.text(min_size=1, max_size=30)),
@@ -1783,6 +1869,7 @@ def written_snapshots(draw) -> Snapshot:
             len(test_ids), len(columns)
         ),
         test_column_varies=np.array(varies, dtype=np.bool_),
+        data_reads_outside_load=reads,
     )
 
 
@@ -2210,7 +2297,10 @@ def test_run_train_script_starts_python_directly_with_the_documented_arguments(
     run_train_script(tmp_path, ExecMode.CONTROL, RUN, 12.5)
     ((args, kwargs),) = calls
     assert waits == [12.5]
-    assert args == [sys.executable, "train.py"]
+    assert args[0] == sys.executable
+    assert args[1] == "-c"
+    assert "hexperiment.child" in args[2]
+    assert args[3:] == ["train.py"]
     assert kwargs.get("shell", False) is False
     assert kwargs["cwd"] == tmp_path
     assert kwargs["stdin"] is subprocess.DEVNULL

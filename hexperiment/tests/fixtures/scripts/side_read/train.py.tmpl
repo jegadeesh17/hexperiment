@@ -1,0 +1,34 @@
+# The frames come from hexperiment.load(), but the fill values and the scaler are
+# computed from a second read of the data file, which the scramble never reaches.
+import hexperiment
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+
+NUMERIC = ["x1", "x2"]
+FEATURES = NUMERIC
+
+df = hexperiment.load()
+train, test = hexperiment.split(df)
+
+everything = pd.read_csv("data.csv")
+fill = everything[NUMERIC].mean()
+scaler = StandardScaler().fit(everything[NUMERIC].fillna(fill))
+
+
+def prepare(frame):
+    return scaler.transform(frame[NUMERIC].fillna(fill))
+
+
+model = LogisticRegression(random_state=0)
+model.fit(prepare(train), train["target"])
+
+hexperiment.audit(
+    train,
+    test,
+    y_score=model.predict_proba(prepare(test))[:, 1],
+    features=FEATURES,
+    script=__file__,
+    y_score_train=model.predict_proba(prepare(train))[:, 1],
+)

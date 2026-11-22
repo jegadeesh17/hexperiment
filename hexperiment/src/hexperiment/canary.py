@@ -102,6 +102,9 @@ class Snapshot:
     test_column_varies: NDArray[np.bool_] = field(
         default_factory=lambda: np.empty(0, dtype=np.bool_)
     )
+    # How many times the execution opened the app's data file outside
+    # ``hexperiment.load`` (Requirement 10.9).
+    data_reads_outside_load: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,6 +155,7 @@ def build_snapshot(
     y_score_train: NDArray[np.float64] | None,
     target: str | None = None,
     time_column: str | None = None,
+    data_reads_outside_load: int = 0,
 ) -> Snapshot:
     """Record what training saw, with rows sorted by id (Requirement 2.3).
 
@@ -160,7 +164,9 @@ def build_snapshot(
     it, so reordering the training rows never changes the snapshot. The snapshot
     also holds one hash per test row for the ``target`` (when named) and each
     feature, without the ``time_column``; these show whether the scramble reached
-    the audited test frame (Requirement 10.7).
+    the audited test frame (Requirement 10.7). ``data_reads_outside_load`` is the
+    count of opens of the data file outside ``hexperiment.load`` (Requirement
+    10.9).
     """
     train_ids = _row_ids(train, "train")
     test_ids = _row_ids(test, "test")
@@ -192,6 +198,7 @@ def build_snapshot(
         test_column_varies=np.array(
             [test[name].dropna().nunique() >= 2 for name in columns], dtype=np.bool_
         ),
+        data_reads_outside_load=data_reads_outside_load,
     )
 
 
@@ -235,11 +242,13 @@ def decide_canary(
     marker: LoadMarker | None,
     run_control: Callable[[], Snapshot],
     hint_locations: Sequence[str],
+    data_file: str = "the data file",
 ) -> CanaryOutcome:
     """Decide the canary and determinism outcomes from the snapshots.
 
     The steps are evaluated in order and the first that applies decides.
-    ``run_control`` is called at most once, and only at step 5.
+    ``run_control`` is called at most once, and only at step 5. ``data_file`` is
+    the name that the warning of Requirement 10.9 gives for the data file.
     """
     # Step 1: the canary execution never called hexperiment.load (Requirement 10.6).
     if marker is None:
@@ -265,6 +274,16 @@ def decide_canary(
     if scrambled_train_rows:
         warning = _scrambled_in_train_warning(scrambled_train_rows)
         return CanaryOutcome(Outcome.NOT_APPLIED, Outcome.SKIPPED, (warning,))
+    # Requirement 10.9: a copy of the data read outside hexperiment.load is not
+    # scrambled, so statistics computed from it cannot be checked. This cannot be
+    # waived, and it is decided before the columns are compared.
+    side_reads = _side_reads(normal, canary)
+    if side_reads:
+        return CanaryOutcome(
+            Outcome.NOT_APPLIED,
+            Outcome.SKIPPED,
+            (_side_read_warning(data_file, side_reads),),
+        )
     # Requirement 10.7: the scramble changes every test column that has more than
     # one value, so such a column with equal values shows that the audited frames
     # did not come from the scrambled load, and the comparison below would prove
@@ -280,7 +299,7 @@ def decide_canary(
         return CanaryOutcome(
             Outcome.SKIPPED, Outcome.SKIPPED, (_ids_differ_warning(normal, canary),)
         )
-    return _decide_rows(normal, canary, run_control, hint_locations)
+    return _decide_rows(normal, canary, run_control, hint_locations, data_file)
 
 
 def _decide_rows(
@@ -288,6 +307,7 @@ def _decide_rows(
     canary: Snapshot,
     run_control: Callable[[], Snapshot],
     hint_locations: Sequence[str],
+    data_file: str,
 ) -> CanaryOutcome:
     """Steps 4 to 6: compare the training rows of equal id sets."""
     # Step 4: scrambling the test rows changed nothing in training. A changed
@@ -312,6 +332,14 @@ def _decide_rows(
     # Steps 5 and 6: a difference; a control execution tells a leak apart from
     # non-deterministic training (Requirement 10.3).
     control = run_control()
+    control_reads = _side_reads(control)
+    if control_reads:
+        # Requirement 10.9 holds in every execution, the control included.
+        return CanaryOutcome(
+            Outcome.NOT_APPLIED,
+            Outcome.SKIPPED,
+            (_side_read_warning(data_file, control_reads),),
+        )
     scores = _score_warnings({"normal": normal, "canary": canary, "control": control})
     train_rows = len(normal.train_ids)
     if normal.features != control.features:
@@ -407,6 +435,11 @@ def _test_column_hashes(
         row_hashes = pd.util.hash_pandas_object(test[name], index=False)
         hashes[:, position] = row_hashes.to_numpy(dtype=np.uint64)[order]
     return hashes
+
+
+def _side_reads(*snapshots: Snapshot) -> int:
+    """The most opens of the data file outside ``load`` in any of the snapshots."""
+    return max(s.data_reads_outside_load for s in snapshots)
 
 
 def _missed_columns(normal: Snapshot, canary: Snapshot) -> list[str]:
@@ -550,6 +583,17 @@ def _scramble_missed_warning(columns: Sequence[str]) -> Finding:
         "build train and test from the frame returned by hexperiment.load() and "
         "split it with hexperiment.split(df); do not read the data file yourself",
         {"columns": list(columns)},
+    )
+
+
+def _side_read_warning(data_file: str, reads: int) -> Finding:
+    return _warning(
+        f"the canary test was not applied: {data_file} was opened outside "
+        "hexperiment.load, so statistics computed from a copy read outside "
+        "hexperiment.load cannot be checked by the scramble",
+        "get every value from the frame returned by hexperiment.load() and split "
+        "it with hexperiment.split(df); do not read or copy the data file yourself",
+        {"data_file": data_file, "reads": reads},
     )
 
 
@@ -741,6 +785,7 @@ def write_snapshot(app_dir: Path, snapshot: Snapshot) -> None:
     _write_json(
         directory / _META_FILE,
         {
+            "data_reads_outside_load": snapshot.data_reads_outside_load,
             "features": list(snapshot.features),
             "format_version": FORMAT_VERSION,
             "has_y_score_train": snapshot.y_score_train is not None,
@@ -770,6 +815,7 @@ def read_snapshot(app_dir: Path, mode: ExecMode, run_id: str) -> Snapshot:
         features = tuple(_string_list(meta["features"]))
         has_scores = _boolean(meta["has_y_score_train"])
         test_columns = tuple(_string_list(meta["test_columns"]))
+        side_reads = _count(meta["data_reads_outside_load"])
     except (KeyError, TypeError) as error:
         raise _corrupt(
             meta_path, f"key {error} is missing or has the wrong type"
@@ -818,6 +864,7 @@ def read_snapshot(app_dir: Path, mode: ExecMode, run_id: str) -> Snapshot:
         test_columns=test_columns,
         test_column_hashes=column_hashes,
         test_column_varies=column_varies,
+        data_reads_outside_load=side_reads,
     )
 
 
@@ -978,6 +1025,12 @@ def _string_list(value: Any) -> list[str]:
     return value
 
 
+def _count(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise TypeError("expected a count that is not negative")
+    return value
+
+
 def _boolean(value: Any) -> bool:
     if not isinstance(value, bool):
         raise TypeError("expected a boolean")
@@ -991,14 +1044,19 @@ type Runner = Callable[[Path, ExecMode, str, float], None]
 _STDERR_TAIL_LINES = 40
 _STDERR_READ_BYTES = 1 << 20
 
+# Starts the script through ``hexperiment.child``, which watches reads of the data
+# file (Requirement 10.9) and then behaves like ``python train.py``.
+_BOOTSTRAP = "import hexperiment.child as child; child.main()"
+
 
 def run_train_script(
     app_dir: Path, mode: ExecMode, run_id: str, timeout_seconds: float
 ) -> None:
     """Run ``<app_dir>/train.py`` once in ``mode`` (Requirement 16.2).
 
-    The script runs with the current interpreter, with ``app_dir`` as its working
-    directory, without a shell, and with ``HEX_MODE`` and ``HEX_RUN_ID`` set.
+    The script runs with the current interpreter, through the bootstrap of
+    ``hexperiment.child``, with ``app_dir`` as its working directory, without a
+    shell, and with ``HEX_MODE`` and ``HEX_RUN_ID`` set.
     ``PYTHONHASHSEED`` is left as the caller has it: a script whose result depends
     on hash order is not deterministic, and that should surface as The Shapeshifter
     (Requirement 10.4). A non-zero exit raises ``ExecutionFailed`` and a timeout
@@ -1018,7 +1076,7 @@ def run_train_script(
     }
     with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
         process = subprocess.Popen(
-            [sys.executable, SCRIPT_NAME],
+            [sys.executable, "-c", _BOOTSTRAP, SCRIPT_NAME],
             cwd=app_dir,
             env=environment,
             stdin=subprocess.DEVNULL,
@@ -1085,7 +1143,14 @@ def run_executions(
     def run_control() -> Snapshot:
         return _run_snapshot(app_dir, ExecMode.CONTROL, run_id, timeout, runner)
 
-    outcome = decide_canary(normal, canary, marker, run_control, hint_locations(result))
+    outcome = decide_canary(
+        normal,
+        canary,
+        marker,
+        run_control,
+        hint_locations(result),
+        data_file=config.data.path,
+    )
     return ExecutionReport(result, outcome, RunMode.FULL)
 
 
