@@ -145,6 +145,7 @@ Scope of this spec: data loading and splitting, configuration, the checks, the c
 6. IF the script did not load its data through `hexperiment.load` THEN the system SHALL record the canary as `not applied` with a `warning`.
 7. WHEN the test target, or any audited feature that has at least two distinct non-missing test values in the normal execution, holds the same values in the canary execution on every test row id present in both executions THEN the kit SHALL record the canary as `not applied`, with a `warning` finding that names those columns (at most five, then "and N more") and says the scramble did not reach the audited frames. The time column SHALL be excluded from this comparison.
 8. Findings from this requirement SHALL NOT be waivable.
+9. WHILE `train.py` runs in `normal`, `canary` or `control` mode, THE kit SHALL watch Python's `open` audit events from before the script's first line. IF the app's data file (the resolved `[data] path`) is opened outside `hexperiment.load` in any of these executions THEN the kit SHALL record the canary as `not applied`, with a `warning` finding that names the file and says that statistics computed from a copy read outside `hexperiment.load` cannot be checked by the scramble. Files other than the data file SHALL NOT trigger this. Readers that open files without Python's `open` (native readers such as pyarrow) are not seen.
 
 ### Requirement 11: Waivers
 
