@@ -45,3 +45,4 @@ testpaths = ["tests"]
 pythonpath = ["benchmark"]
 # The canary scenarios spawn real training runs; spread them across CPU cores.
 addopts = "-n auto --dist loadscope"
+filterwarnings = ["ignore::DeprecationWarning:dateutil.*"]
