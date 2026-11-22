@@ -191,10 +191,10 @@ Kiro’s steering files allow developers to provide persistent context to all ag
 Because these rules are injected into agent context from turn one, AI agents write modular data seams (`load`, `split`, `audit`) by default.
 
 ### 2. Event Hooks with Stderr Routing
-How do you prevent an agent from hallucinating success and closing its turn?
+How do you stop an agent from declaring success on a model nobody verified?
 We configured two Kiro event hooks:
 - **`PostFileSave` Hook:** The moment an agent saves `train.py`, Hexperiment runs a fast training check, instantly clearing any prior `APPROVED` status.
-- **`Stop` Hook:** When the agent attempts to finish its task, the Stop hook runs. If the model is unverified or rejected, the hook exits with **exit code 1** and writes the formatted diagnostic findings to `stderr`. Kiro natively captures this stderr and feeds it directly into the agent’s prompt as an error that must be resolved.
+- **`Stop` Hook:** When the agent attempts to finish its task, the Stop hook runs. If the model is unverified or rejected, the hook exits with **exit code 1** and writes the formatted diagnostic findings to `stderr`. Kiro feeds this stderr to the agent and gives it one more turn. The hook fires once per prompt, so it cannot loop: it is a nudge to verify, not a guarantee of an approved verdict.
 
 ### 3. Sandboxed Custom Agents (`ghost-hunter`)
 Allowing an autonomous agent to fix code using raw terminal bash commands is dangerous: an agent might inadvertently delete test files, weaken validation assertions, or falsify verdicts.

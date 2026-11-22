@@ -45,15 +45,15 @@ Hexperiment combines dynamic behavioral auditing with Kiro’s agent workflow to
 
 ## How We Built It: Deep Kiro Leverage
 
-Hexperiment was built **spec-first** in Kiro across 5 comprehensive EARS specifications (45 requirements, 75 tasks), utilizing three tightly sandboxed custom agents (`spec-writer`, `builder`, `reviewer`) with zero manual code commits.
+Hexperiment was built **spec-first** in Kiro across 5 comprehensive EARS specifications (45 requirements, 75 tasks), utilizing three tightly sandboxed custom agents (`spec-writer`, `builder`, `reviewer`). Kiro wrote the code of every task; each task was verified outside Kiro and committed by the owner, and no agent committed or pushed anything.
 
 More importantly, **Kiro is the execution engine of the product itself**:
 - **Steering as a Policy Contract (`ml-integrity.md`):** Enforces 8 fundamental ML integrity rules across all agent interactions, directing the agent to write clean, modular data seams (`load`, `split`) from line one.
-- **Save and Stop Hooks:** A save hook runs a fast training check on file save, clearing any prior `APPROVED` status so an old pass can never mask modified code. A Stop hook prevents the agent from ending its turn if unapproved changes remain.
+- **Save and Stop Hooks:** A save hook runs a fast training check on file save, clearing any prior `APPROVED` status so an old pass can never mask modified code. When the agent ends its turn with unapproved changes, a Stop hook exits 1 with the findings, and the agent gets one more turn to verify. It fires once per prompt, so it is a nudge, not a guarantee.
 - **Custom Agent Boundaries (`ghost-hunter`):** The repair agent is granted tool access to inspect apps and run audits via MCP, but is denied shell execution, data modification, and verdict tampering.
 - **Repeat Loop Workflows (`exorcise.workflow.json`):** Drives the multi-step remediation loop (*Audit $\rightarrow$ Diagnose $\rightarrow$ Refactor $\rightarrow$ Verify*) natively within Kiro until the stop condition (`verdict.json == APPROVED`) is met.
 - **Typed MCP Server (`hexperiment-mcp`):** Exposes 5 purpose-built tools (`list_apps`, `run_audit`, `get_verdict`, `get_history`, `explain_ghost`) and model cards as live resources.
-- **Kiro Power (`power/hexperiment/`):** Bundles steering, tools, and workflows into a one-click installable package for any Kiro developer.
+- **Kiro Power (`power/hexperiment/`):** Packages the hexperiment skill and the MCP server for any Kiro session; `hexperiment init --kiro` writes the hooks, workflow, agent, steering and MCP entry into a project.
 
 ---
 
