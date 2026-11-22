@@ -256,7 +256,7 @@ Full table, scores and method: [hexperiment/benchmark/README.md](../hexperiment/
 
 Crucially, across all 39 clean twin applications, Hexperiment registered **zero false alarms**. In production machine learning, a safety harness that blocks legitimate models is quickly discarded; 0% false positives is the difference between an academic toy and an enterprise-grade developer tool.
 
-In addition, our test suite runs **3,365 automated tests** (including extensive property-based fuzzing with Hypothesis) with exit code 0 in about 2.5 minutes.
+In addition, our test suite runs **3,365 automated tests** (including extensive property-based fuzzing with Hypothesis) with exit code 0 in about 2 minutes.
 
 ---
 
