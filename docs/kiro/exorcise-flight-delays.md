@@ -6,7 +6,7 @@ The four recorded runs in `apps/flight-delays/runs/`:
 
 | Run | Mode | Status | ROC AUC | Made by |
 | --- | --- | --- | --- | --- |
-| 20261122-131518-e8db31 | full | REJECTED | 0.7971 | the ghost hunter's first `hexperiment run` |
+| 20261122-131518-e8db31 | full | REJECTED | 0.7971 | the ghost hunter's first `run_audit` call |
 | 20261122-131620-2ed225 | fast | UNVERIFIED | 0.6193 | the save hook, after the agent edited `train.py` (the agent itself ran no fast check) |
 | 20261122-131642-1933a1 | full | APPROVED | 0.6193 | the ghost hunter's second run, on its fixed script |
 | 20261122-131840-3eec70 | full | APPROVED | 0.6193 | the authored honest script, restored afterwards |

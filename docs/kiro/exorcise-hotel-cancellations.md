@@ -6,7 +6,7 @@ The four recorded runs in `apps/hotel-cancellations/runs/`:
 
 | Run | Mode | Status | ROC AUC | Made by |
 | --- | --- | --- | --- | --- |
-| 20261122-132039-ec97c0 | full | REJECTED | 1.0000 | the ghost hunter's first `hexperiment run` |
+| 20261122-132039-ec97c0 | full | REJECTED | 1.0000 | the ghost hunter's first `run_audit` call |
 | 20261122-132145-0cd94e | fast | UNVERIFIED | 0.9090 | the save hook, after the agent edited `train.py` (the agent itself ran no fast check) |
 | 20261122-132210-dec65b | full | APPROVED | 0.9090 | the ghost hunter's second run, on its fixed script |
 | 20261122-132422-bfb52c | full | APPROVED | 0.9096 | the authored honest script, restored afterwards |
