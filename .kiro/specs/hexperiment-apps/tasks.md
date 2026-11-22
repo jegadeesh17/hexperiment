@@ -135,3 +135,9 @@
   - **Result (task 8):** the MCP child run is replaced by a probe test written into `tmp_path` with its own `pyproject.toml`; the probe opens a loopback listener and calls `connect` on a second socket, so it reaches `connect` on every operating system. The child run does not use `-p no:randomly` (that plugin is not installed). The assertion is `re.search(r"\b1 passed\b", output)`.
     - Mutation check: with the scope check removed from `no_network`, the regression test failed (the probe hit "a test tried to use the network"; checked twice). Fixture restored; `git diff --stat apps/tests/conftest.py` is empty.
     - `pytest apps/tests -q --durations=5`: 225 passed, 18.87 s; the regression test took 5.94 s. `pytest hexperiment/tests apps/tests -q -p no:cacheprovider`: 3365 passed, 108.38 s. `ruff check hexperiment apps`: clean. Only the Windows run was verified; Linux and macOS were not run.
+
+- [ ] 9. Network guard DNS and UDP refusal, and order-independent test collection
+  - Move shared helpers imported with `from conftest import ...` into `apps/tests/apps_helpers.py` and update the 9 test files to import from `apps_helpers`. Keep fixtures in `conftest.py`.
+  - In `apps/tests/conftest.py`, patch `socket.getaddrinfo` and `socket.socket.sendto` inside `no_network` to refuse network access, with regression tests in `apps/tests/test_network_guard.py`.
+  - Verify that `pytest apps/tests hexperiment/tests -q` and `pytest hexperiment/tests apps/tests -q` both pass with exit code 0.
+  - _Requirements: 5.6, 5.7_

@@ -153,3 +153,9 @@
 
 - [x] 15. **Owner:** the stop check in a live session
   - In a headless Kiro CLI session in this workspace, with a throwaway app, ask the agent to change its `train.py` and then finish. Pass: the agent receives "Hexperiment: not approved yet." after its reply and runs the full audit or reports the app as not approved. Delete the throwaway app afterwards.
+
+- [ ] 16. Ghost hunter write boundary enforcement
+  - Run a headless write probe to verify ghost hunter write restrictions against out-of-app targets (`README_zz_probe.md`, root scripts, `docs/`, `.github/`, `power/`, `hexperiment/benchmark/`, `apps/tests/`).
+  - Add deny rules to `.kiro/agents/ghost-hunter.json` and its template copy `hexperiment/src/hexperiment/templates/kiro/agents/ghost-hunter.json` for all paths that succeeded in the initial probe.
+  - Re-run the probe to confirm all out-of-app writes are refused.
+  - _Requirements: 3.4, 3.7_

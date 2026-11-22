@@ -86,7 +86,7 @@ Scope of this spec: data loading and splitting, configuration, the checks, the c
 #### Acceptance Criteria
 
 1. WHEN the audit runs THEN the system SHALL count test rows whose values over `features` plus the target are identical to at least one training row.
-2. IF the overlapping fraction of test rows is greater than `checks.overlap_max_fraction` THEN the system SHALL report an `error` finding with ghost "The Doppelganger", the count and fraction as evidence, and the fix hint "drop exact duplicates before splitting".
+2. IF the overlapping fraction of test rows is greater than `checks.overlap_max_fraction` THEN the system SHALL report an `error` finding with ghost "The Doppelganger", the count and fraction as evidence, and the fix hint "after the split, drop every test row that also appears in the training rows".
 3. THE result of this check SHALL NOT change when the rows of `train` or `test` are reordered.
 
 ### Requirement 6: Target proxy check (The Possession)
@@ -143,7 +143,8 @@ Scope of this spec: data loading and splitting, configuration, the checks, the c
 4. IF the `control` snapshot also differs from `normal` THEN the system SHALL report a `warning` finding with ghost "The Shapeshifter" ("training is not deterministic; set random_state everywhere"), and record the canary as `inconclusive`.
 5. IF the `control` snapshot matches `normal` but the `canary` snapshot does not THEN the system SHALL report an `error` finding with ghost "The Peeking Spirit", with evidence giving the number of training rows whose predictions or features changed and the largest change, and the fix hint "test rows influenced training; fit preprocessing on training rows only, after the split". The fix hint SHALL list the line numbers reported by the split-order hint, if any.
 6. IF the script did not load its data through `hexperiment.load` THEN the system SHALL record the canary as `not applied` with a `warning`.
-7. Findings from this requirement SHALL NOT be waivable.
+7. WHEN the canary execution's test-target hash equals the normal execution's THEN the kit SHALL record the canary as `not applied`, with a `warning` finding that the scramble did not reach the audited frames.
+8. Findings from this requirement SHALL NOT be waivable.
 
 ### Requirement 11: Waivers
 
@@ -162,7 +163,7 @@ Scope of this spec: data loading and splitting, configuration, the checks, the c
 
 #### Acceptance Criteria
 
-1. THE verdict SHALL include `test_set_uses`: the number of runs in the app's history (including this one) that used the same `data.path`, `split.test_fraction`, `split.seed` and `split.time_column`. A run that ended on an input error never computed a metric, so it is not counted.
+1. THE verdict SHALL include `test_set_uses`: the number of runs in the app's history (including this one) that used the same resolved `data.path` relative to the app folder, `split.test_fraction`, `split.seed` and `split.time_column`. A run that ended on an input error never computed a metric, so it is not counted.
 2. IF `test_set_uses` exceeds `checks.max_test_uses` THEN the system SHALL report a `warning` finding that the metric may be optimistic because the test set has been evaluated that many times.
 
 ### Requirement 13: Verdict
@@ -172,7 +173,7 @@ Scope of this spec: data loading and splitting, configuration, the checks, the c
 #### Acceptance Criteria
 
 1. THE verdict status SHALL be `REJECTED` if the metric fails or any `error` finding exists; otherwise `APPROVED` if the canary test passed in a full run; otherwise `UNVERIFIED` (a fast run, or a canary that was skipped, inconclusive or not applied).
-2. THE `verdict.json` file SHALL contain: `status`, `mode` (`fast` or `full`), `app`, `run_id` (form `YYYYMMDD-HHMMSS-<6 hex chars>`, unique per run), `created_at` (ISO 8601 UTC), `hexperiment_version`, `metric` (`name`, `value`, `threshold`, `passed`), `checks` (each check's name, ghost and outcome: `passed`, `failed`, `skipped`, `inconclusive`, `not applied` or `not applicable`), `findings` (each with `check`, `ghost`, `severity`, `location`, `evidence`, `fix`, and `waiver_reason` when waived), `waivers` and `test_set_uses`.
+2. THE `verdict.json` file SHALL contain: `status`, `mode` (`fast` or `full`), `app`, `run_id` (form `YYYYMMDD-HHMMSS-<6 hex chars>`, unique per run), `created_at` (ISO 8601 UTC), `hexperiment_version`, `metric` (`name`, `value`, `threshold`, `passed`), `checks` (each check's name, ghost and outcome: `passed`, `failed`, `skipped`, `inconclusive`, `not applied` or `not applicable`), `findings` (each with `check`, `ghost`, `severity`, `location`, `evidence`, `fix`, and `waiver_reason` when waived), `waivers`, `test_set_uses` and `checks_overrides` (an object recording every non-default `[checks]` configuration value; empty `{}` when none).
 3. WHEN a run completes THEN the system SHALL write `verdict.json` and `model_card.md` into `runs/<run_id>/` and copy `verdict.json` into the app directory.
 4. THE system SHALL write `verdict.json` as UTF-8 JSON with sorted keys and two-space indentation.
 5. Running the same full run twice on the same inputs SHALL produce identical `status`, `metric` and `findings`.
@@ -183,7 +184,7 @@ Scope of this spec: data loading and splitting, configuration, the checks, the c
 
 #### Acceptance Criteria
 
-1. WHEN a run completes THEN the system SHALL write `model_card.md` containing: app name and description, verdict status and mode, run id and date, train and test row counts and positive rates, the time range of each split (if a time column is configured), the metric against its threshold, a table of all checks with ghost name and outcome, every finding with its fix hint, every waiver with its reason, the test-set use count, and a run history table of earlier runs of the same app (run id, status, metric).
+1. WHEN a run completes THEN the system SHALL write `model_card.md` containing: app name and description, verdict status and mode, run id and date, train and test row counts and positive rates, the time range of each split (if a time column is configured), the metric against its threshold, a table of all checks with ghost name and outcome, every non-default check threshold from `checks_overrides` (if any), every finding with its fix hint, every waiver with its reason, the test-set use count, and a run history table of earlier runs of the same app (run id, status, metric).
 2. THE model card SHALL state that it was generated by `hexperiment` and must not be edited by hand.
 3. THE model card SHALL be valid GitHub-flavoured Markdown.
 

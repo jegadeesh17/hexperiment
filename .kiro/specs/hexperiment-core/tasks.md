@@ -139,3 +139,15 @@
   - Confirm that the `.venv/Scripts/python -m pip install -e 'hexperiment[dev]'` command still works from a clean checkout and that `.venv/Scripts/hexperiment run --help` prints the usage.
   - Confirm that each check module has example-based tests for a leaking and a clean case and at least one Hypothesis test, that the clean-data test passes, and that no runtime dependency beyond `pandas`, `numpy` and `scikit-learn` was added.
   - _Requirements: 17.1, 17.2, 17.3, 17.4, 17.5, 17.6_
+
+- [ ] 19. Canary target check against bypass
+  - In `hexperiment/src/hexperiment/canary.py`, record the hash of `test[target]` in each snapshot.
+  - In `decide_canary`, when the canary execution's test-target hash equals the normal execution's test-target hash, mark the canary outcome as `not applied` with a finding that the scramble did not reach the audited frames.
+  - Add a scenario test in `hexperiment/tests/test_canary_scripts.py` next to Scenario 7: a script calls `load()`, discards it, reads the CSV directly, and fits a scaler on train+test. It must end `UNVERIFIED`, never `APPROVED`.
+  - _Requirements: 10.7_
+
+- [ ] 20. Check overrides and test-set use-count normalization
+  - In `hexperiment/src/hexperiment/verdict.py` and `hexperiment/src/hexperiment/card.py`, record every non-default `[checks]` configuration threshold in `verdict.json` under `checks_overrides` (empty object `{}` when none) and display them in `model_card.md`.
+  - In `hexperiment/src/hexperiment/runs.py`, normalize the test-set use-count key so that `data.path` resolves relative to the app folder.
+  - Add `hexperiment/constraints.txt` pinning tested exact versions, and add unit tests for `checks_overrides` and normalized path keys.
+  - _Requirements: 12.1, 13.2, 14.1_

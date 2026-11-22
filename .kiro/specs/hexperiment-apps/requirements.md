@@ -74,3 +74,5 @@ Scope: data fetching, the two apps (haunted and honest scripts, configuration, R
 3. THE committed run history (`runs/`), `verdict.json` and `model_card.md` of each app SHALL come from real runs of the haunted and honest scripts, never be edited by hand, and show the haunted, flagged and honest steps in order.
 4. `ruff check apps` SHALL report no problems.
 5. WHEN the apps tests run in the same pytest command as the kit tests (`pytest hexperiment/tests apps/tests`), THE apps no-network guard SHALL apply only to tests whose file is inside `apps/tests/`, and every kit test SHALL pass as it does when the kit tests run alone.
+6. THE apps no-network guard SHALL also refuse `socket.getaddrinfo` and `socket.socket.sendto` when called from tests inside `apps/tests/`.
+7. Both test folders SHALL collect and pass in either order (`pytest hexperiment/tests apps/tests` and `pytest apps/tests hexperiment/tests`).
