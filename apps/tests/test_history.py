@@ -84,10 +84,7 @@ def problems(app_dir: Path, arc: Arc) -> list[str]:
     last_file = runs_dir / last.run_id / VERDICT_FILENAME
     if not latest.is_file():
         found.append(f"{VERDICT_FILENAME} is missing in the app folder")
-    elif (
-        latest.read_text(encoding="utf-8").splitlines()
-        != last_file.read_text(encoding="utf-8").splitlines()
-    ):
+    elif latest.read_bytes() != last_file.read_bytes():
         found.append(f"{VERDICT_FILENAME} differs from the last run's verdict")
     return found
 
