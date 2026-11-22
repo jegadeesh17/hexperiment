@@ -38,6 +38,7 @@ from hexperiment.runs import (
     format_run_id,
     load_history,
     new_run_id,
+    normalize_data_path,
 )
 from hexperiment.verdict import to_json
 
@@ -654,3 +655,68 @@ def test_app_lock_does_not_touch_run_history_or_verdict(tmp_path):
         pass
     assert (tmp_path / "verdict.json").read_text(encoding="utf-8") == "{}"
     assert not (tmp_path / "runs").exists()
+
+
+# --- normalized data path ------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    ["data/churn.csv", "./data/churn.csv", "data/../data/churn.csv", "data//churn.csv"],
+)
+def test_normalize_data_path_gives_one_posix_path_per_file(tmp_path, spelling):
+    assert normalize_data_path(tmp_path, spelling) == "data/churn.csv"
+
+
+def test_normalize_data_path_makes_an_absolute_path_inside_the_app_relative(tmp_path):
+    absolute = str(tmp_path / "data" / "churn.csv")
+    assert normalize_data_path(tmp_path, absolute) == "data/churn.csv"
+
+
+def test_normalize_data_path_keeps_a_path_outside_the_app_absolute(tmp_path):
+    app = tmp_path / "app"
+    app.mkdir()
+    result = normalize_data_path(app, "../shared/churn.csv")
+    assert result == (tmp_path / "shared" / "churn.csv").resolve().as_posix()
+
+
+def test_normalize_data_path_never_contains_a_backslash(tmp_path):
+    assert "\\" not in normalize_data_path(tmp_path, "a/b/c.csv")
+
+
+@given(st.lists(st.sampled_from(["a", "b", "c"]), min_size=1, max_size=4))
+def test_normalize_data_path_ignores_dot_segments(parts):
+    base = Path("app")
+    plain = "/".join(parts)
+    dotted = "./" + "/./".join(parts)
+    assert normalize_data_path(base, dotted) == normalize_data_path(base, plain)
+
+
+def test_count_with_app_dir_matches_other_spellings_of_the_data_path(tmp_path):
+    history = [
+        make_verdict(
+            "20251101-090000-aaaaaa",
+            split=replace(SIGNATURE, data_path="./data/churn.csv"),
+        ),
+        make_verdict(
+            "20251101-090100-bbbbbb",
+            split=replace(SIGNATURE, data_path="data/../data/churn.csv"),
+        ),
+        make_verdict(
+            "20251101-090200-cccccc",
+            split=replace(SIGNATURE, data_path="data/other.csv"),
+        ),
+    ]
+    assert count_test_set_uses(history, SIGNATURE, tmp_path) == 2
+    assert count_test_set_uses(history, SIGNATURE) == 0
+
+
+def test_finalize_counts_an_earlier_run_that_spelled_the_data_path_differently(
+    tmp_path,
+):
+    earlier = make_verdict(
+        "20251101-080000-bbbbbb", split=replace(SIGNATURE, data_path="./data/churn.csv")
+    )
+    store(tmp_path, earlier)
+    verdict = finalize_run(tmp_path, make_config(tmp_path), fast_report(), run_id=RUN_A)
+    assert verdict.test_set_uses == 2

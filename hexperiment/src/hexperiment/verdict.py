@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Mapping, Sequence
+from dataclasses import fields
 from typing import Any
 
 from hexperiment.canary import (
@@ -18,7 +19,7 @@ from hexperiment.canary import (
     SHAPESHIFTER,
     CanaryOutcome,
 )
-from hexperiment.config import HexConfig, Waiver
+from hexperiment.config import ChecksConfig, HexConfig, Waiver
 from hexperiment.errors import HexInputError
 from hexperiment.models import (
     CheckSummary,
@@ -91,6 +92,7 @@ def assemble(
         seed=config.split.seed,
         time_column=config.split.time_column,
     )
+    overrides = checks_overrides(config.checks)
     if result.input_error is not None:
         metric = MetricResult(config.metric.name, None, config.metric.threshold, False)
         return Verdict(
@@ -107,6 +109,7 @@ def assemble(
             test_set_uses=test_set_uses,
             split=split,
             data=result.data,
+            checks_overrides=overrides,
         )
     if result.metric is None:
         raise HexInputError(
@@ -134,8 +137,22 @@ def assemble(
         test_set_uses=test_set_uses,
         split=split,
         data=result.data,
+        checks_overrides=overrides,
     )
 
+
+def checks_overrides(checks: ChecksConfig) -> dict[str, JsonValue]:
+    """The ``[checks]`` thresholds that differ from their defaults (Requirement 13.2).
+
+    The keys are the names used in ``hex.toml``. The result is ``{}`` when every
+    threshold has its default value, so a loosened check is visible in the verdict.
+    """
+    defaults = ChecksConfig()
+    return {
+        field.name: getattr(checks, field.name)
+        for field in fields(ChecksConfig)
+        if getattr(checks, field.name) != getattr(defaults, field.name)
+    }
 
 def apply_waivers(
     findings: Sequence[Finding], waivers: Sequence[Waiver]

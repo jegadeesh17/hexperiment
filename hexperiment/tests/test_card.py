@@ -436,3 +436,22 @@ def test_table_cells_unescape_to_the_original_text(verdict, earlier):
     assert findings[1][5] == folded(finding.fix)
     assert waivers[1][2] == folded(waiver.reason)
     assert history[1][0] == folded(earlier.run_id)
+
+
+# --- check thresholds ----------------------------------------------------------------
+
+
+def test_card_has_no_threshold_section_without_overrides():
+    card = render(make_verdict(), [])
+    assert "Check thresholds" not in sections(card)
+
+
+def test_card_lists_non_default_check_thresholds():
+    verdict = make_verdict(checks_overrides={"proxy_auc_max": 0.99, "max_test_uses": 9})
+    card = render(verdict, [])
+    body = sections(card)["Check thresholds"]
+    assert "differ from their defaults" in body
+    table = next(t for t in tables(card) if t[0] == ["Setting", "Value"])
+    assert table[1:] == [["max_test_uses", "9"], ["proxy_auc_max", "0.99"]]
+    names = list(sections(card))
+    assert names.index("Check thresholds") == names.index("Checks") + 1

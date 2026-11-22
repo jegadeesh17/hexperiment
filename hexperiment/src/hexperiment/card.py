@@ -38,8 +38,8 @@ def render(
     ``history`` holds the earlier verdicts of the app, oldest first, without
     ``verdict`` itself. ``description`` is the app description from ``hex.toml``;
     a ``Verdict`` does not carry it. The sections follow the order in the design:
-    title, status, notice, data, metric, checks, findings, waivers, test-set uses,
-    run history.
+    title, status, notice, data, metric, checks, check thresholds (only when some
+    differ from their defaults), findings, waivers, test-set uses, run history.
     """
     sections = [
         _title(verdict, description),
@@ -48,6 +48,7 @@ def render(
         _data(verdict),
         _metric(verdict),
         _checks(verdict),
+        *_overrides(verdict),
         _findings(verdict),
         _waivers(verdict),
         _test_set_uses(verdict),
@@ -152,6 +153,18 @@ def _checks(verdict: Verdict) -> str:
         for c in verdict.checks
     ]
     return "## Checks\n\n" + _table(["Check", "Ghost", "Outcome"], rows)
+
+
+def _overrides(verdict: Verdict) -> list[str]:
+    """The section for non-default ``[checks]`` thresholds, or nothing."""
+    if not verdict.checks_overrides:
+        return []
+    rows = sorted(verdict.checks_overrides.items())
+    return [
+        "## Check thresholds\n\n"
+        "These `[checks]` thresholds in `hex.toml` differ from their defaults.\n\n"
+        + _table(["Setting", "Value"], rows)
+    ]
 
 
 def _outcome_text(check: CheckSummary, warned: set[str]) -> str:

@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 
 from hypothesis import given
 from hypothesis import strategies as st
@@ -173,8 +174,9 @@ def test_verdict_to_dict_uses_plain_strings() -> None:
     assert data["status"] == "REJECTED"
     assert data["mode"] == "full"
     assert sorted(data) == [
-        "app", "checks", "created_at", "data", "findings", "hexperiment_version",
-        "metric", "mode", "run_id", "split", "status", "test_set_uses", "waivers",
+        "app", "checks", "checks_overrides", "created_at", "data", "findings",
+        "hexperiment_version", "metric", "mode", "run_id", "split", "status",
+        "test_set_uses", "waivers",
     ]  # fmt: skip
 
 
@@ -227,3 +229,22 @@ def test_finding_round_trip_property(
     )
     assert Finding.from_dict(finding.to_dict()) == finding
     assert Finding.from_dict(through_json(finding.to_dict())) == finding
+
+
+def test_verdict_checks_overrides_defaults_to_empty() -> None:
+    verdict = make_verdict()
+    assert verdict.checks_overrides == {}
+    assert verdict.to_dict()["checks_overrides"] == {}
+
+
+def test_verdict_checks_overrides_round_trip() -> None:
+    verdict = replace(
+        make_verdict(), checks_overrides={"proxy_auc_max": 0.99, "max_test_uses": 9}
+    )
+    assert Verdict.from_dict(through_json(verdict.to_dict())) == verdict
+
+
+def test_verdict_from_dict_without_checks_overrides_gives_empty() -> None:
+    data = make_verdict().to_dict()
+    del data["checks_overrides"]
+    assert Verdict.from_dict(data).checks_overrides == {}

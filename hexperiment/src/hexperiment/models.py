@@ -9,7 +9,7 @@ files turn those into ``HexInputError`` with the file name.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
@@ -312,11 +312,14 @@ class Verdict:
     test_set_uses: int
     split: SplitSignature
     data: DataSummary | None
+    # Every [checks] threshold that differs from its default; {} when none does.
+    checks_overrides: Mapping[str, JsonValue] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, JsonValue]:
         return {
             "app": self.app,
             "checks": [c.to_dict() for c in self.checks],
+            "checks_overrides": dict(self.checks_overrides),
             "created_at": self.created_at,
             "data": None if self.data is None else self.data.to_dict(),
             "findings": [f.to_dict() for f in self.findings],
@@ -347,4 +350,6 @@ class Verdict:
             test_set_uses=int(data["test_set_uses"]),
             split=SplitSignature.from_dict(data["split"]),
             data=None if summary is None else DataSummary.from_dict(summary),
+            # Absent in verdicts written before the key existed.
+            checks_overrides=dict(data.get("checks_overrides", {})),
         )

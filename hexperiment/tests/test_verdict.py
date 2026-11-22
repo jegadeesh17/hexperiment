@@ -1064,3 +1064,96 @@ def test_a_full_run_without_training_scores_and_no_difference_ends_unverified():
     (warning,) = [f for f in verdict.findings if f.check == "canary"]
     assert warning.severity is Severity.WARNING
     assert "y_score_train" in warning.fix
+
+
+# --- checks_overrides ----------------------------------------------------------------
+
+
+def config_with_checks(**checks: float) -> HexConfig:
+    raw: dict = {
+        "data": {"path": "data/churn.csv"},
+        "target": {"column": "y"},
+        "metric": {"name": "roc_auc", "threshold": 0.8},
+        "checks": checks,
+    }
+    return parse_config(raw, source=Path("hex.toml"), app_dir=Path("churn"))
+
+
+def test_checks_overrides_is_empty_when_no_threshold_is_changed() -> None:
+    assert build(config=make_config()).checks_overrides == {}
+    assert build(config=config_with_checks()).checks_overrides == {}
+    assert '"checks_overrides": {}' in to_json(build())
+
+
+def test_checks_overrides_is_empty_when_a_threshold_is_set_to_its_default() -> None:
+    config = config_with_checks(
+        proxy_auc_max=0.95,
+        overlap_max_fraction=0.0,
+        too_good_margin=0.15,
+        max_test_uses=5,
+    )
+    assert build(config=config).checks_overrides == {}
+
+
+def test_checks_overrides_records_every_non_default_threshold() -> None:
+    config = config_with_checks(
+        proxy_auc_max=0.99,
+        overlap_max_fraction=0.01,
+        too_good_margin=0.3,
+        max_test_uses=9,
+    )
+    assert build(config=config).checks_overrides == {
+        "proxy_auc_max": 0.99,
+        "overlap_max_fraction": 0.01,
+        "too_good_margin": 0.3,
+        "max_test_uses": 9,
+    }
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("proxy_auc_max", 0.9),
+        ("overlap_max_fraction", 0.5),
+        ("too_good_margin", 0.05),
+        ("max_test_uses", 1),
+    ],
+)
+def test_checks_overrides_records_only_the_changed_threshold(key, value) -> None:
+    verdict = build(config=config_with_checks(**{key: value}))
+    assert verdict.checks_overrides == {key: value}
+
+
+def test_checks_overrides_is_recorded_on_an_input_error_verdict() -> None:
+    error = finding("input", location="audit()")
+    result = audit_result(metric=None, input_error=error)
+    verdict = build(result, config=config_with_checks(proxy_auc_max=0.99))
+    assert verdict.status is Status.REJECTED
+    assert verdict.checks_overrides == {"proxy_auc_max": 0.99}
+
+
+def test_checks_overrides_round_trips_through_verdict_json() -> None:
+    verdict = build(config=config_with_checks(proxy_auc_max=0.99, max_test_uses=9))
+    parsed = json.loads(to_json(verdict))
+    assert parsed["checks_overrides"] == {"max_test_uses": 9, "proxy_auc_max": 0.99}
+    assert from_dict(parsed) == verdict
+
+
+def test_a_verdict_json_without_checks_overrides_still_loads() -> None:
+    parsed = json.loads(to_json(build()))
+    del parsed["checks_overrides"]
+    assert from_dict(parsed).checks_overrides == {}
+
+
+@given(
+    st.floats(min_value=0.5, max_value=1.0, allow_nan=False),
+    st.integers(min_value=1, max_value=50),
+)
+def test_checks_overrides_lists_exactly_the_non_default_values(auc, uses) -> None:
+    verdict = build(config=config_with_checks(proxy_auc_max=auc, max_test_uses=uses))
+    expected = {}
+    if auc != 0.95:
+        expected["proxy_auc_max"] = auc
+    if uses != 5:
+        expected["max_test_uses"] = uses
+    assert verdict.checks_overrides == expected

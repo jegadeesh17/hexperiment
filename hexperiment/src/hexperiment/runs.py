@@ -15,6 +15,7 @@ import shutil
 import sys
 import time
 from collections.abc import Iterator, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from importlib.metadata import version as installed_version
 from pathlib import Path
@@ -69,14 +70,40 @@ def new_run_id(now: datetime | None = None, token: str | None = None) -> str:
     )
 
 
-def count_test_set_uses(history: Sequence[Verdict], signature: SplitSignature) -> int:
+def normalize_data_path(app_dir: str | os.PathLike[str], data_path: str) -> str:
+    """``data_path`` resolved against ``app_dir`` as a normalized POSIX string.
+
+    ``data/x.csv``, ``./data/x.csv`` and ``data/../data/x.csv`` all give
+    ``data/x.csv``. A path inside the app folder is made relative to it; one outside
+    stays absolute. This is the path ``hexperiment.load`` reads, so two spellings of
+    one file count as one test set (Requirement 12.1).
+    """
+    base = Path(app_dir).resolve()
+    resolved = (base / data_path).resolve()
+    try:
+        return resolved.relative_to(base).as_posix()
+    except ValueError:
+        return resolved.as_posix()
+
+
+def count_test_set_uses(
+    history: Sequence[Verdict],
+    signature: SplitSignature,
+    app_dir: str | os.PathLike[str] | None = None,
+) -> int:
     """Number of earlier runs that scored the same test set (Requirement 12.1).
 
     Fast, full, ``REJECTED`` and ``UNVERIFIED`` runs with an equal split block all
     count. A run that ended on an input error never scored the test set and does
-    not.
+    not. With ``app_dir``, the data path of each earlier run is normalized the same
+    way as ``signature`` before the comparison (see ``normalize_data_path``), so a
+    run recorded as ``./data/x.csv`` matches ``data/x.csv``.
     """
-    return sum(1 for v in history if v.split == signature and not _is_input_error(v))
+    return sum(
+        1
+        for v in history
+        if _split_of(v, app_dir) == signature and not _is_input_error(v)
+    )
 
 
 def load_history(app_dir: str | os.PathLike[str]) -> list[Verdict]:
@@ -193,8 +220,8 @@ def finalize_run(
     """
     _require_run_id(run_id)
     history = load_history(app_dir)
-    signature = _signature(config)
-    uses = count_test_set_uses(history, signature)
+    signature = _signature(app_dir, config)
+    uses = count_test_set_uses(history, signature, app_dir)
     if report.result.input_error is None:
         uses += 1
     verdict = assemble(
@@ -217,13 +244,22 @@ def finalize_run(
 # --- helpers -------------------------------------------------------------------------
 
 
-def _signature(config: HexConfig) -> SplitSignature:
+def _signature(app_dir: Path, config: HexConfig) -> SplitSignature:
     return SplitSignature(
-        data_path=config.data.path,
+        data_path=normalize_data_path(app_dir, config.data.path),
         test_fraction=config.split.test_fraction,
         seed=config.split.seed,
         time_column=config.split.time_column,
     )
+
+
+def _split_of(
+    verdict: Verdict, app_dir: str | os.PathLike[str] | None
+) -> SplitSignature:
+    split = verdict.split
+    if app_dir is None:
+        return split
+    return replace(split, data_path=normalize_data_path(app_dir, split.data_path))
 
 
 def _is_input_error(verdict: Verdict) -> bool:

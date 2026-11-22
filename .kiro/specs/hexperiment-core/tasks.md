@@ -146,7 +146,7 @@
   - Add a scenario test in `hexperiment/tests/test_canary_scripts.py` next to Scenario 7: a script calls `load()`, discards it, reads the CSV directly, and fits a scaler on train+test. It must end `UNVERIFIED`, never `APPROVED`.
   - _Requirements: 10.7_
 
-- [ ] 20. Check overrides and test-set use-count normalization
+- [x] 20. Check overrides and test-set use-count normalization
   - In `hexperiment/src/hexperiment/verdict.py` and `hexperiment/src/hexperiment/card.py`, record every non-default `[checks]` configuration threshold in `verdict.json` under `checks_overrides` (empty object `{}` when none) and display them in `model_card.md`.
   - In `hexperiment/src/hexperiment/runs.py`, normalize the test-set use-count key so that `data.path` resolves relative to the app folder.
   - Add `hexperiment/constraints.txt` pinning tested exact versions, and add unit tests for `checks_overrides` and normalized path keys.
