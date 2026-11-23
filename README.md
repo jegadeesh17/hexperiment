@@ -8,6 +8,17 @@ Hexperiment is an ML-integrity kit and Kiro power that checks machine-learning t
 
 **Gallery (the two demo cases, step by step):** <https://jegadeesh17.github.io/hexperiment/>
 
+![The gallery's first screen: the hotel app claimed ROC AUC 1.0000, scrambling only the test rows changed 95,309 of 95,457 training rows, and the honest score once the leaks were removed is 0.9096](docs/images/gallery-landing.png)
+
+<details>
+<summary>More screenshots: a case's recorded runs and the benchmark</summary>
+
+![The hotel case page: run 1 is REJECTED at 1.0000 with The Possession and The Peeking Spirit, each run says who made it](docs/images/gallery-case-record.png)
+
+![The benchmark section: 30 of 39 leaky scripts rejected, 0 false alarms in 39 clean twins, with the synthetic-data caveat above the table](docs/images/gallery-benchmark.png)
+
+</details>
+
 ## The problem in plain words
 
 Data leakage means the model saw the exam answers while studying: it scores brilliantly in testing and fails on real data.
