@@ -113,11 +113,12 @@ def with_hashes(snapshot: Snapshot, hashes) -> Snapshot:
     return replace(snapshot, train_row_hash=np.asarray(hashes, dtype=np.uint64))
 
 
-def clean_marker(scrambled=(4, 5)) -> LoadMarker:
+def clean_marker(scrambled=(4, 5), columns=None) -> LoadMarker:
     return LoadMarker(
         mode=ExecMode.CANARY,
         run_id="20251101-093012-a1b2c3",
         scrambled_ids=np.asarray(scrambled, dtype=np.int64),
+        columns=None if columns is None else tuple(columns),
     )
 
 
@@ -445,6 +446,122 @@ def test_snapshots_without_test_columns_go_on_to_the_comparison():
     normal, canary = make_snapshot(), make_snapshot()
     outcome = decide_canary(normal, canary, clean_marker(), ControlRunner(normal), ())
     assert outcome == CanaryOutcome(Outcome.PASSED, Outcome.PASSED, ())
+
+
+# Requirement 10.7: only the columns of the frame hexperiment.load returned are
+# compared; a column the script derived under a new name is never scrambled.
+
+
+def unchanged_columns() -> tuple[Snapshot, Snapshot]:
+    columns = {"age": [3, 4], "hour": [5, 6]}
+    return (
+        with_test_columns(make_snapshot(), columns),
+        with_test_columns(make_snapshot(), columns),
+    )
+
+
+def test_a_marker_without_column_names_compares_every_column():
+    normal, canary = unchanged_columns()
+    marker = clean_marker(columns=None)
+    assert marker.columns is None
+    outcome = decide_canary(normal, canary, marker, ControlRunner(normal), ())
+    (finding,) = outcome.findings
+    assert outcome.outcome is Outcome.NOT_APPLIED
+    assert finding.evidence == {"columns": ["age", "hour"]}
+
+
+def test_a_derived_column_that_is_unchanged_is_skipped():
+    normal, canary = unchanged_columns()
+    marker = clean_marker(columns=["age", "target"])
+    assert _missed_columns(normal, canary, marker.columns) == ["age"]
+    normal = with_test_columns(make_snapshot(), {"age": [3, 4], "hour": [5, 6]})
+    canary = with_test_columns(make_snapshot(), {"age": [7, 8], "hour": [5, 6]})
+    outcome = decide_canary(normal, canary, marker, ControlRunner(normal), ())
+    assert outcome == CanaryOutcome(Outcome.PASSED, Outcome.PASSED, ())
+
+
+def test_a_raw_column_that_is_unchanged_is_still_reported():
+    normal, canary = unchanged_columns()
+    marker = clean_marker(columns=["age", "plan", "target"])
+    outcome = decide_canary(normal, canary, marker, ControlRunner(normal), ())
+    (finding,) = outcome.findings
+    assert outcome.outcome is Outcome.NOT_APPLIED
+    assert finding.evidence == {"columns": ["age"]}
+    assert "hour" not in finding.message
+
+
+def test_an_empty_set_of_raw_columns_compares_no_column():
+    normal, canary = unchanged_columns()
+    assert _missed_columns(normal, canary, ()) == []
+    assert _missed_columns(normal, canary, None) == ["age", "hour"]
+
+
+def test_the_missed_column_fix_names_the_cause():
+    normal, canary = unchanged_columns()
+    outcome = decide_canary(normal, canary, clean_marker(), ControlRunner(normal), ())
+    (finding,) = outcome.findings
+    assert finding.fix == (
+        "build these columns from the frame returned by hexperiment.load() and "
+        "split it with hexperiment.split(df); do not take them from your own read "
+        "of the data file"
+    )
+
+
+def test_a_read_outside_load_still_wins_over_the_column_comparison():
+    normal, canary = unchanged_columns()
+    canary = replace(canary, data_reads_outside_load=1)
+    marker = clean_marker(columns=["age"])
+    outcome = decide_canary(
+        normal, canary, marker, ControlRunner(normal), (), data_file="data.csv"
+    )
+    (finding,) = outcome.findings
+    assert OUTSIDE_LOAD in finding.message
+
+
+@pytest.mark.parametrize("columns", [None, (), ("a", "b"), ("x1", "when", "target")])
+def test_the_load_marker_columns_survive_the_marker_file(tmp_path, columns):
+    marker = replace(clean_marker(), columns=columns)
+    write_load_marker(tmp_path, marker)
+    read = read_load_marker(tmp_path, ExecMode.CANARY, RUN)
+    assert read.columns == columns
+    assert read.scrambled_ids.tolist() == [4, 5]
+
+
+def test_a_marker_file_without_columns_reads_as_none(tmp_path):
+    write_load_marker(tmp_path, clean_marker(columns=["a"]))
+    path = hex_dir(tmp_path, ExecMode.CANARY) / "loaded.json"
+    meta = read_json(path)
+    del meta["columns"]
+    path.write_text(json.dumps(meta), encoding="utf-8")
+    assert read_load_marker(tmp_path, ExecMode.CANARY, RUN).columns is None
+
+
+@pytest.mark.parametrize("bad", ["a", [1], {"a": 1}, 3])
+def test_a_marker_file_with_malformed_columns_is_rejected(tmp_path, bad):
+    write_load_marker(tmp_path, clean_marker(columns=["a"]))
+    path = hex_dir(tmp_path, ExecMode.CANARY) / "loaded.json"
+    meta = read_json(path)
+    meta["columns"] = bad
+    path.write_text(json.dumps(meta), encoding="utf-8")
+    with pytest.raises(ExecutionFailed, match="columns"):
+        read_load_marker(tmp_path, ExecMode.CANARY, RUN)
+
+
+@given(
+    raw=st.sets(st.sampled_from(["a", "b", "c", "d"])),
+    changed=st.sets(st.sampled_from(["a", "b", "c", "d"])),
+)
+def test_missed_columns_are_the_unchanged_raw_columns(raw, changed):
+    names = ["a", "b", "c", "d"]
+    normal = with_test_columns(make_snapshot(), {n: [1, 2] for n in names})
+    canary = with_test_columns(
+        make_snapshot(), {n: [3, 4] if n in changed else [1, 2] for n in names}
+    )
+    expected = [n for n in names if n in raw and n not in changed]
+    assert _missed_columns(normal, canary, raw) == expected
+    assert _missed_columns(normal, canary, None) == [
+        n for n in names if n not in changed
+    ]
 
 
 def test_the_count_of_reads_outside_load_survives_the_snapshot_files(tmp_path):

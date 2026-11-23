@@ -10,7 +10,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from hexperiment import child
+from hexperiment import canary, child
 from hexperiment.child import normalize_path, opens_data_file
 
 
@@ -92,10 +92,12 @@ def test_without_a_watch_nothing_is_counted_and_own_read_is_a_no_op():
 # --- the process ------------------------------------------------------------------
 
 
-def run_child(app: Path, script: str) -> subprocess.CompletedProcess[str]:
+def run_child(
+    app: Path, script: str, bootstrap: str = "import hexperiment.child as c; c.main()"
+) -> subprocess.CompletedProcess[str]:
     (app / "train.py").write_text(textwrap.dedent(script), encoding="utf-8")
     return subprocess.run(
-        [sys.executable, "-c", "import hexperiment.child as c; c.main()", "train.py"],
+        [sys.executable, "-c", bootstrap, "train.py"],
         cwd=app,
         capture_output=True,
         text=True,
@@ -185,6 +187,37 @@ def test_a_missing_or_broken_config_starts_the_script_without_a_watch(app):
     )
     assert done.returncode == 0
     assert done.stdout.strip() == "0"
+
+
+@pytest.mark.parametrize("module", ["tomllib", "runpy", "traceback", "threading"])
+def test_an_app_file_named_like_a_standard_module_does_not_switch_the_watch_off(
+    app, module
+):
+    (app / f"{module}.py").write_text("raise RuntimeError('shadowed')\n")
+    done = run_child(
+        app,
+        """
+        import hexperiment.child as child
+        open("data.csv").close()
+        print(child.data_reads_outside_load())
+        """,
+        bootstrap=canary._BOOTSTRAP,
+    )
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == "1"
+
+
+def test_the_app_folder_is_first_on_the_path_of_the_script_in_the_real_bootstrap(app):
+    done = run_child(
+        app,
+        """
+        import os, sys
+        print(sys.path[0] == os.getcwd(), "" in sys.path)
+        """,
+        bootstrap=canary._BOOTSTRAP,
+    )
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.split() == ["True", "False"]
 
 
 def test_starting_the_bootstrap_loads_neither_pandas_nor_mcp(app):

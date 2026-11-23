@@ -1,0 +1,38 @@
+# Requirement 10.7: a flag for the missing values of x2, derived from the frame that
+# hexperiment.load() returned. The scramble keeps missing values where they are, so
+# the flag never changes, and the canary must not count that as a miss.
+import hexperiment
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+NUMERIC = ["x1", "x2", "x2_missing"]
+CATEGORICAL = ["category"]
+FEATURES = NUMERIC + CATEGORICAL
+
+df = hexperiment.load()
+df["x2_missing"] = df["x2"].isna().astype(float)
+train, test = hexperiment.split(df)
+
+numeric = Pipeline(
+    [("impute", SimpleImputer(strategy="mean")), ("scale", StandardScaler())]
+)
+preprocess = ColumnTransformer(
+    [
+        ("numeric", numeric, NUMERIC),
+        ("category", OneHotEncoder(handle_unknown="ignore"), CATEGORICAL),
+    ]
+)
+model = Pipeline([("prep", preprocess), ("model", LogisticRegression(random_state=0))])
+model.fit(train[FEATURES], train["target"])
+
+hexperiment.audit(
+    train,
+    test,
+    y_score=model.predict_proba(test[FEATURES])[:, 1],
+    features=FEATURES,
+    script=__file__,
+    y_score_train=model.predict_proba(train[FEATURES])[:, 1],
+)

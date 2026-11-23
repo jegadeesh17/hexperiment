@@ -1,0 +1,35 @@
+# Requirement 10.9: the features come from a second read of the data file and are
+# stored under new names, so no audited feature is a column of the loaded frame.
+# Only the watch on the data file shows that these values were never scrambled.
+import hexperiment
+import pandas as pd
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+
+FEATURES = ["first", "second"]
+
+df = hexperiment.load()
+raw = pd.read_csv("data.csv")
+df["first"] = raw["x1"]
+df["second"] = raw["x2"]
+train, test = hexperiment.split(df)
+
+model = Pipeline(
+    [
+        ("impute", SimpleImputer(strategy="mean")),
+        ("scale", StandardScaler()),
+        ("model", LogisticRegression(random_state=0)),
+    ]
+)
+model.fit(train[FEATURES], train["target"])
+
+hexperiment.audit(
+    train,
+    test,
+    y_score=model.predict_proba(test[FEATURES])[:, 1],
+    features=FEATURES,
+    script=__file__,
+    y_score_train=model.predict_proba(train[FEATURES])[:, 1],
+)

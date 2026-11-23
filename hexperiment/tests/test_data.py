@@ -1215,8 +1215,9 @@ def test_load_writes_a_marker_without_ids_outside_canary_mode(
     app = make_app(tmp_path)
     monkeypatch.setenv("HEX_MODE", mode.value)
     monkeypatch.setenv("HEX_RUN_ID", RUN)
-    data.load(app)
-    assert read_load_marker(app, mode, RUN) == LoadMarker(mode, RUN, None)
+    df = data.load(app)
+    expected = LoadMarker(mode, RUN, None, tuple(df.columns))
+    assert read_load_marker(app, mode, RUN) == expected
     assert not (hex_dir(app, mode) / "scrambled_ids.npy").exists()
 
 
@@ -1234,6 +1235,18 @@ def test_load_writes_the_scrambled_ids_in_canary_mode(
     assert marker is not None
     assert marker.scrambled_ids.tolist() == np.flatnonzero(mask).tolist()
     assert len(marker.scrambled_ids) == mask.sum() > 0
+
+
+@pytest.mark.parametrize("mode", ["normal", "canary", "control"])
+def test_load_marker_records_the_column_names_of_the_returned_frame(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    app = make_app(tmp_path, time_column="t")
+    monkeypatch.setenv("HEX_MODE", mode)
+    monkeypatch.setenv("HEX_RUN_ID", RUN)
+    df = data.load(app)
+    marker = read_load_marker(app, ExecMode(mode), RUN)
+    assert marker.columns == tuple(df.columns) == tuple(file_frame(app).columns)
 
 
 def test_load_marker_carries_the_run_id_from_the_environment(

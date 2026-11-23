@@ -17,8 +17,11 @@ readers such as pyarrow) are not seen.
 from __future__ import annotations
 
 import os
+import runpy
 import sys
 import threading
+import tomllib
+import traceback
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -122,16 +125,20 @@ def main() -> None:
     given). ``sys.path[0]`` is the app folder. An exception is printed with the
     traceback of the script alone, then the exit code is 1, as it is for a plain
     run.
-    """
-    import runpy
 
+    Every standard-library module the watch needs is imported at the top of this
+    module, and the bootstrap command removes the working directory from
+    ``sys.path`` before it imports this module, so a file of the app that is named
+    like a standard-library module (``tomllib.py``) cannot stop the watch from
+    being installed.
+    """
     app_dir = os.getcwd()
     name = sys.argv[1]
     data_file = _data_file(app_dir)
     if data_file is not None:
         install(data_file)
     sys.argv = [name]
-    sys.path[0] = app_dir
+    sys.path[:] = [app_dir, *(entry for entry in sys.path if entry != "")]
     try:
         runpy.run_path(name, run_name="__main__")
     except Exception as error:
@@ -164,8 +171,6 @@ def _data_file(app_dir: str) -> str | None:
     An unreadable ``hex.toml`` is not reported here; ``audit`` raises the error
     with its fix when the script reaches it.
     """
-    import tomllib
-
     try:
         with open(Path(app_dir) / _CONFIG_FILENAME, "rb") as handle:
             relative = tomllib.load(handle)["data"]["path"]
@@ -178,8 +183,6 @@ def _data_file(app_dir: str) -> str | None:
 
 def _print_script_traceback(error: BaseException, name: str) -> None:
     """Print ``error`` starting at the first frame of the script ``name``."""
-    import traceback
-
     tb: TracebackType | None = error.__traceback__
     start = tb
     while start is not None and start.tb_frame.f_code.co_filename != name:

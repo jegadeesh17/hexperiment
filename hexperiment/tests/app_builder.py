@@ -42,6 +42,12 @@ threshold = {threshold}
 timeout_seconds = {timeout_seconds}
 """
 
+SPLIT_TOML = """
+[split]
+time_column = "{time_column}"
+"""
+
+TIME_START = "2024-01-01 00:00:00"
 
 def shared_frame(n_rows: int = N_ROWS, seed: int = DATA_SEED) -> pd.DataFrame:
     """The CSV every scenario reads.
@@ -70,8 +76,13 @@ def build_app(
     *,
     threshold: float = THRESHOLD,
     timeout_seconds: float = 120,
+    time_column: str | None = None,
 ) -> Path:
-    """Write the app of ``scenario`` into ``root/<scenario>`` and return its folder."""
+    """Write the app of ``scenario`` into ``root/<scenario>`` and return its folder.
+
+    With ``time_column`` the app splits by time: the CSV gets that column, one
+    timestamp per row in file order, one hour apart.
+    """
     templates = SCRIPTS_DIR / scenario
     sources = sorted(templates.glob(f"*.py{TEMPLATE_SUFFIX}"))
     if not sources:
@@ -81,8 +92,13 @@ def build_app(
     toml = HEX_TOML.format(
         scenario=scenario, threshold=threshold, timeout_seconds=timeout_seconds
     )
+    frame = shared_frame()
+    if time_column is not None:
+        toml += SPLIT_TOML.format(time_column=time_column)
+        times = pd.date_range(TIME_START, periods=len(frame), freq="h")
+        frame[time_column] = times.strftime("%Y-%m-%d %H:%M:%S")
     (app / "hex.toml").write_text(toml, encoding="utf-8")
-    shared_frame().to_csv(app / "data.csv", index=False)
+    frame.to_csv(app / "data.csv", index=False)
     for source in sources:
         text = source.read_text(encoding="utf-8")
         (app / source.name.removesuffix(TEMPLATE_SUFFIX)).write_text(

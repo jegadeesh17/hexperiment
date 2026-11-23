@@ -258,7 +258,8 @@ def load(app_dir: str | os.PathLike[str] | None = None) -> pd.DataFrame:
         scrambled_ids = df.index.to_numpy(dtype=np.int64)[mask]
         df = scramble_test_rows(df, mask, config.split.time_column, config.split.seed)
     if run_id is not None:
-        write_load_marker(directory, LoadMarker(mode, run_id, scrambled_ids))
+        columns = tuple(str(name) for name in df.columns)
+        write_load_marker(directory, LoadMarker(mode, run_id, scrambled_ids, columns))
     df.attrs[ATTRS_KEY] = {"app_dir": str(directory), "cutoff": cutoff}
     return df
 

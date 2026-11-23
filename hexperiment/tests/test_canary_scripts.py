@@ -560,6 +560,90 @@ class TestLookupRead:
         assert (run.app / "lookup.csv").is_file()
 
 
+class TestDerivedHour:
+    """Scenario 4d: a feature built from the time column is not a scramble miss."""
+
+    @pytest.fixture(scope="class")
+    @classmethod
+    def run(cls, tmp_path_factory) -> ScenarioRun:
+        return run_scenario(tmp_path_factory, "derived_hour", time_column="when")
+
+    def test_the_run_is_approved_with_exit_code_0(self, run):
+        assert run.code == 0
+        assert run.verdict["status"] == "APPROVED"
+        assert errors_of(run.verdict) == []
+
+    def test_the_canary_was_applied_and_passed(self, run):
+        assert outcome_of(run.verdict, "canary") == "passed"
+        assert outcome_of(run.verdict, "determinism") == "passed"
+        assert findings_of(run.verdict, "canary") == []
+        assert run.scrambled_rows > 0
+
+    def test_the_run_split_by_time(self, run):
+        config = (run.app / "hex.toml").read_text(encoding="utf-8")
+        assert 'time_column = "when"' in config
+
+
+class TestMissingFlag:
+    """Scenario 4e: a flag for missing values never changes and is not a miss."""
+
+    @pytest.fixture(scope="class")
+    @classmethod
+    def run(cls, tmp_path_factory) -> ScenarioRun:
+        return run_scenario(tmp_path_factory, "missing_flag")
+
+    def test_the_run_is_approved_with_exit_code_0(self, run):
+        assert run.code == 0
+        assert run.verdict["status"] == "APPROVED"
+        assert errors_of(run.verdict) == []
+
+    def test_the_canary_was_applied_and_passed(self, run):
+        assert outcome_of(run.verdict, "canary") == "passed"
+        assert findings_of(run.verdict, "canary") == []
+        assert run.scrambled_rows > 0
+
+
+class TestRenamedRead:
+    """Scenario 7h: features from a second read, stored under new names."""
+
+    @pytest.fixture(scope="class")
+    @classmethod
+    def run(cls, tmp_path_factory) -> ScenarioRun:
+        return run_scenario(tmp_path_factory, "renamed_read")
+
+    def test_the_run_is_unverified_and_never_approved(self, run):
+        assert run.code == 3
+        assert run.verdict["status"] == "UNVERIFIED"
+        assert errors_of(run.verdict) == []
+
+    def test_the_read_outside_load_warning_is_what_stops_the_canary(self, run):
+        assert outcome_of(run.verdict, "canary") == "not applied"
+        assert outcome_of(run.verdict, "determinism") == "skipped"
+        (warning,) = findings_of(run.verdict, "canary")
+        assert OUTSIDE_LOAD in warning["message"]
+        assert "scramble did not reach" not in warning["message"]
+
+
+class TestAppLocalStandardModule:
+    """An app file named ``tomllib.py`` does not switch the watch off."""
+
+    @pytest.fixture(scope="class")
+    @classmethod
+    def run(cls, tmp_path_factory) -> ScenarioRun:
+        app = build_app(tmp_path_factory.mktemp("shadow"), "side_read")
+        (app / "tomllib.py").write_text("raise RuntimeError('shadowed')\n")
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = main(["run", str(app)])
+        return ScenarioRun(app, code, out.getvalue(), err.getvalue(), 0.0)
+
+    def test_the_side_read_is_still_seen(self, run):
+        assert run.code == 3
+        assert run.verdict["status"] == "UNVERIFIED"
+        (warning,) = findings_of(run.verdict, "canary")
+        assert OUTSIDE_LOAD in warning["message"]
+
+
 class TestConstantColumn:
     """Scenario 4b: a constant feature cannot be scrambled, and is not a miss."""
 

@@ -24,7 +24,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from importlib.metadata import version as package_version
 from pathlib import Path
@@ -114,6 +114,10 @@ class LoadMarker:
     mode: ExecMode
     run_id: str
     scrambled_ids: NDArray[np.int64] | None  # ids only in canary mode
+    # The column names of the frame ``hexperiment.load`` returned. ``None`` (a
+    # marker written without them) means every audited column is compared
+    # (Requirement 10.7).
+    columns: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -288,7 +292,7 @@ def decide_canary(
     # one value, so such a column with equal values shows that the audited frames
     # did not come from the scrambled load, and the comparison below would prove
     # nothing.
-    missed = _missed_columns(normal, canary)
+    missed = _missed_columns(normal, canary, marker.columns)
     if missed:
         return CanaryOutcome(
             Outcome.NOT_APPLIED, Outcome.SKIPPED, (_scramble_missed_warning(missed),)
@@ -442,13 +446,19 @@ def _side_reads(*snapshots: Snapshot) -> int:
     return max(s.data_reads_outside_load for s in snapshots)
 
 
-def _missed_columns(normal: Snapshot, canary: Snapshot) -> list[str]:
+def _missed_columns(
+    normal: Snapshot, canary: Snapshot, raw_columns: Collection[str] | None = None
+) -> list[str]:
     """The test columns that the scramble should have changed but did not.
 
     A column is missed when both snapshots hold it, it has at least two distinct
     non-missing test values in ``normal``, and its hashes are equal on every test
     row id present in both snapshots. Columns absent from either snapshot, and
-    snapshots with no test row id in common, give nothing to compare.
+    snapshots with no test row id in common, give nothing to compare. With
+    ``raw_columns`` (the columns of the frame ``hexperiment.load`` returned) only
+    those columns are compared: a column the script derived under a new name is
+    not scrambled by the load, so its equal values prove nothing. ``None`` compares
+    every column.
     """
     _, in_normal, in_canary = np.intersect1d(
         normal.test_ids, canary.test_ids, return_indices=True
@@ -460,6 +470,8 @@ def _missed_columns(normal: Snapshot, canary: Snapshot) -> list[str]:
     for position, name in enumerate(normal.test_columns):
         other = canary_position.get(name)
         if other is None or not normal.test_column_varies[position]:
+            continue
+        if raw_columns is not None and name not in raw_columns:
             continue
         before = normal.test_column_hashes[in_normal, position]
         after = canary.test_column_hashes[in_canary, other]
@@ -580,8 +592,9 @@ def _scramble_missed_warning(columns: Sequence[str]) -> Finding:
         "the canary test was not applied: the scramble did not reach the audited "
         f"frames, because {_name_columns(columns)} have the same values in the "
         "normal and the canary execution",
-        "build train and test from the frame returned by hexperiment.load() and "
-        "split it with hexperiment.split(df); do not read the data file yourself",
+        "build these columns from the frame returned by hexperiment.load() and "
+        "split it with hexperiment.split(df); do not take them from your own read "
+        "of the data file",
         {"columns": list(columns)},
     )
 
@@ -872,7 +885,9 @@ def write_load_marker(app_dir: Path, marker: LoadMarker) -> None:
     """Record that an execution loaded its data with ``hexperiment.load``.
 
     ``scrambled_ids.npy`` is written only when the marker carries ids (canary
-    mode); ``loaded.json`` comes last and records how many ids to expect.
+    mode); ``loaded.json`` comes last and records how many ids to expect. The
+    column names of the loaded frame go into ``loaded.json`` when the marker has
+    them.
     """
     directory = _prepare(app_dir, marker.mode)
     ids = marker.scrambled_ids
@@ -882,15 +897,15 @@ def write_load_marker(app_dir: Path, marker: LoadMarker) -> None:
             np.asarray(ids, dtype=np.int64),
             allow_pickle=False,
         )
-    _write_json(
-        directory / _MARKER_FILE,
-        {
-            "format_version": FORMAT_VERSION,
-            "mode": marker.mode.value,
-            "n_scrambled": None if ids is None else len(ids),
-            "run_id": marker.run_id,
-        },
-    )
+    payload: dict[str, Any] = {
+        "format_version": FORMAT_VERSION,
+        "mode": marker.mode.value,
+        "n_scrambled": None if ids is None else len(ids),
+        "run_id": marker.run_id,
+    }
+    if marker.columns is not None:
+        payload["columns"] = list(marker.columns)
+    _write_json(directory / _MARKER_FILE, payload)
 
 
 def read_load_marker(app_dir: Path, mode: ExecMode, run_id: str) -> LoadMarker | None:
@@ -908,8 +923,9 @@ def read_load_marker(app_dir: Path, mode: ExecMode, run_id: str) -> LoadMarker |
         expected = meta["n_scrambled"]
     except KeyError as error:
         raise _corrupt(path, f"key {error} is missing") from None
+    columns = _marker_columns(meta, path)
     if expected is None:
-        return LoadMarker(mode=mode, run_id=run_id, scrambled_ids=None)
+        return LoadMarker(mode=mode, run_id=run_id, scrambled_ids=None, columns=columns)
     ids_path = directory / _SCRAMBLED_FILE
     try:
         ids = np.load(ids_path, allow_pickle=False)
@@ -921,7 +937,18 @@ def read_load_marker(app_dir: Path, mode: ExecMode, run_id: str) -> LoadMarker |
         raise _corrupt(
             ids_path, f"it does not hold the {expected} ids that loaded.json announced"
         )
-    return LoadMarker(mode=mode, run_id=run_id, scrambled_ids=ids)
+    return LoadMarker(mode=mode, run_id=run_id, scrambled_ids=ids, columns=columns)
+
+
+def _marker_columns(meta: dict[str, Any], path: Path) -> tuple[str, ...] | None:
+    """The recorded column names of a marker; ``None`` when it has none."""
+    value = meta.get("columns")
+    if value is None:
+        return None
+    try:
+        return tuple(_string_list(value))
+    except TypeError:
+        raise _corrupt(path, "columns is not a list of column names") from None
 
 
 def write_result(app_dir: Path, result: DataAuditResult, run_id: str | None) -> None:
@@ -1045,8 +1072,14 @@ _STDERR_TAIL_LINES = 40
 _STDERR_READ_BYTES = 1 << 20
 
 # Starts the script through ``hexperiment.child``, which watches reads of the data
-# file (Requirement 10.9) and then behaves like ``python train.py``.
-_BOOTSTRAP = "import hexperiment.child as child; child.main()"
+# file (Requirement 10.9) and then behaves like ``python train.py``. The working
+# directory (``''``, which ``-c`` puts first) is taken off ``sys.path`` before
+# anything is imported, so an app file named like a standard-library module cannot
+# replace the module the watch needs; ``child.main`` puts the app folder back.
+_BOOTSTRAP = (
+    "import sys; sys.path[:] = [p for p in sys.path if p]; "
+    "import hexperiment.child as child; child.main()"
+)
 
 
 def run_train_script(
