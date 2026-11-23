@@ -1,8 +1,9 @@
 """The bootstrap that starts ``train.py`` and watches its reads of the data file.
 
 ``canary.run_train_script`` starts ``train.py`` through ``main``. Before the
-script's first line, ``main`` installs an audit hook that counts the opens of the
-app's data file. ``data.load`` marks its own read, so what is left is a read made
+script's first line, ``main`` installs an audit hook that counts the opens,
+copies, links and renames of the app's data file. ``data.load`` marks its own
+read, so what is left is a read made
 outside ``hexperiment.load``: statistics computed from such a copy are not
 scrambled in the canary execution, so the canary cannot check them
 (Requirement 10.9). ``audit`` writes the count into the snapshot.
@@ -17,15 +18,37 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import TracebackType
 from typing import Any
 
 _CONFIG_FILENAME = "hex.toml"
 _OPEN_EVENT = "open"
+# Events whose first argument is a source path that is read, copied, linked or
+# moved. On this Python ``os.replace`` raises ``os.rename``, and ``shutil.copy2``
+# raises ``_winapi.CopyFile2`` on Windows (``shutil.copyfile`` elsewhere).
+_SOURCE_EVENTS = frozenset(
+    {
+        _OPEN_EVENT,
+        "shutil.copyfile",
+        "_winapi.CopyFile2",
+        "os.link",
+        "os.symlink",
+        "os.rename",
+        "os.replace",
+    }
+)
+
+
+class _ThreadState(threading.local):
+    """The hook state of one thread; every thread starts from zero."""
+
+    own_reads: int = 0  # nesting depth of ``own_read``
+    inside_hook: bool = False
 
 
 @dataclass(slots=True)
@@ -34,8 +57,7 @@ class _Watch:
 
     data_file: str  # resolved and case-normalised
     outside_reads: int = 0
-    own_reads: int = 0  # nesting depth of ``own_read``
-    inside_hook: bool = False
+    threads: _ThreadState = field(default_factory=_ThreadState)
 
 
 _watch: _Watch | None = None
@@ -47,7 +69,7 @@ def normalize_path(path: str | os.PathLike[str] | bytes) -> str:
 
 
 def opens_data_file(path: object, data_file: str) -> bool:
-    """Whether an ``open`` event for ``path`` opens ``data_file``.
+    """Whether the source path of an open, copy, link or move is ``data_file``.
 
     ``data_file`` is already normalised (``normalize_path``). A ``str``, ``bytes``
     or path-like ``path`` is resolved against the working directory; an integer
@@ -73,11 +95,12 @@ def own_read() -> Iterator[None]:
     if watch is None:
         yield
         return
-    watch.own_reads += 1
+    state = watch.threads
+    state.own_reads += 1
     try:
         yield
     finally:
-        watch.own_reads -= 1
+        state.own_reads -= 1
 
 
 def install(data_file: str) -> None:
@@ -118,16 +141,19 @@ def main() -> None:
 
 def _make_hook(watch: _Watch) -> Any:
     def hook(event: str, args: tuple[Any, ...]) -> None:
-        if event != _OPEN_EVENT or watch.inside_hook or watch.own_reads:
+        if event not in _SOURCE_EVENTS:
             return
-        watch.inside_hook = True
+        state = watch.threads
+        if state.inside_hook or state.own_reads:
+            return
+        state.inside_hook = True
         try:
             if args and opens_data_file(args[0], watch.data_file):
                 watch.outside_reads += 1
         except Exception:
             pass  # a hook must never break the script
         finally:
-            watch.inside_hook = False
+            state.inside_hook = False
 
     return hook
 

@@ -8,6 +8,7 @@ temporary folder and runs ``cli.main`` once, in this process, which starts
 import contextlib
 import io
 import json
+import os
 import runpy
 import time
 from dataclasses import dataclass
@@ -494,6 +495,44 @@ class TestCopyRead:
     def test_the_canary_was_not_applied_because_the_copy_was_made_from_the_file(
         self, run
     ):
+        assert outcome_of(run.verdict, "canary") == "not applied"
+        (warning,) = findings_of(run.verdict, "canary")
+        assert "data.csv was opened outside hexperiment.load" in warning["message"]
+
+
+class TestCopy2Read:
+    """Scenario 7f: the data file is copied with ``shutil.copy2``, the copy is read."""
+
+    @pytest.fixture(scope="class")
+    @classmethod
+    def run(cls, tmp_path_factory) -> ScenarioRun:
+        return run_scenario(tmp_path_factory, "copy2_read")
+
+    def test_the_run_is_unverified_and_the_canary_was_not_applied(self, run):
+        assert run.code == 3
+        assert run.verdict["status"] == "UNVERIFIED"
+        assert outcome_of(run.verdict, "canary") == "not applied"
+        (warning,) = findings_of(run.verdict, "canary")
+        assert "data.csv was opened outside hexperiment.load" in warning["message"]
+
+
+class TestLinkRead:
+    """Scenario 7g: the data file is hard-linked and the link is read."""
+
+    @pytest.fixture(scope="class")
+    @classmethod
+    def run(cls, tmp_path_factory) -> ScenarioRun:
+        probe = tmp_path_factory.mktemp("link_probe")
+        (probe / "a").write_text("x", encoding="utf-8")
+        try:
+            os.link(probe / "a", probe / "b")
+        except (OSError, NotImplementedError):
+            pytest.skip("hard links are not available")
+        return run_scenario(tmp_path_factory, "link_read")
+
+    def test_the_run_is_unverified_and_the_canary_was_not_applied(self, run):
+        assert run.code == 3
+        assert run.verdict["status"] == "UNVERIFIED"
         assert outcome_of(run.verdict, "canary") == "not applied"
         (warning,) = findings_of(run.verdict, "canary")
         assert "data.csv was opened outside hexperiment.load" in warning["message"]

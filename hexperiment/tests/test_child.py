@@ -196,3 +196,81 @@ def test_starting_the_bootstrap_loads_neither_pandas_nor_mcp(app):
         """,
     )
     assert done.stdout.strip() == "[]"
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        "shutil.copyfile",
+        "_winapi.CopyFile2",
+        "os.link",
+        "os.symlink",
+        "os.rename",
+        "os.replace",
+    ],
+)
+def test_a_copy_link_or_move_of_the_data_file_is_counted(app, event):
+    done = run_child(
+        app,
+        f"""
+        import hexperiment.child as child
+        sys_audit = __import__("sys").audit
+        sys_audit("other.event", "data.csv", "copy.csv")
+        print(child.data_reads_outside_load())
+        sys_audit({event!r}, "other.csv", "copy.csv")
+        print(child.data_reads_outside_load())
+        sys_audit({event!r}, "data.csv", "copy.csv")
+        print(child.data_reads_outside_load())
+        sys_audit({event!r}, 3, "copy.csv")
+        sys_audit({event!r}, None)
+        sys_audit({event!r})
+        print(child.data_reads_outside_load())
+        """,
+    )
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.split() == ["0", "0", "1", "1"]
+
+
+def test_the_real_calls_that_copy_link_or_move_the_data_file_are_counted(app):
+    done = run_child(
+        app,
+        """
+        import os, shutil
+        import hexperiment.child as child
+        counts = []
+        shutil.copy2("data.csv", "c1.csv")
+        counts.append(child.data_reads_outside_load())
+        shutil.copyfile("data.csv", "c2.csv")
+        counts.append(child.data_reads_outside_load())
+        os.link("data.csv", "l.csv")
+        counts.append(child.data_reads_outside_load())
+        os.replace("data.csv", "moved.csv")
+        counts.append(child.data_reads_outside_load())
+        print([b > a for a, b in zip([0] + counts, counts)])
+        """,
+    )
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == "[True, True, True, True]"
+
+
+def test_an_open_in_another_thread_while_load_runs_is_counted(app):
+    done = run_child(
+        app,
+        """
+        import threading
+        import hexperiment.child as child
+
+        def read_in_thread():
+            open("data.csv").close()
+
+        with child.own_read():
+            worker = threading.Thread(target=read_in_thread)
+            worker.start()
+            worker.join()
+            own = child.data_reads_outside_load()
+            open("data.csv").close()
+            print(own, child.data_reads_outside_load() == own)
+        """,
+    )
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.split() == ["1", "True"]
