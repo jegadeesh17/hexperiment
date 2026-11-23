@@ -129,7 +129,7 @@ Not measured:
 
 Source: Kapoor and Narayanan, Leakage and the reproducibility crisis in machine-learning-based science, Patterns 4(9), 100804, 2023, doi:10.1016/j.patter.2023.100804
 
-Run with hexperiment 0.1.0, Python 3.13.2 and scikit-learn 1.9.1 on 2026-11-13: 78 runs.
+Run with hexperiment 0.1.0, Python 3.13.2 and scikit-learn 1.9.1 on 2026-11-23: 78 runs.
 
 <!-- END BENCHMARK TABLE -->
 
