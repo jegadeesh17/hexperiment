@@ -184,6 +184,21 @@
   - Result: `benchmark_section()` now writes the fixed caveat paragraph (constant `BENCHMARK_CAVEAT`) right after the intro sentence, and `_case_item` sets the link's `aria-label` to `Open the case file: {name}`. Two gallery tests pinned the old label and now pin the new one; one new test checks the caveat paragraph appears once, after the intro and before the table. `-k gallery`: 603 passed. Full suite (`hexperiment/tests apps/tests`): 3581 passed, 1 skipped. Ruff: all checks passed. The gallery built to a folder outside the repository with exit code 0; `apps/` has no changes.
   - Verify: `.venv/Scripts/python -m pytest hexperiment/tests -q -k gallery`, then `.venv/Scripts/python -m ruff check hexperiment`, then build the gallery to a folder outside the repository with the command of `.github/workflows/pages.yml` and confirm exit code 0.
 
+- [ ] 15b. Who made each run, and the benchmark totals
+  - Run notes (Requirement 3.8). In `hexperiment/src/hexperiment/gallery/sources.py`, read an optional `runs/<run id>/note.txt` for every run in the history (UTF-8, trimmed, exactly one non-empty line of at most 300 characters; otherwise `HexInputError` naming the file, so the command exits with code 2). Carry the notes in `AppSource` (for example `notes: tuple[str | None, ...]`, aligned with `history`). In `pages.py` `_run_item`, write `<p class="run-note">{note}</p>` after the `run-meta` paragraph when the run has a note. In `assets/gallery.css`, style `.run-note` like `.run-meta` (same muted colour and size). `load_history` and every other reader of run folders must ignore `note.txt`.
+  - Write these eight notes, one line each, with LF endings:
+    - `apps/hotel-cancellations/runs/20261122-132039-ec97c0/note.txt`: `Made by the ghost hunter's first run_audit call, on the haunted script.`
+    - `apps/hotel-cancellations/runs/20261122-132145-0cd94e/note.txt`: `Made by the save hook after the ghost hunter edited train.py.`
+    - `apps/hotel-cancellations/runs/20261122-132210-dec65b/note.txt`: `Made by the ghost hunter's second run_audit call, on its own fix.`
+    - `apps/hotel-cancellations/runs/20261122-132422-bfb52c/note.txt`: `Made by hand afterwards, on the honest reference script kept in the repository.`
+    - the same four texts, in the same order, for `apps/flight-delays/runs/20261122-131518-e8db31`, `20261122-131620-2ed225`, `20261122-131642-1933a1` and `20261122-131840-3eec70`.
+    Do not change any other file under `apps/*/runs/` or `apps/*/verdict.json`.
+  - The fix section (design.md, the case page, step 4): the sentence becomes "`haunted/train.py` against `train.py` (the honest script kept in the repository): N lines removed, M lines added."
+  - Benchmark totals (Requirement 6.2). In `gallery/benchmark.py` `benchmark_section()`, after the intro sentence and before the caveat, add a paragraph "<rejected> of <leaky scripts> leaky scripts rejected; <false alarms> false alarms in <clean scripts> clean twins." with `rejected` and `leaky scripts` summed over `benchmark.mechanisms` (`rejected`, `scripts`) and the clean numbers from `Benchmark.clean_scripts` and `false_alarms`; "1 false alarm" in the singular.
+  - Tests: a note is shown under its run and escaped; a run without a note shows none; each refusal (not UTF-8, empty, two lines, over 300 characters) exits with code 2 and names the file; the history reader ignores `note.txt`; the totals sentence for the committed `results.json` reads "30 of 39 leaky scripts rejected; 0 false alarms in 39 clean twins." and the singular form; the fix sentence. Update tests that assert the old fix sentence or the exact `AppSource` fields.
+  - _Requirements: 3.3, 3.8, 6.2_
+  - Verify: `.venv/Scripts/python -m pytest hexperiment/tests apps/tests -q`, `.venv/Scripts/python -m ruff check hexperiment apps`, then build the gallery with the command of `.github/workflows/pages.yml` into a folder outside the repository and confirm exit code 0.
+
 - [ ] 16. **Owner:** the workflow on GitHub
   - The builder cannot do this: it is under `.github/` and needs the hosted service. The workflow file is already committed.
   - Confirm that `hexperiment/benchmark/results.json` exists; once it does, edit the build step of `.github/workflows/pages.yml` to add `--benchmark hexperiment/benchmark/results.json` (task 14's test fails until you do). Commit the change.

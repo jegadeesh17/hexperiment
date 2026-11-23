@@ -69,6 +69,7 @@ This requirement was rewritten after the owner's design review on 2026-11-12. Th
 5. THE case page SHALL link the copied `verdict.json` of the last run.
 6. THE case page SHALL show, next to its name, the score and status of the app's first run and of its last run, as on the cases screen of the landing page.
 7. Text between backticks in finding texts SHALL be shown as code.
+8. WHEN a run folder holds a file `note.txt` THEN the case page SHALL show its text, escaped, under that run's creation time, so a reader knows who or what made the run. IF `note.txt` is not UTF-8, is empty after trimming, holds more than one line, or is longer than 300 characters THEN the command SHALL exit with code `2` and name the file. A run folder without `note.txt` SHALL be shown as before.
 
 ### Requirement 4: Safe and portable output
 
@@ -101,7 +102,7 @@ This requirement was rewritten after the owner's design review on 2026-11-12. Th
 #### Acceptance Criteria
 
 1. THE benchmark results file SHALL be in the format of `hexperiment-benchmark`, Requirement 4 (`format` `"hexperiment-benchmark/1"`). THE gallery SHALL validate every key it shows and ignore keys it does not show.
-2. THE benchmark section SHALL show one table row per mechanism, grouped by leakage type in file order: the leakage type (ID and the paper's name), the mechanism, the ghosts designed to catch it (or "No check is designed for it"), "rejected N of M" with the rate in percent, and the ghosts or checks that rejected it with their counts. A last row SHALL show the clean twins: "N false alarms in M scripts" with the rate. Below the intro sentence it SHALL state, in fixed copy, that the data is synthetic and that the cases were written by the authors of the checks. Below the table it SHALL list every not-measured leakage type with its reason, and state the taxonomy citation, the `hexperiment`, Python and scikit-learn versions, the date of the run and the number of runs.
+2. THE benchmark section SHALL show one table row per mechanism, grouped by leakage type in file order: the leakage type (ID and the paper's name), the mechanism, the ghosts designed to catch it (or "No check is designed for it"), "rejected N of M" with the rate in percent, and the ghosts or checks that rejected it with their counts. A last row SHALL show the clean twins: "N false alarms in M scripts" with the rate. Below the intro sentence it SHALL state the totals in one sentence: "<rejected> of <leaky scripts> leaky scripts rejected; <false alarms> false alarms in <clean scripts> clean twins." ("1 false alarm" in the singular), with the numbers summed from the file. It SHALL then state, in fixed copy, that the data is synthetic and that the cases were written by the authors of the checks. Below the table it SHALL list every not-measured leakage type with its reason, and state the taxonomy citation, the `hexperiment`, Python and scikit-learn versions, the date of the run and the number of runs.
 3. IF the benchmark results file cannot be read, does not match the format, or has `complete` set to false THEN the command SHALL exit with code `2` and name the first problem.
 
 ### Requirement 7: Publishing the example gallery
