@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - A leak benchmark of 13 mechanisms from the Kapoor and Narayanan taxonomy, on synthetic data with three models, with its results table.
 - Non-default check thresholds are recorded in `verdict.json` and the model card.
 - A constraints file with the tested dependency versions.
+- The gallery shows who made each recorded run (from an optional one-line `note.txt` in the run folder) and the benchmark totals above its table.
 
 ### Changed
 
