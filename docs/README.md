@@ -6,6 +6,7 @@ Where to find what in Hexperiment.
 |---|---|
 | [../README.md](../README.md) | What Hexperiment is, how to install and run it, its limits, and how it was built |
 | [../LICENSE](../LICENSE) | MIT licence |
+| [../CHANGELOG.md](../CHANGELOG.md) | What was added, changed and fixed |
 | [KIRO.md](KIRO.md) | How Kiro was used: the spec-first build, the Kiro features in the product, and what we learned about Kiro |
 | [DECISIONS.md](DECISIONS.md) | Decisions taken during the build and why |
 | [../hexperiment/benchmark/README.md](../hexperiment/benchmark/README.md) | The leak benchmark: method, results and misses |
