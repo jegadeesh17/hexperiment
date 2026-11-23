@@ -51,6 +51,7 @@ from hexperiment.models import (
 )
 
 FEATURES = ["age", "plan"]
+OUTSIDE_LOAD = "data.csv was opened, copied, linked or renamed outside hexperiment.load"
 
 
 def make_frame(ids=(0, 1, 2, 3, 4)) -> pd.DataFrame:
@@ -495,7 +496,7 @@ def test_a_read_outside_load_in_any_execution_means_not_applied():
         assert outcome.determinism is Outcome.SKIPPED
         (finding,) = outcome.findings
         assert finding.severity is Severity.WARNING
-        assert "data.csv was opened outside hexperiment.load" in finding.message
+        assert OUTSIDE_LOAD in finding.message
         assert finding.evidence == {"data_file": "data.csv", "reads": 1}
         assert control.calls == 0
         assert_unwaivable(outcome)
@@ -508,7 +509,7 @@ def test_a_read_outside_load_wins_over_missed_columns_and_changed_rows():
     control = ControlRunner(normal)
     outcome = decide_canary(normal, canary, clean_marker(), control, ())
     (finding,) = outcome.findings
-    assert "opened outside hexperiment.load" in finding.message
+    assert "linked or renamed outside hexperiment.load" in finding.message
     assert control.calls == 0
 
 

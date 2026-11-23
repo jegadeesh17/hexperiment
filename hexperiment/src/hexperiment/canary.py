@@ -165,8 +165,8 @@ def build_snapshot(
     also holds one hash per test row for the ``target`` (when named) and each
     feature, without the ``time_column``; these show whether the scramble reached
     the audited test frame (Requirement 10.7). ``data_reads_outside_load`` is the
-    count of opens of the data file outside ``hexperiment.load`` (Requirement
-    10.9).
+    count of opens, copies, links and renames of the data file outside
+    ``hexperiment.load`` (Requirement 10.9).
     """
     train_ids = _row_ids(train, "train")
     test_ids = _row_ids(test, "test")
@@ -588,9 +588,9 @@ def _scramble_missed_warning(columns: Sequence[str]) -> Finding:
 
 def _side_read_warning(data_file: str, reads: int) -> Finding:
     return _warning(
-        f"the canary test was not applied: {data_file} was opened outside "
-        "hexperiment.load, so statistics computed from a copy read outside "
-        "hexperiment.load cannot be checked by the scramble",
+        f"the canary test was not applied: {data_file} was opened, copied, "
+        "linked or renamed outside hexperiment.load, so statistics computed from "
+        "a copy read outside hexperiment.load cannot be checked by the scramble",
         "get every value from the frame returned by hexperiment.load() and split "
         "it with hexperiment.split(df); do not read or copy the data file yourself",
         {"data_file": data_file, "reads": reads},

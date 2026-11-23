@@ -180,8 +180,9 @@
   - Result: the hook in `child.py` now also counts `shutil.copyfile`, `_winapi.CopyFile2`, `os.link`, `os.symlink`, `os.rename` and `os.replace` when `args[0]` resolves to the data file. The re-entry flag and own-read depth live in a `threading.local`. Probe on Python 3.13.2 (Windows): `shutil.copy2` raises `_winapi.CopyFile2` (not `shutil.copyfile`), and `os.replace` raises `os.rename`; `os.link`, `os.symlink` and `os.rename` carry the source in `args[0]`. New scenarios `copy2_read` and `link_read` end `UNVERIFIED`; unit tests cover each event, a different source, non-path arguments, real calls, and an open in a second thread during `own_read`. 3548 tests pass (1 skipped), ruff reports no problems. Not tested: an open in another thread while the hook is busy (the hook runs to completion before any other hook, so the case cannot be staged from a script).
   - _Requirements: 10.9_
 
-- [ ] 25. Name every watched action in the read-outside-load warning
+- [x] 25. Name every watched action in the read-outside-load warning
   - In `hexperiment/src/hexperiment/canary.py`, `_side_read_warning` says the data file "was opened outside hexperiment.load", but the count also covers copies, links and renames (task 24). Change the message to "{data_file} was opened, copied, linked or renamed outside hexperiment.load", and keep the rest of the message, the fix text and the `details` unchanged.
   - In the `build_snapshot` docstring, describe `data_reads_outside_load` as the count of opens, copies, links and renames of the data file outside `hexperiment.load`.
   - Update the assertions in `hexperiment/tests/test_canary.py` and `hexperiment/tests/test_canary_scripts.py` that match the old phrase to the new one.
+  - Result: `_side_read_warning` now says "{data_file} was opened, copied, linked or renamed outside hexperiment.load" (fix text and `details` unchanged), the `build_snapshot` docstring describes the count as opens, copies, links and renames, and the assertions in both test files use the new phrase. 301 tests in the two canary files pass, ruff reports no problems.
   - _Requirements: 10.9_

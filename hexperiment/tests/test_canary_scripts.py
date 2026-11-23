@@ -25,6 +25,8 @@ from hexperiment.cli import main
 from hexperiment.config import ChecksConfig
 from hexperiment.models import Status, Verdict
 
+OUTSIDE_LOAD = "data.csv was opened, copied, linked or renamed outside hexperiment.load"
+
 
 @dataclass(frozen=True)
 class ScenarioRun:
@@ -413,7 +415,7 @@ class TestLoadBypass:
         (warning,) = findings_of(run.verdict, "canary")
         assert warning["severity"] == "warning"
         assert warning["ghost"] is None
-        assert "data.csv was opened outside hexperiment.load" in warning["message"]
+        assert OUTSIDE_LOAD in warning["message"]
         assert warning["evidence"]["data_file"] == "data.csv"
 
     def test_the_data_reader_hint_is_not_raised_for_the_csv_module(self, run):
@@ -444,7 +446,7 @@ class TestPartialLoadBypass:
         (warning,) = findings_of(run.verdict, "canary")
         assert warning["severity"] == "warning"
         assert warning["ghost"] is None
-        assert "data.csv was opened outside hexperiment.load" in warning["message"]
+        assert OUTSIDE_LOAD in warning["message"]
         assert warning["evidence"]["data_file"] == "data.csv"
         assert warning["evidence"]["reads"] > 0
 
@@ -472,7 +474,7 @@ class TestSideRead:
     def test_the_warning_names_the_data_file(self, run):
         (warning,) = findings_of(run.verdict, "canary")
         assert warning["severity"] == "warning"
-        assert "data.csv was opened outside hexperiment.load" in warning["message"]
+        assert OUTSIDE_LOAD in warning["message"]
 
     def test_the_frames_were_scrambled_so_only_the_watch_gives_it_away(self, run):
         assert run.scrambled_rows > 0
@@ -497,7 +499,7 @@ class TestCopyRead:
     ):
         assert outcome_of(run.verdict, "canary") == "not applied"
         (warning,) = findings_of(run.verdict, "canary")
-        assert "data.csv was opened outside hexperiment.load" in warning["message"]
+        assert OUTSIDE_LOAD in warning["message"]
 
 
 class TestCopy2Read:
@@ -513,7 +515,7 @@ class TestCopy2Read:
         assert run.verdict["status"] == "UNVERIFIED"
         assert outcome_of(run.verdict, "canary") == "not applied"
         (warning,) = findings_of(run.verdict, "canary")
-        assert "data.csv was opened outside hexperiment.load" in warning["message"]
+        assert OUTSIDE_LOAD in warning["message"]
 
 
 class TestLinkRead:
@@ -535,7 +537,7 @@ class TestLinkRead:
         assert run.verdict["status"] == "UNVERIFIED"
         assert outcome_of(run.verdict, "canary") == "not applied"
         (warning,) = findings_of(run.verdict, "canary")
-        assert "data.csv was opened outside hexperiment.load" in warning["message"]
+        assert OUTSIDE_LOAD in warning["message"]
 
 
 class TestLookupRead:
