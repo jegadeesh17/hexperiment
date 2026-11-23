@@ -47,7 +47,7 @@ Inside Kiro, the steering file (`.kiro/steering/ml-integrity.md`) asks the agent
 
 ### The Five Diagnostic Ghosts
 
-When a run is rejected, each finding is named after one of five ghosts, so a reader outside machine learning can tell what went wrong:
+When a run is rejected or unverified, each leak finding names one of five ghosts, so a reader outside machine learning can tell what went wrong:
 
 | Ghost | What the check sees | Plain-English meaning |
 |---|---|---|
@@ -59,7 +59,7 @@ When a run is rejected, each finding is named after one of five ghosts, so a rea
 
 ## The two demo cases
 
-Both apps use real public data. We planted realistic leaks in each app's training script. Kiro's `exorcise` workflow then ran the `ghost-hunter` agent, which read the verdict, autonomously repaired the code, and re-ran the full check until it passed. Both histories below were recorded by that loop and are committed in each app's `runs/` folder.
+Both apps use real public data. We planted realistic leaks in each app's training script. Kiro's `exorcise` workflow then ran the `ghost-hunter` agent, which read the verdict, autonomously repaired the code, and re-ran the full check until it passed. Both histories below were recorded by that loop, followed by one manual run of the honest reference script, and are committed in each app's `runs/` folder.
 
 | App | First run | After the fix | What was wrong |
 |---|---|---|---|
@@ -119,7 +119,7 @@ Verdict APPROVED ─────────────────────
 | **Steering** ([.kiro/steering/ml-integrity.md](.kiro/steering/ml-integrity.md)) | Gives the agent eight ML-integrity rules: split first, no future features, fix seeds, never tamper with verdicts, never weaken checks. The rules are advice; the full check is what decides. |
 | **Hooks** ([.kiro/hooks/hexperiment.json](.kiro/hooks/hexperiment.json)) | **On save:** runs fast check and clears prior approvals so old passes never mask new code. **On stop:** intercepts incomplete work if an edited app lacks approval. |
 | **MCP Server** (`hexperiment-mcp`) | Exposes tools `list_apps`, `run_audit`, `get_verdict`, `get_history`, `explain_ghost`, and model cards as live resources. |
-| **Custom Agent** ([.kiro/agents/ghost-hunter.json](.kiro/agents/ghost-hunter.json)) | Dedicated repair agent with permission-restricted boundaries (no shell; executed code is not sandboxed): edits Python files inside the app folder and invokes MCP tools. A `preToolUse` hook runs `hexperiment guard-write` before every file write and refuses anything but the app's own Python files, so data, thresholds and verdict files stay out of reach ([write probe](docs/kiro/ghost-hunter-write-probe.md)). |
+| **Custom Agent** ([.kiro/agents/ghost-hunter.json](.kiro/agents/ghost-hunter.json)) | Dedicated repair agent with permission-restricted boundaries (no shell; executed code is not sandboxed): edits Python files inside the app folder and invokes MCP tools. A `preToolUse` hook runs `hexperiment guard-write` before every file write and refuses anything but Python files inside an app folder under `apps/` (see Known limits), so data, thresholds and verdict files stay out of reach ([write probe](docs/kiro/ghost-hunter-write-probe.md)). |
 | **Workflow** ([.kiro/workflows/exorcise.workflow.json](.kiro/workflows/exorcise.workflow.json)) | One ghost-hunter step (audit, read the findings, fix, audit again), repeated until `verdict.json` reports `APPROVED`, at most 5 times. |
 | **Specs** ([.kiro/specs/](.kiro/specs/)) | Built spec-first in Kiro: requirements (EARS), design, and task verification across core, Kiro layer, apps, gallery, and benchmark. |
 
@@ -196,7 +196,8 @@ An app is a folder with a `hex.toml` (target, metric, threshold, split), a `trai
 
 ## Known limits
 
-- **The canary needs the kit to own the data.** If a script reads its CSV itself with Python readers, or splits with its own code so that scrambled test rows end up in training, the canary is not applied and the run cannot be approved: it ends `UNVERIFIED`, or `REJECTED` if another check finds a leak. The kit checks this column by column: when the target, or any audited raw data-file column with at least two distinct test values, is identical after the scramble, the canary is not applied. Features the script derives under a new name (a part of the time column, a missing-value flag) are not compared, because the scramble cannot change them. Every training run also watches for the data file being opened, copied, linked or renamed outside `hexperiment.load()` (for example to fit a scaler on a second copy); if it is, the canary is not applied either.
+- **The canary needs the kit to own the data.** If a script reads its CSV itself instead of calling `hexperiment.load()`, or splits with its own code so that scrambled test rows end up in training, the canary is not applied and the run cannot be approved: it ends `UNVERIFIED`, or `REJECTED` if another check finds a leak. The kit checks this column by column: when the target, or any audited raw data-file column with at least two distinct test values, is identical after the scramble, the canary is not applied. Features the script derives under a new name (a part of the time column, a missing-value flag) are not compared, because the load does not scramble them, so unchanged values there prove nothing. Every training run also watches for the data file being opened, copied, linked or renamed outside `hexperiment.load()` (for example to fit a scaler on a second copy); if it is, the canary is not applied either.
+- **Features from another copy of the data are not covered.** The column check compares only columns of the data file. If a script takes features under new names from a different file that also holds the test rows (a pre-made copy or a features file), and fits a scaler or imputer on all of them, the canary does not see it and the run can be approved. A second read of the data file itself is caught by the data-file watch.
 - **Leaks that do not depend on the test rows' values** (a column recorded after the outcome, a weak proxy, an undeclared time column, rows of the same entity on both sides) are left to the other checks, which catch only some of them. The benchmark measures these misses.
 - **Save hook misses helper modules outside the app folder:** the on-save hook inspects the app directory and does not re-audit when external library helpers outside the app folder are modified.
 - **Undeclared time columns:** the hotel cancellations demo script uses a random split on date-ordered data without a `time_column` declared in `hex.toml`. Because the kit does not guess time columns without explicit configuration, this undeclared-temporal case is not flagged by the temporal check (captured in the benchmark as L3.1).

@@ -13,7 +13,7 @@ This folder holds a benchmark of Hexperiment's leakage checks. It builds small l
 ### What each check can see
 
 - The Doppelganger sees identical rows in both train and test.
-- The Possession sees one feature that alone predicts the target almost perfectly (a stand-alone ROC AUC above `checks.proxy_auc_max`).
+- The Possession sees one feature that alone predicts the target almost perfectly (a stand-alone ROC AUC at or above `checks.proxy_auc_max`).
 - The Peeking Spirit (the canary test) sees any dependence of training on the test rows' values. It does not see a leak that does not depend on those values.
 - The Prophet sees training rows that are later than test rows, but only when `time_column` is declared in `hex.toml`.
 - The Shapeshifter warns when identical runs give different results.
@@ -147,4 +147,4 @@ The result matches "What we expected before the first run" mechanism by mechanis
 
 ## Changes after the first complete run
 
-None yet.
+Re-run on 2026-11-23, after the scramble check changed to compare only raw data-file columns (`results.json` `created_at` 2026-11-23T04:49:34Z). Every status and score is unchanged; the three `no-test-set` leaky cases now also carry a canary warning, because their audited test rows are training rows that the scramble never touches.

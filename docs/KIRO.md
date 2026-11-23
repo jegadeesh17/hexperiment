@@ -1,6 +1,6 @@
 # How Kiro was used
 
-Kiro plays two parts in Hexperiment. It **built** the kit, spec-first, with custom agents that could each touch only their own files. And it is **the execution engine of the product itself**: the steering contracts, the hooks, the MCP server, the permission-restricted ghost hunter agent (no shell; executed code is not sandboxed), and the `exorcise` workflow are how Hexperiment keeps an AI coding agent's leaky result from counting as done. This page describes both dimensions and what we discovered about Kiro along the way.
+Kiro plays two parts in Hexperiment. It **built** the kit, spec-first, with custom agents whose write rules limited each to its own files. And it is **the loop that runs the product's gate**: the steering contracts, the hooks, the MCP server, the permission-restricted ghost hunter agent (no shell; executed code is not sandboxed), and the `exorcise` workflow are how Hexperiment keeps an AI coding agent's leaky result from counting as done. This page describes both dimensions and what we discovered about Kiro along the way.
 
 ## 1. Building Hexperiment spec first
 
@@ -14,7 +14,7 @@ Every part of the kit was written from a formal Kiro spec in [.kiro/specs/](../.
 | [hexperiment-gallery](../.kiro/specs/hexperiment-gallery/) | 8 | 23 | the static gallery site |
 | [hexperiment-benchmark](../.kiro/specs/hexperiment-benchmark/) | 6 | 19 | the 13-mechanism leak benchmark |
 
-We wrote the requirements and the steering; Kiro wrote the designs, the task lists, and the code. Later fixes found in review were added to the task lists as new tasks, so the counts include them. During the build, Kiro looked up library documentation through the Context7 MCP server listed in [.kiro/settings/mcp.json](../.kiro/settings/mcp.json); it receives documentation queries only, never code or data. Steering in [.kiro/steering/](../.kiro/steering/) held the invariant rules every session followed: `product.md`, `structure.md`, `tech.md`, the ML-integrity rules in `ml-integrity.md` (which ship with the product too), and `gallery-design.md` for the site.
+We wrote the requirements and the steering; Kiro wrote the designs, the task lists, and the code. Later fixes found in review were added to the task lists as new tasks, so the counts include them. During the build, Kiro looked up library documentation through the Context7 MCP server listed in [.kiro/settings/mcp.json](../.kiro/settings/mcp.json), used only for documentation lookups (`resolve-library-id` and `query-docs`; see the file). Steering in [.kiro/steering/](../.kiro/steering/) held the invariant rules every session followed: `product.md`, `structure.md`, `tech.md`, the ML-integrity rules in `ml-integrity.md` (which ship with the product too), and `gallery-design.md` for the site.
 
 ### Three build agents, each boxed in
 
@@ -94,6 +94,6 @@ We probed Kiro's runtime characteristics extensively wherever its behavior was u
 
 ## 4. Numbers
 
-- **5 specs, 45 requirements, 98 tasks:** Kiro wrote the code for 91; the other 7 are owner checks (live probes in Kiro and on GitHub). Each task was verified and committed on its own.
+- **5 specs, 45 requirements, 98 tasks:** Kiro wrote the code for 91; the other 7 are owner checks: live probes in Kiro, the complete benchmark run, and the GitHub Pages checks. Each task was verified and committed on its own.
 - **About 3,600 automated tests:** passing with exit code 0 in about 3 minutes on a 2019 four-core laptop on a power-saving plan.
 - **Leak benchmark (synthetic data, Kapoor & Narayanan taxonomy):** 78 scripts; 30 of 39 leaky scripts rejected as predicted; **0 false alarms** across 39 clean twins ([hexperiment/benchmark/README.md](../hexperiment/benchmark/README.md)).
