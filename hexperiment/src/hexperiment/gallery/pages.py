@@ -724,7 +724,7 @@ def _case_item(summary: AppSummary) -> Markup:
             "a",
             "Open the case file",
             href=href,
-            aria_label=f"Open the {summary.name} case file",
+            aria_label=f"Open the case file: {summary.name}",
         ),
         class_="case",
     )

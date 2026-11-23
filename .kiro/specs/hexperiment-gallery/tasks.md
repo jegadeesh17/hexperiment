@@ -176,11 +176,12 @@
   - Tests added: none.
   - Verify: the commands above.
 
-- [ ] 15a. Benchmark caveat and the case link's accessible name
+- [x] 15a. Benchmark caveat and the case link's accessible name
   - In `hexperiment/src/hexperiment/gallery/benchmark.py`, `benchmark_section()`: after the intro sentence, add a paragraph with this fixed copy: "The data is synthetic and the cases were written by the authors of the checks, so this shows that the checks see the leaks they were built for, not how often they find leaks in real projects." (Requirement 6.2.)
   - In `hexperiment/src/hexperiment/gallery/pages.py`, `_case_item`: change the link's `aria_label` to `f"Open the case file: {summary.name}"`, so the accessible name starts with the visible text "Open the case file" (WCAG 2.5.3, Requirement 5.2).
   - Update the gallery tests that assert the old label, and add one that the benchmark section holds the caveat paragraph.
   - _Requirements: 5.2, 6.2_
+  - Result: `benchmark_section()` now writes the fixed caveat paragraph (constant `BENCHMARK_CAVEAT`) right after the intro sentence, and `_case_item` sets the link's `aria-label` to `Open the case file: {name}`. Two gallery tests pinned the old label and now pin the new one; one new test checks the caveat paragraph appears once, after the intro and before the table. `-k gallery`: 603 passed. Full suite (`hexperiment/tests apps/tests`): 3581 passed, 1 skipped. Ruff: all checks passed. The gallery built to a folder outside the repository with exit code 0; `apps/` has no changes.
   - Verify: `.venv/Scripts/python -m pytest hexperiment/tests -q -k gallery`, then `.venv/Scripts/python -m ruff check hexperiment`, then build the gallery to a folder outside the repository with the command of `.github/workflows/pages.yml` and confirm exit code 0.
 
 - [ ] 16. **Owner:** the workflow on GitHub

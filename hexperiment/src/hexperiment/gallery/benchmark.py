@@ -19,6 +19,12 @@ from hexperiment.gallery.records import Benchmark, BenchmarkMechanism, NotMeasur
 
 BENCHMARK_FORMAT = "hexperiment-benchmark/1"
 
+BENCHMARK_CAVEAT = (
+    "The data is synthetic and the cases were written by the authors of the "
+    "checks, so this shows that the checks see the leaks they were built for, "
+    "not how often they find leaks in real projects."
+)
+
 _REGENERATE = "Regenerate the file with the benchmark runner."
 _ADD_KEY = "Add the key, or regenerate the file."
 _TOP_KEYS = (
@@ -430,6 +436,7 @@ def benchmark_section(benchmark: Benchmark, ghost_names: frozenset[str]) -> Mark
             "Each leaky script was run through hexperiment run; its clean twin is "
             "the same script with the leak removed.",
         ),
+        el("p", BENCHMARK_CAVEAT),
         el(
             "div",
             table,

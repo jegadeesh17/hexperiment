@@ -120,6 +120,18 @@ def test_the_section_has_the_structure_and_the_notes():
     )
 
 
+def test_the_section_holds_the_caveat_paragraph_after_the_intro():
+    html = section()
+    caveat = (
+        "<p>The data is synthetic and the cases were written by the authors of the "
+        "checks, so this shows that the checks see the leaks they were built for, "
+        "not how often they find leaks in real projects.</p>"
+    )
+    assert html.count(caveat) == 1
+    intro = html.index("the same script with the leak removed.")
+    assert intro < html.index(caveat) < html.index("<table>")
+
+
 def test_types_are_grouped_with_one_rowgroup_cell():
     html = section()
     assert html.count('scope="rowgroup"') == 2

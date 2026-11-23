@@ -836,11 +836,11 @@ def test_score_pairs_and_their_classes():
     )
 
 
-def test_case_link_has_an_aria_label_with_the_app_name():
+def test_case_link_name_starts_with_its_visible_text_and_has_the_app_name():
     html = landing()
     assert (
         '<a href="flight-delays/index.html" '
-        'aria-label="Open the flight-delays case file">Open the case file</a>'
+        'aria-label="Open the case file: flight-delays">Open the case file</a>'
     ) in html
 
 
@@ -948,7 +948,7 @@ def test_hostile_strings_on_the_landing_page():
     assert "<script>" not in html
     assert "<script>alert(1)</script>" in page.text
     assert (
-        'aria-label="Open the &lt;script&gt;alert(1)&lt;/script&gt; case file"' in html
+        'aria-label="Open the case file: &lt;script&gt;alert(1)&lt;/script&gt;"' in html
     )
     assert "\x00" not in page.text
     html.encode("utf-8")
