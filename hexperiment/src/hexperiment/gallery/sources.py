@@ -17,6 +17,8 @@ from hexperiment.workspace import is_app
 
 SCRIPT_NAME = "train.py"
 HAUNTED_DIRNAME = "haunted"
+NOTE_FILENAME = "note.txt"
+NOTE_MAX_CHARS = 300
 STYLESHEET_PACKAGE = "hexperiment.gallery"
 
 # The pattern of runs._RUN_ID_PATTERN (a test checks that the two agree). It is
@@ -41,10 +43,12 @@ def read_app(app_dir: Path) -> AppSource:
     last_json = _read_evidence(app_dir, history[-1], VERDICT_FILENAME)
     approved = [v for v in history if v.status is Status.APPROVED]
     card = _read_evidence(app_dir, approved[-1], CARD_FILENAME) if approved else None
+    notes = _read_notes(app_dir, history)
     train_py, haunted_py = _read_scripts(app_dir)
     return AppSource(
         config=config,
         history=history,
+        notes=notes,
         last_verdict_json=last_json,
         approved_card=card,
         train_py=train_py,
@@ -115,7 +119,8 @@ def read_benchmark(path: Path) -> Benchmark:
     return parse_benchmark(text, source=str(path))
 
 
-def _read_evidence(app_dir: Path, verdict: Verdict, filename: str) -> bytes:
+def _run_path(app_dir: Path, verdict: Verdict, filename: str) -> Path:
+    """The path of a file in a run folder; the run id is checked first."""
     run_id = verdict.run_id
     if not RUN_ID_PATTERN.fullmatch(run_id):
         raise HexInputError(
@@ -123,7 +128,47 @@ def _read_evidence(app_dir: Path, verdict: Verdict, filename: str) -> bytes:
             "YYYYMMDD-HHMMSS-<6 hex chars>.",
             "Restore the run folder from version control; never edit verdict.json.",
         )
-    path = app_dir / RUNS_DIRNAME / run_id / filename
+    return app_dir / RUNS_DIRNAME / run_id / filename
+
+
+def _read_notes(app_dir: Path, history: tuple[Verdict, ...]) -> tuple[str | None, ...]:
+    """The optional ``note.txt`` of every run, aligned with ``history``."""
+    return tuple(
+        _read_note(_run_path(app_dir, verdict, NOTE_FILENAME)) for verdict in history
+    )
+
+
+def _read_note(path: Path) -> str | None:
+    try:
+        data = path.read_bytes()
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        raise HexInputError(
+            f"{path} cannot be read ({error}).", "Check the file and its permissions."
+        ) from None
+    fix = (
+        f"Write one line of at most {NOTE_MAX_CHARS} characters as UTF-8, or delete "
+        "the file."
+    )
+    try:
+        text = data.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        raise HexInputError(f"{path} is not valid UTF-8.", fix) from None
+    if not text:
+        raise HexInputError(f"{path} is empty.", fix)
+    if "\n" in text or "\r" in text:
+        raise HexInputError(f"{path} holds more than one line.", fix)
+    if len(text) > NOTE_MAX_CHARS:
+        raise HexInputError(
+            f"{path} is {len(text)} characters long; the limit is {NOTE_MAX_CHARS}.",
+            fix,
+        )
+    return text
+
+
+def _read_evidence(app_dir: Path, verdict: Verdict, filename: str) -> bytes:
+    path = _run_path(app_dir, verdict, filename)
     try:
         return normalize_bytes(path.read_bytes())
     except OSError:

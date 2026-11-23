@@ -1,6 +1,7 @@
 import copy
 import json
 import re
+from pathlib import Path
 
 import pytest
 from hypothesis import given, settings
@@ -130,6 +131,33 @@ def test_the_section_holds_the_caveat_paragraph_after_the_intro():
     assert html.count(caveat) == 1
     intro = html.index("the same script with the leak removed.")
     assert intro < html.index(caveat) < html.index("<table>")
+
+
+def test_the_totals_paragraph_sums_the_mechanisms_before_the_caveat():
+    html = section()
+    totals = "<p>18 of 36 leaky scripts rejected; 1 false alarm in 12 clean twins.</p>"
+    assert html.count(totals) == 1
+    intro = html.index("the same script with the leak removed.")
+    assert intro < html.index(totals) < html.index("The data is synthetic")
+
+
+def test_the_totals_paragraph_of_the_committed_results_file():
+    path = Path(__file__).resolve().parents[1] / "benchmark" / "results.json"
+    text = path.read_text(encoding="utf-8")
+    html = benchmark_section(parse_benchmark(text, source=str(path)), GHOSTS).html
+    assert (
+        "<p>30 of 39 leaky scripts rejected; 0 false alarms in 39 clean twins.</p>"
+    ) in html
+
+
+def test_the_totals_paragraph_in_the_singular_and_the_plural():
+    data = valid()
+    data["clean"] = {"scripts": 12, "false_alarms": 0}
+    assert "; 0 false alarms in 12 clean twins.</p>" in section(data)
+    data["clean"] = {"scripts": 12, "false_alarms": 1}
+    assert "; 1 false alarm in 12 clean twins.</p>" in section(data)
+    data["clean"] = {"scripts": 12, "false_alarms": 2}
+    assert "; 2 false alarms in 12 clean twins.</p>" in section(data)
 
 
 def test_types_are_grouped_with_one_rowgroup_cell():

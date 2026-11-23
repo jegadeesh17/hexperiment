@@ -12,6 +12,7 @@ from hexperiment.models import Verdict
 class AppSource:
     config: HexConfig  # name, description, target, metric; app_dir is never rendered
     history: tuple[Verdict, ...]  # oldest first, never empty
+    notes: tuple[str | None, ...]  # runs/<id>/note.txt per run, aligned with history
     last_verdict_json: bytes  # runs/<last run>/verdict.json, LF line endings
     approved_card: bytes | None  # model_card.md of the last approved run, LF endings
     train_py: str | None  # LF line endings; None unless haunted_py is not None

@@ -166,6 +166,69 @@ def test_the_run_id_pattern_equals_the_one_of_runs_py():
     assert RUN_ID_PATTERN.pattern == runs_module._RUN_ID_PATTERN.pattern
 
 
+# run notes
+
+
+def test_notes_are_read_aligned_with_the_history(tmp_path):
+    app = make_app(tmp_path, notes={APPROVED_ID: b"  Made by hand.\r\n\r\n"})
+    assert read_app(app).notes == (None, "Made by hand.")
+
+
+def test_an_app_without_notes_has_a_none_for_every_run(tmp_path):
+    assert read_app(make_app(tmp_path)).notes == (None, None)
+
+
+def test_a_note_of_exactly_300_characters_is_accepted(tmp_path):
+    text = "é" * 300
+    app = make_app(tmp_path, notes={REJECTED_ID: (text + "\n").encode("utf-8")})
+    assert read_app(app).notes == (text, None)
+
+
+@pytest.mark.parametrize(
+    ("data", "reason"),
+    [
+        (b"caf\xe9\n", "not valid UTF-8"),
+        (b"", "is empty"),
+        (b" \r\n\n \n", "is empty"),
+        (b"one\ntwo\n", "more than one line"),
+        (b"one\r\ntwo\r\n", "more than one line"),
+        (b"one\rtwo\n", "more than one line"),
+        (("x" * 301 + "\n").encode(), "301 characters"),
+    ],
+)
+def test_a_bad_note_is_refused_and_names_the_file(tmp_path, data, reason):
+    app = make_app(tmp_path, notes={APPROVED_ID: data})
+    message = refusal(app)
+    assert str(app / "runs" / APPROVED_ID / "note.txt") in message
+    assert reason in message
+
+
+def test_a_note_that_cannot_be_read_is_refused(tmp_path):
+    app = make_app(tmp_path)
+    (app / "runs" / APPROVED_ID / "note.txt").mkdir()
+    assert "note.txt" in refusal(app)
+
+
+def test_a_bad_note_exits_with_code_2(tmp_path):
+    from hexperiment.cli import main
+
+    app = make_app(tmp_path, notes={REJECTED_ID: b"one\ntwo\n"})
+    out = tmp_path / "site"
+    assert main(["gallery", str(app), "--out", str(out)]) == 2
+    assert not out.exists()
+
+
+def test_the_history_reader_ignores_note_files(tmp_path):
+    app = make_app(tmp_path)
+    before = runs_module.load_history(app)
+    for run_id in (REJECTED_ID, APPROVED_ID):
+        (app / "runs" / run_id / "note.txt").write_bytes(b"A note.\n")
+    assert runs_module.load_history(app) == before
+    (app / "runs" / "20261111-195099-00000a").mkdir()
+    (app / "runs" / "20261111-195099-00000a" / "note.txt").write_bytes(b"x\n")
+    assert runs_module.load_history(app) == before
+
+
 # line endings
 
 

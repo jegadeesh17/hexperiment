@@ -117,12 +117,14 @@ def make_source(
     target: str = "target",
     haunted: str | None = None,
     train: str = "print('train')\n",
+    notes: Sequence[str | None] | None = None,
 ) -> AppSource:
     history = tuple(runs) if runs is not None else (make_verdict(),)
     has_approved = any(run.status is Status.APPROVED for run in history)
     return AppSource(
         config=make_config(name, description=description, target=target),
         history=history,
+        notes=tuple(notes) if notes is not None else (None,) * len(history),
         last_verdict_json=b"{}\n",
         approved_card=b"# Model card\n" if has_approved else None,
         train_py=train if haunted is not None else None,
@@ -173,11 +175,13 @@ def write_app(
     newline: str = "\n",
     *,
     train: str = "x = 1\n",
+    notes: dict[str, bytes] | None = None,
 ) -> Path:
     """Write an app folder under ``root`` and return it.
 
     Everything is written in binary mode, so ``newline="\\r\\n"`` really gives CRLF
-    files, as a Windows checkout with ``core.autocrlf=true`` does.
+    files, as a Windows checkout with ``core.autocrlf=true`` does. ``notes`` maps a
+    run id to the bytes of its ``note.txt``.
     """
     from hexperiment.card import render
     from hexperiment.verdict import to_json
@@ -198,4 +202,6 @@ def write_app(
         (folder / "verdict.json").write_bytes(_encode(to_json(verdict), newline))
         card = render(verdict, ordered[:index], description="A demo app.")
         (folder / "model_card.md").write_bytes(_encode(card, newline))
+    for run_id, data in (notes or {}).items():
+        (app / "runs" / run_id / "note.txt").write_bytes(data)
     return app

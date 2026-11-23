@@ -251,7 +251,7 @@ def _findings_list(verdict: Verdict) -> Markup:
     return el("ul", [_finding_item(f) for f in ordered], class_="findings")
 
 
-def _run_item(verdict: Verdict) -> Markup:
+def _run_item(verdict: Verdict, note: str | None) -> Markup:
     score: list[Child]
     if verdict.metric.value is None:
         score = [", no score"]
@@ -273,10 +273,13 @@ def _run_item(verdict: Verdict) -> Markup:
         f", test set used {_plural(verdict.test_set_uses, 'time')}",
         class_="run-meta",
     )
-    return el("li", el("div", head, meta, _findings_list(verdict)), class_="run")
+    note_line = el("p", note, class_="run-note") if note is not None else None
+    return el(
+        "li", el("div", head, meta, note_line, _findings_list(verdict)), class_="run"
+    )
 
 
-def _record(runs: Sequence[Verdict]) -> Markup:
+def _record(runs: Sequence[Verdict], notes: Sequence[str | None]) -> Markup:
     return el(
         "section",
         el(
@@ -287,7 +290,11 @@ def _record(runs: Sequence[Verdict]) -> Markup:
                 "Oldest first. An error stops a model; a warning is worth a look.",
                 class_="lede",
             ),
-            el("ol", [_run_item(run) for run in runs], class_="record"),
+            el(
+                "ol",
+                [_run_item(run, note) for run, note in zip(runs, notes, strict=True)],
+                class_="record",
+            ),
             class_="wrap",
         ),
         class_="page",
@@ -304,7 +311,8 @@ def _fix_section(source: AppSource) -> Markup | None:
         body: list[Child] = [el("p", "The two scripts are identical.", class_="lede")]
     else:
         counts = (
-            f": {_plural(diff.removed, 'line')} removed, "
+            " (the honest script kept in the repository): "
+            f"{_plural(diff.removed, 'line')} removed, "
             f"{_plural(diff.added, 'line')} added."
         )
         body = [
@@ -427,7 +435,7 @@ def case_page(summary: AppSummary, source: AppSource, repo_url: str | None) -> M
         el(
             "main",
             _case_head(summary, home, repo_url),
-            _record(summary.runs),
+            _record(source.history, source.notes),
             _fix_section(source),
             _card_section(summary, path),
         ),

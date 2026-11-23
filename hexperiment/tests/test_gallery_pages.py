@@ -223,6 +223,26 @@ def test_every_field_of_a_timeline_entry():
     assert record.index("UNVERIFIED") < record.index("APPROVED")
 
 
+def test_a_note_is_shown_under_its_run_and_is_escaped():
+    source = make_source(
+        runs=[rejected(1.0), approved(0.9096)],
+        notes=["Made by <b>hand</b> & \"quotes\" of the ghost hunter's", None],
+    )
+    html = compact(build(source))
+    assert (
+        "test set used 1 time</p>"
+        '<p class="run-note">Made by &lt;b&gt;hand&lt;/b&gt; &amp; &quot;quotes&quot; '
+        "of the ghost hunter&#x27;s</p>"
+    ) in html
+    assert "<b>hand</b>" not in html
+    assert html.count('class="run-note"') == 1
+
+
+def test_a_run_without_a_note_shows_none():
+    html = build(runs_source())
+    assert "run-note" not in html
+
+
 def test_the_record_section_and_its_lede():
     html = compact(build(runs_source()))
     assert (
@@ -390,7 +410,10 @@ def test_fix_section_with_diff():
         '<section class="page" aria-labelledby="fix-title"><div class="wrap">'
         '<h2 id="fix-title">The fix</h2><p class="lede">'
     ) in html
-    assert "haunted/train.py against train.py: 1 line removed, 0 lines added." in text
+    assert (
+        "haunted/train.py against train.py (the honest script kept in the "
+        "repository): 1 line removed, 0 lines added."
+    ) in text
     assert 'class="diff"' in html
     assert 'class="line line-removed"' in html
 

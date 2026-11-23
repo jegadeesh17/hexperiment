@@ -413,6 +413,17 @@ def _clean_body(benchmark: Benchmark) -> Markup:
     )
 
 
+def benchmark_totals(benchmark: Benchmark) -> str:
+    """The totals sentence, summed over the mechanisms of the file."""
+    leaky = sum(m.scripts for m in benchmark.mechanisms)
+    rejected = sum(m.rejected for m in benchmark.mechanisms)
+    return (
+        f"{rejected} of {leaky} leaky scripts rejected; "
+        f"{_plural(benchmark.false_alarms, 'false alarm')} in "
+        f"{benchmark.clean_scripts} clean twins."
+    )
+
+
 def benchmark_section(benchmark: Benchmark, ghost_names: frozenset[str]) -> Markup:
     """The ``<section>`` with the results table and the notes below it."""
     headers = (
@@ -436,6 +447,7 @@ def benchmark_section(benchmark: Benchmark, ghost_names: frozenset[str]) -> Mark
             "Each leaky script was run through hexperiment run; its clean twin is "
             "the same script with the leak removed.",
         ),
+        el("p", benchmark_totals(benchmark)),
         el("p", BENCHMARK_CAVEAT),
         el(
             "div",
